@@ -1,0 +1,3043 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "PillDrops API",
+    "version": "1.0.0",
+    "description": "PillDrops-shaped REST API for disposable Firecracker microVM sandboxes: create, exec, files, pause/resume, preview, templates, keys, usage, and audit. This document covers the core /v1 surface; some operational endpoints are omitted."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "This node (single-binary) or orchestrator"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Liveness check",
+        "description": "Returns 200 whenever the process is up and routing. Checks no dependencies: use /readyz to decide whether to send traffic.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/livez": {
+      "get": {
+        "summary": "Liveness check (alias of /health)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "summary": "Readiness check",
+        "description": "Verifies this node's datastore is reachable. 503 means stop routing traffic here; it does not mean restart the process.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Ready to serve",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A dependency is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "check": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes": {
+      "post": {
+        "summary": "Create a sandbox (optionally deploy files/setup/start)",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Repeat with the same key to replay the original response instead of creating a duplicate."
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSandboxRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sandbox"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "402": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "summary": "List sandboxes for the caller's org",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sandboxes": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Sandbox"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "summary": "Rename, re-slug, move the public port or change the idle auto-pause",
+        "description": "Absent fields are left alone. `slug` must start with a lowercase letter and be unique across the platform (`8000-x`, `agent-x` and reserved labels such as `www` are refused); `''` releases it. `port` moves the preview to another port without a restart; on the docker runtime it must be 8000 or a port the template declares. `idle_timeout` follows the create policy: seconds, clamped to 30 s..24 h; -1 = never auto-pause; 0 = platform default.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Human label; empty clears it."
+                  },
+                  "slug": {
+                    "type": "string",
+                    "description": "DNS label served at https://<slug>.<domain>/ and accepted wherever an id is; empty releases it."
+                  },
+                  "port": {
+                    "type": "integer",
+                    "description": "Public app port for the preview URL."
+                  },
+                  "idle_timeout": {
+                    "type": "integer",
+                    "description": "Idle auto-pause in seconds; -1 = never, 0 = platform default."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated sandbox (`url` when a port is published).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sandbox"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad name or slug grammar, or `port_not_published`: the docker runtime publishes 8000 and the template's declared ports only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "`slug_taken`: another live sandbox holds the slug.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Get a sandbox",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sandbox"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Destroy a sandbox",
+        "responses": {
+          "200": {
+            "description": "Destroyed"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/ports": {
+      "get": {
+        "summary": "Ports with a listener",
+        "description": "Probes a fixed candidate list (3000, 3001, 4200, 5000, 5173, 8000, 8080, 8081, 8888, 9000, 9323) plus the sandbox's public port and reports which answer. Detection, not a registry.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "port": {
+                            "type": "integer"
+                          },
+                          "listening": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/exec": {
+      "post": {
+        "summary": "Execute a command",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/standby": {
+      "post": {
+        "summary": "Freeze a sandbox in RAM",
+        "description": "Stop the sandbox's compute while keeping its memory, processes and open sockets resident on the node. A wake is milliseconds and the app never restarts, unlike a pause, which writes the memory to disk and frees it. Standby holds the node's RAM, so the sandbox keeps its slot and is still billed for memory; only vCPU-seconds stop. Any exec, file or preview request wakes it.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "On standby",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "standby"
+                      ]
+                    },
+                    "standby_ms": {
+                      "type": "integer",
+                      "description": "How long the freeze took; 0 when the sandbox was already on standby."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "description": "This node's runtime cannot freeze a sandbox in RAM."
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/pause": {
+      "post": {
+        "summary": "Pause a sandbox",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "paused"
+                      ]
+                    },
+                    "paused_ms": {
+                      "type": "integer",
+                      "description": "How long the snapshot took; 0 when the sandbox was already paused."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/resume": {
+      "post": {
+        "summary": "Resume a paused sandbox",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resumed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "running"
+                      ]
+                    },
+                    "resume_ms": {
+                      "type": "integer",
+                      "description": "How long the restore took; 0 when the sandbox was already running."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/fork": {
+      "post": {
+        "summary": "Fork a sandbox",
+        "description": "Copy a running or paused sandbox into a new one: disk, memory and every running process. A running parent stands still only while its memory is written and its disk is copied, then carries on; a paused parent stays paused. The child comes up running with its own id, URL and token, and is independent from that moment. Counted against the plan like a create.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Optional label for the child."
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "description": "Child hard TTL in seconds; 0 = node default, negative = persistent."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Forked. The create response shape plus parent_id, parent_state, source (\"fork/<parent>\"), boot_ms and parent_paused_ms."
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "description": "This node's runtime cannot fork."
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/checkpoints": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Save a named checkpoint",
+        "description": "Take a named save point of a running sandbox. On Firecracker this captures memory and disk with the guest stopped only for the writes, so the sandbox keeps running and comes back with the same processes; on Docker it is a filesystem commit and the container is never stopped. At most 10 per sandbox, deleted with it. Saving over an existing name replaces it atomically.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Saved: name, created_at, size_bytes, snapshot_kind (\"memory\" or \"disk\") and status."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "checkpoint_limit: the sandbox already holds 10."
+          },
+          "501": {
+            "description": "This node's runtime cannot checkpoint."
+          }
+        }
+      },
+      "get": {
+        "summary": "List checkpoints",
+        "description": "A sandbox's save points and the per-sandbox maximum. A capture that was interrupted lists with status \"building\" and cannot be restored.",
+        "responses": {
+          "200": {
+            "description": "{checkpoints: [...], max: 10}"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/checkpoints/{name}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "name",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+          }
+        }
+      ],
+      "delete": {
+        "summary": "Remove a checkpoint",
+        "responses": {
+          "200": {
+            "description": "Removed."
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/checkpoints/{name}/restore": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "name",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Restore a checkpoint in place",
+        "description": "Roll the sandbox back to a save point: same id, URL, token and address, and every write made after the checkpoint is discarded. A memory checkpoint comes back with its processes and listening sockets still running, so the start command is not relaunched; a disk checkpoint has lost them and it is. A paused sandbox is woken first.",
+        "responses": {
+          "200": {
+            "description": "{status: running, name, restore_ms}"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "checkpoint_not_ready, or the sandbox is mid-transition."
+          },
+          "501": {
+            "description": "This node's runtime cannot checkpoint."
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/files": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "path",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Sandbox-relative path. Rejected if it contains a '..' segment."
+        }
+      ],
+      "post": {
+        "summary": "Write a file",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Written"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "summary": "Read a file",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/logs": {
+      "get": {
+        "summary": "Tail sandbox app logs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/metrics": {
+      "get": {
+        "summary": "Per-sandbox usage metrics",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/templates": {
+      "get": {
+        "summary": "List available templates",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/images/build": {
+      "post": {
+        "summary": "Build a custom image or a Firecracker template from a build context",
+        "description": "Builds from the request body (a tar or tar.gz build context containing a Dockerfile) and produces ONE of two artifacts, selected by `runtime`:\n\n- **docker** (the default) \u2014 a Docker image tagged for the calling org. Launch it with `pilldrops sandbox create --image <tag>`.\n- **firecracker** \u2014 a TEMPLATE: the same context converted to a bootable squashfs rootfs, with the platform's boot machinery injected. Launch it with `pilldrops sandbox create --template <template_id>`.\n\nThe two are not interchangeable, and a build is never relayed to a node of the other runtime: if the fleet has no healthy node of the requested runtime the answer is 503 naming what the fleet does have.\n\nA Firecracker template build requires a container engine on the building node even though that node boots microVMs, because the rootfs is produced by exporting a built container image's filesystem. It also requires squashfs-tools and an envd binary on the node (PD_ENVD_PATH, default /opt/pilldrops/bin/envd); a missing prerequisite is a 400 naming it, checked before the build starts.\n\nThe build runs on ONE node and the result is then published to the fleet's shared artifact store, so any node can obtain it. It previously ran on every node in the fleet, serially, with a 20-minute timeout each.\n\nThe body is capped by MAX_BUILD_CONTEXT_BYTES (default 512 MiB) rather than by the generic request cap.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Image name. The tag becomes sf-<org>-<name>:latest, and the template id is that tag without its version suffix."
+          },
+          {
+            "name": "runtime",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "docker",
+                "firecracker"
+              ]
+            },
+            "description": "Which runtime the result must be bootable on, which decides both the node the build lands on and the kind of artifact published. Omitted (the default) prefers a docker node and produces an image tarball, which is the behaviour every caller had before Firecracker template builds existed."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The build ran. Check `ok`: it is true only when the image was built AND, on a fleet of more than one node, published to the shared store. A build that succeeded but could not be published reports ok=false with the reason in publish.error, because the image would then exist on exactly one node while placement is free to schedule the sandbox anywhere.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageBuildResult"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Build context exceeds MAX_BUILD_CONTEXT_BYTES"
+          },
+          "503": {
+            "description": "No healthy node to build on, or no healthy node of the requested `runtime`. The message names the runtimes the fleet actually has."
+          }
+        }
+      }
+    },
+    "/v1/templates/{id}/artifacts": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Template id."
+        }
+      ],
+      "get": {
+        "summary": "Describe a template's published builds",
+        "description": "Lists the builds of a template, newest first, with the id of the one that is ready to boot. For operators and the CLI; it is not how a node resolves a template on the create path. An operator key sees every org's builds, a customer key only its own org's. Served by the control plane.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "template_id": {
+                      "type": "string"
+                    },
+                    "ready_build_id": {
+                      "type": "string",
+                      "description": "The newest build that may be booted, or empty when the template has no completed publish."
+                    },
+                    "builds": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TemplateBuild"
+                      }
+                    },
+                    "artifacts": {
+                      "type": "array",
+                      "description": "The objects recorded for ready_build_id.",
+                      "items": {
+                        "$ref": "#/components/schemas/ArtifactObject"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Publish a template artifact (operator only)",
+        "description": "Uploads a template's root filesystem as the raw request body and publishes it: the data object, its block-map header and metadata.json are written to the fleet's shared artifact store, read back and verified, and only then is the build marked ready. A publish that is interrupted at any point leaves the build unready and unbootable \u2014 a build is never ready before its bytes are durable. Requires the operator key: publishing decides what every node in the fleet boots. Served by the control plane, which is the only tier whose database role may write the build index.",
+        "parameters": [
+          {
+            "name": "build_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifier for this build; generated when omitted. Re-using an existing one is refused with 409."
+          },
+          {
+            "name": "org",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Owning organisation (default \"default\")."
+          },
+          {
+            "name": "kernel_version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Boot-compatibility triple, recorded in metadata.json and cached on the build row for scheduling."
+          },
+          {
+            "name": "firecracker_version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "envd_version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Published and ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "build": {
+                      "$ref": "#/components/schemas/TemplateBuild"
+                    },
+                    "artifacts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ArtifactObject"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an operator key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "That build id already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No artifact store is configured (ORCHESTRATOR_ARTIFACT_DIR), or the build index is not reachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/keys": {
+      "get": {
+        "summary": "List API keys for the org",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create an API key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/v1/keys/{id}": {
+      "delete": {
+        "summary": "Revoke an API key",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked"
+          }
+        }
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "summary": "Usage + credit summary for the org",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/whoami": {
+      "get": {
+        "summary": "Name the caller: the principal kind and the org it acts for (control plane)",
+        "description": "A sandbox's own token (pd_sb_…, delivered to /run/pilldrops/token in the guest) answers principal=sandbox with its sandbox_id; an API key answers principal=key; the fleet key answers principal=operator. Sandbox principals are admitted only to sandbox routes (their own sandbox; org-wide create/list/get/exec/files/fork/ports); every other route answers 403 with a body naming the principal kind.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "principal": {
+                      "type": "string",
+                      "enum": ["sandbox", "key", "operator"]
+                    },
+                    "org": {
+                      "type": "string"
+                    },
+                    "sandbox_id": {
+                      "type": "string",
+                      "description": "Present when principal is sandbox: the sandbox the token was minted for."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/audit": {
+      "get": {
+        "summary": "List recent audit entries for the org (newest first)",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 200,
+              "maximum": 1000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuditEntry"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/status": {
+      "get": {
+        "summary": "Agent session status",
+        "description": "Only for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session state, mode, current turn, queue depth and journal cursor"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/turns": {
+      "post": {
+        "summary": "Give the agent a task",
+        "description": "Only for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates. Returns 202: the task is accepted, not finished. Stream its progress from the returned cursor via the events endpoint.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "description": "The task, in natural language"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "supervised",
+                      "guided",
+                      "autonomous"
+                    ],
+                    "description": "Autonomy posture. guided requires an agent with a verified approval hook."
+                  },
+                  "thread": {
+                    "type": "string",
+                    "description": "latest (default), new, or a thread id"
+                  },
+                  "priority": {
+                    "type": "boolean",
+                    "description": "Jump the queue"
+                  },
+                  "wake": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Resume a paused workstation. false returns 409 instead of paying for a resume."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted, with turn_id, journal cursor and stream URL"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "summary": "List turns",
+        "description": "Only for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Turns, newest first"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/turns/{turn}": {
+      "get": {
+        "summary": "Get one turn",
+        "description": "Only for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "turn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The turn and how it ended"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Dequeue a turn that has not started",
+        "description": "Only for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates. A running turn must be interrupted instead; deleting it returns 409.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "turn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/turns/{turn}/interrupt": {
+      "post": {
+        "summary": "Stop a running turn",
+        "description": "Only for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates. Signals the agent's process group, honours a grace period, then kills it. Output produced before stopping is kept.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "turn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "grace_seconds": {
+                    "type": "number",
+                    "description": "How long the agent may stop politely before being killed"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Interrupting"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/queue/reorder": {
+      "post": {
+        "summary": "Reorder the pending queue",
+        "description": "Only for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "order": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Turn ids first; unlisted turns keep their relative order behind them"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reordered"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/events": {
+      "get": {
+        "summary": "Stream agent events (SSE)",
+        "description": "Only for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates. Server-Sent Events. Resume with since_seq, or let a browser reconnect automatically via Last-Event-ID \u2014 either way you receive only what you missed rather than the run replayed from its start.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Deliver events after this journal sequence number"
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Resume cursor; takes precedence over since_seq"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/event-stream of journal events",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/tokens": {
+      "post": {
+        "summary": "Mint an agent access token",
+        "description": "Creates a credential bound to THIS sandbox with an explicit scope set, for a teammate, a CI job or an MCP client that should not hold organization-wide authority.\n\nThe secret is returned exactly once \u2014 only its SHA-256 is stored, so it cannot be recovered later, only rotated.\n\nRequires an organization API key. An agent access token cannot mint another, even with agent:admin: a credential that can issue its own successors is not revocable in practice, because revoking it leaves the children behind.\n\nOnly for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "scopes"
+                ],
+                "properties": {
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Scopes to grant. One of agent:read, agent:write, agent:console, agent:approve, agent:files, agent:admin. An unknown scope is rejected rather than ignored: a scope silently dropped would show as granted and behave as denied."
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "Human label, shown in the token list."
+                  },
+                  "ttl_seconds": {
+                    "type": "integer",
+                    "description": "Lifetime in seconds. Defaults to 7 days and is clamped to 30 days \u2014 an unbounded token is one that outlives the reason it was created."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The token metadata plus the one-time secret"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "summary": "List agent access tokens",
+        "description": "Every token for this sandbox, newest first, including revoked and expired ones \u2014 \"was there a credential that could have done this, and who made it\" is the question asked after an incident.\n\nSecrets are never included; there is no stored secret to return. The response also carries the scope catalogue so a permission chooser renders from the server that enforces it.\n\nOnly for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tokens and the scope catalogue"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/tokens/{tokenID}": {
+      "delete": {
+        "summary": "Revoke an agent access token",
+        "description": "Takes effect on the next request \u2014 nothing caches the decision, which is the whole reason these are opaque database-backed tokens rather than self-verifying JWTs.\n\nIdempotent: revoking an already-revoked token succeeds and keeps the original timestamp, because the first revocation is the one an audit cares about.\n\nOnly for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tokenID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The token's public id. Safe to log and display; it is not the secret."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/tokens/{tokenID}/rotate": {
+      "post": {
+        "summary": "Rotate an agent access token",
+        "description": "Issues a new secret with the same sandbox, scopes and label, and shortens the previous token's life to a bounded overlap so requests already in flight with the old value are not broken.\n\nThe old token is expired rather than revoked, so \"this was rotated out\" stays distinguishable from \"someone revoked this\" \u2014 different incidents with different responses. Rotation never extends a token that was about to expire, and a revoked token cannot be rotated (409): that would resurrect access someone removed on purpose.\n\nOnly for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tokenID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The token's public id. Safe to log and display; it is not the secret."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The replacement token and its one-time secret"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/share": {
+      "post": {
+        "summary": "Create a one-time share link for the agent",
+        "description": "Mints a read-scoped token (by default) and returns a claim_url containing a single-use code \u2014 not the token.\n\nURLs end up in chat scrollback, browser history, referrer headers and access logs, none of which anyone audits, so a link must not be a durable credential. Opening claim_url exchanges the code for an HttpOnly cookie scoped to this sandbox's agent API and redirects to an address carrying nothing secret. The code cannot be reused.\n\nA share link may not carry agent:console (400): a shell must not be reachable from something forwardable.\n\nOnly for sandboxes whose template declares kind=agent. Any other sandbox returns 404 \u2014 indistinguishable from a sandbox that does not exist, so the surface cannot be used to enumerate templates.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Defaults to [agent:read]. agent:console is refused."
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "ttl_seconds": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The token metadata, a one-time claim_url and its expiry"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/claim": {
+      "get": {
+        "summary": "Exchange a one-time share code for a session cookie",
+        "description": "Unauthenticated by necessity \u2014 the code IS the credential, which is why it is single-use and expires in minutes. This is the form share links use, because it is the only one the control plane can route: a proxy hop finds the owning node from the {id} in the path.\n\nOn success sets an HttpOnly cookie scoped to /v1/sandboxes/{id}/agent and redirects (303) to a URL with no credential in it. Used, expired, unknown, and path-mismatched codes all return the same 401, and the code is consumed either way, so a stale or leaked link cannot be probed.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Cookie set; redirected to the agent view"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/agent/claim": {
+      "get": {
+        "summary": "Exchange a one-time share code for a session cookie (node-direct)",
+        "description": "The same handler without the sandbox in the path. Reachable only on the node itself and on the per-sandbox agent origin, where the host already carries the id \u2014 not through the control plane, which routes by path. Share links use the /v1/sandboxes/{id}/agent/claim form instead.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Cookie set; redirected to the agent view"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/connect": {
+      "get": {
+        "summary": "Everything needed to drive this agent, in one call",
+        "description": "Endpoints, a freshly minted short-lived token, copy-paste snippets (curl/Node/Python), an MCP client config, channel reachability and the per-sandbox agent origin.\n\nThe token is scoped to agent:read + agent:write only \u2014 never console (a shell behind a link people paste into terminals) and never admin (which could raise its own spend cap) \u2014 and is shown ONCE. A later call mints a different token; there is no way to retrieve this one's secret again.\n\nUnavailable channels are listed with a reason rather than hidden, so \"can I drive this from Slack?\" gets an answer.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The connect bundle"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/share/qr": {
+      "get": {
+        "summary": "QR payload for a share link",
+        "description": "Returns the string to render as a QR, client-side. It carries the single-use share link and NEVER an API token: a QR is a screenshot-shaped secret \u2014 it gets photographed, pasted into tickets and shown on slides, and none of those paths is auditable or revocable. Credential-shaped input is refused with 400 regardless of what the caller intended.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The claim_url from POST /agent/share."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The QR payload"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/webhooks": {
+      "get": {
+        "summary": "List webhooks for a sandbox",
+        "description": "Never returns signing secrets \u2014 they are shown once at creation. Also returns the signature scheme (what is signed, the skew window, the dedupe header) and the events this server will actually deliver, filtered through the predicate that enforces it.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a webhook",
+        "description": "The URL is SSRF-validated at creation as well as at send time, so a blocked target is an error you can read rather than a delivery that silently never arrives. Private, link-local, metadata, CGNAT and plaintext targets are refused.\n\n`turn.output` is not deliverable: it is the agent's raw output stream, flushed several times a second, and forwarding it would flood your endpoint.\n\nThe signing secret is returned ONCE and never again.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created; carries the signing secret once"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/webhooks/{hookID}": {
+      "delete": {
+        "summary": "Delete a webhook",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hookID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/webhooks/{hookID}/test": {
+      "post": {
+        "summary": "Send one signed test delivery",
+        "description": "Rate limited to 5 per minute per hook: this makes the server call your endpoint on demand. A failure at your endpoint is reported as 200 with `ok: false` \u2014 the API call succeeded, and returning 5xx would send you to our status page for a problem in your service.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hookID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The probe result, including a failure at your endpoint"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/webhooks/failures": {
+      "get": {
+        "summary": "Deliveries that never got through (dead-letter view)",
+        "description": "Deliveries still failed after the attempt budget. A 4xx other than 408/429 stops immediately, because the receiver understood the request and refused it.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/approvals": {
+      "get": {
+        "summary": "Pending tool approvals (Guided mode)",
+        "description": "Tool calls the agent has parked for review, plus recently resolved ones. **501 with a reason is NOT the same as an empty list**: an agent with no verified approval gate cannot park anything, and a client that showed \"nothing to review\" for it would be asserting something false about what is happening. Requires the `read` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending and resolved approvals, the remember scopes on offer, the timeout, and whether THIS caller may decide"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/approvals/{approvalID}": {
+      "post": {
+        "summary": "Decide one approval",
+        "description": "Allow or deny a parked tool call. `remember` widens the decision to a category \u2014 `once`, `session` or `sandbox` \u2014 and the approval's `signature` is the category it would apply to, which is why a UI must show that signature next to the choice. **Not answering is a denial**: an approval that reaches its timeout is refused, so silence is never taken as consent. Requires the `approve` scope, which no other scope implies.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "approvalID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "decision"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "allow",
+                      "deny"
+                    ]
+                  },
+                  "remember": {
+                    "type": "string",
+                    "enum": [
+                      "once",
+                      "session",
+                      "sandbox"
+                    ],
+                    "description": "Omitted means once. Anything wider consents to the approval's whole signature, not just this call."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The decision as recorded, with the scope it was remembered at"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Already decided, or the approval timed out while the request was in flight"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/policy": {
+      "get": {
+        "summary": "The allowlist and what has been remembered",
+        "description": "What runs without asking in Guided mode: the allowlist, plus every remembered grant with the scope it was granted at. Session grants are listed too \u2014 a grant that silently permits calls while being unlistable is a permission nobody can audit or revoke. Requires the `read` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Allowlist, remembered grants, session grants"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/policy/remembered": {
+      "delete": {
+        "summary": "Forget a remembered grant",
+        "description": "Revokes one remembered allow by its signature, so a category consented to earlier stops applying. Takes `signature` as a query parameter \u2014 the exact string the policy and approval responses show, because revoking is only trustworthy if it names the same thing the grant did. Requires the `approve` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "signature",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The grant that was forgotten"
+          },
+          "404": {
+            "description": "No such remembered grant"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/budget": {
+      "get": {
+        "summary": "Spend cap and spend to date",
+        "description": "The cap, what has been spent against it, and **`turns_unreported`** \u2014 turns whose agent reported no cost. That last field is the honest qualifier on the total: only some agents report usage, so a spend figure without it reads as complete when it is not. Requires the `read` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cap, spent, remaining, and the unreported-turn count"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "description": "This agent has no budget file"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Change the spend cap",
+        "description": "Sets the daily cap in USD. Requires the `admin` scope specifically \u2014 a token that could raise its own cap has no cap, so `write` deliberately does not imply this.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "cap_usd"
+                ],
+                "properties": {
+                  "cap_usd": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new cap"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "description": "This token lacks the admin scope"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/models": {
+      "get": {
+        "summary": "Which models this agent can run",
+        "description": "The models the agent's CLI accepts, and which one it is currently using. Reported by the agent rather than listed here, so a provider adding a model does not require a change to this platform. Requires the `read` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Available models and the current selection"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "description": "This agent's CLI cannot enumerate models"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/threads": {
+      "get": {
+        "summary": "Conversations on this workstation",
+        "description": "Threads derived from OUR records rather than by asking the CLI: only two of the supported agents can list their own sessions, so a thread API built on the CLI would exist for some agents and not others. An agent with no resume command reports no thread id rather than a thread that silently forgets. Requires the `read` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Threads with their turn counts and last activity"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/threads/{thread}": {
+      "get": {
+        "summary": "One conversation's turns",
+        "description": "Every turn in one thread, oldest first. Requires the `read` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "thread",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The thread's turns"
+          },
+          "404": {
+            "description": "No such thread for this sandbox"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/isolation": {
+      "get": {
+        "summary": "What isolation this workstation actually has",
+        "description": "Each line is MEASURED, not asserted: the runtime that boots this sandbox, whether this request arrived over TLS, whether a provider credential is stored, and the autonomy the supervisor is really running in. `state` is `yes`/`no`/**`unknown`** \u2014 three values, because a boolean forces an unverifiable property to report as false, which is a claim of its own. Reports which env NAMES hold credentials, never their values. Requires the `read` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Isolation facts, each with a state and an explanation"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/responses": {
+      "post": {
+        "summary": "OpenAI-compatible Responses adapter",
+        "description": "Accepts an OpenAI Responses-shaped request and runs it as a turn, so an existing client can drive this agent without knowing the native API. A compatibility surface, not a second product: anything it cannot express maps onto the native turn semantics or is refused rather than approximated. Requires the `write` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "string",
+                    "description": "The task, in the OpenAI field name."
+                  },
+                  "stream": {
+                    "type": "boolean",
+                    "description": "Stream deltas instead of returning once the turn ends."
+                  },
+                  "model": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A Responses-shaped result"
+          },
+          "202": {
+            "description": "Accepted when streaming"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "The agent is busy with another turn"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/responses/{response}": {
+      "get": {
+        "summary": "Fetch one adapter response",
+        "description": "The Responses-shaped view of a turn. Requires the `read` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "response",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The response object"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/responses/{response}/stream": {
+      "get": {
+        "summary": "Stream one adapter response",
+        "description": "SSE, in the Responses event shape. Resumes with `Last-Event-ID` like the native event stream, so a dropped connection does not lose the middle of a turn. Requires the `read` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "response",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/agent/responses/{response}/cancel": {
+      "post": {
+        "summary": "Cancel an adapter response",
+        "description": "Interrupts the underlying turn. Partial output already journaled is kept \u2014 an interrupted turn that produced work should show how far it got rather than discarding it. Requires the `write` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "response",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Already finished"
+          }
+        }
+      }
+    },
+    "/v1/capabilities": {
+      "get": {
+        "summary": "What this node \u2014 or this fleet \u2014 can actually do",
+        "description": "Served on BOTH tiers at the same path, and the two answers are different documents: a node reports the one runtime it has, the control plane reports the union across the fleet. The `scope` field (\"node\" or \"fleet\") is what tells them apart; branch on it rather than on which URL you called.\n\n`isolation_level` is the vocabulary to ask for a boundary in rather than an engine \u2014 see docs/runtimes.md. `strong` means the guest has its own kernel (firecracker); `shared` means a real boundary on a kernel shared with the host (docker); `trusted` means no tenant boundary is claimed (the process runtime, `-tags dev` builds only, never in a release binary). An unrecognised runtime is reported `shared`, never `strong`.\n\nThe fleet answer is CAPABILITY, NOT CAPACITY: a level is listed if any node offers it, including nodes that are cordoned, draining or currently full. `nodes.counted` versus `nodes.schedulable` shows that gap. Whether a sandbox can be placed right now is answered by POST /v1/sandboxes, not here.\n\nA node answers this even when built with `-tags core`, which serves no optional feature: describing the boundary it runs code behind is not optional.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NodeCapabilities"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FleetCapabilities"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "This node has no runtime configured and cannot boot anything. Refused rather than answered, because the document it would otherwise return reports isolation_level \"trusted\" \u2014 an affirmative claim that it runs code with no boundary, where the truth is that it runs nothing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key issued from /v1/keys, sent as 'Authorization: Bearer <key>'."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "description": "Every error carries a human-readable message and a stable machine-readable code.",
+        "required": [
+          "error",
+          "code"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable message."
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable code: bad_request, unauthorized, payment_required, forbidden, not_found, conflict, payload_too_large, rate_limited, unavailable, error."
+          }
+        }
+      },
+      "CreateSandboxRequest": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "type": "string",
+            "description": "Template id or alias; defaults to the node's first template."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Optional DNS label, unique across the platform: the sandbox is served at https://<slug>.<domain>/ (its public port) and every {id} path accepts it. Must start with a lowercase letter; `agent-*` and reserved labels are refused (400); a taken slug is 409 `slug_taken`."
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Sandbox TTL in seconds (capped to the plan max)."
+          },
+          "vcpu": {
+            "type": "integer"
+          },
+          "memory_mb": {
+            "type": "integer"
+          },
+          "storage_mb": {
+            "type": "integer"
+          },
+          "port": {
+            "type": "integer",
+            "description": "App port to publish for the preview URL. On the docker runtime it must be 8000 or a port the template declares, else 400 `port_not_published`."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "setup": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Commands run once after files are written."
+          },
+          "start": {
+            "type": "string",
+            "description": "Long-running start command (deploy); its port is published."
+          }
+        }
+      },
+      "Sandbox": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string",
+            "description": "Present when set; the sandbox is also https://<slug>.<domain>/."
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string",
+            "description": "Preview URL for a published app port."
+          },
+          "app_url": {
+            "type": "string",
+            "description": "Preview URL for a deployed start command."
+          },
+          "idle_timeout": {
+            "type": "integer",
+            "description": "Idle auto-pause in seconds; -1 = never; 0 = platform default."
+          }
+        }
+      },
+      "ExecRequest": {
+        "type": "object",
+        "required": [
+          "cmd"
+        ],
+        "properties": {
+          "cmd": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Seconds."
+          }
+        }
+      },
+      "ExecResult": {
+        "type": "object",
+        "properties": {
+          "stdout": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "exit_code": {
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AuditEntry": {
+        "type": "object",
+        "properties": {
+          "org_id": {
+            "type": "string"
+          },
+          "key_id": {
+            "type": "string",
+            "description": "The actor API key id."
+          },
+          "action": {
+            "type": "string",
+            "description": "e.g. sandbox.create, sandbox.destroy, sandbox.exec, key.create, key.revoke."
+          },
+          "target": {
+            "type": "string"
+          },
+          "at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          }
+        }
+      },
+      "TemplateBuild": {
+        "type": "object",
+        "description": "One build of a template. status is 'ready' only once the artifact is durably published and verified; a build in any other status cannot be booted.",
+        "properties": {
+          "build_id": {
+            "type": "string"
+          },
+          "template_id": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "building",
+              "ready",
+              "failed"
+            ]
+          },
+          "rootfs_size": {
+            "type": "integer"
+          },
+          "rootfs_sha256": {
+            "type": "string",
+            "description": "Hex SHA-256 of the root filesystem, as carried by the artifact's header."
+          },
+          "total_size": {
+            "type": "integer",
+            "description": "Bytes across every object of this build."
+          },
+          "kernel_version": {
+            "type": "string"
+          },
+          "firecracker_version": {
+            "type": "string"
+          },
+          "envd_version": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "ready_at": {
+            "type": "integer",
+            "description": "Unix seconds; 0 until the build is ready."
+          }
+        }
+      },
+      "ArtifactObject": {
+        "type": "object",
+        "description": "One object of a build that is present in the artifact store.",
+        "properties": {
+          "build_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "rootfs, rootfs.header or metadata.json."
+          },
+          "key": {
+            "type": "string",
+            "description": "Object key, always \"<build_id>/<kind>\"."
+          },
+          "size": {
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "store_kind": {
+            "type": "string",
+            "description": "Which backend holds the bytes (fs, controlplane)."
+          },
+          "uploaded_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          }
+        }
+      },
+      "ImageBuildResult": {
+        "type": "object",
+        "description": "Result of POST /v1/images/build.",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Built, and published where the fleet needs it to be."
+          },
+          "tag": {
+            "type": "string",
+            "description": "The image tag, e.g. sf-acme-mytool:latest."
+          },
+          "log": {
+            "type": "string",
+            "description": "Tail of the build log (last 8000 bytes)."
+          },
+          "build": {
+            "type": "object",
+            "description": "The one build that ran.",
+            "properties": {
+              "node": {
+                "type": "string",
+                "description": "Node the build ran on."
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "error": {
+                "type": "string"
+              },
+              "payload": {
+                "type": "string",
+                "enum": [
+                  "image.tar",
+                  "rootfs"
+                ],
+                "description": "What the node produced. `image.tar` is a Docker image tarball, launched with --image <tag>; `rootfs` is a Firecracker template squashfs, launched with --template <template_id>. A client that cannot see which it got cannot use it."
+              }
+            }
+          },
+          "publish": {
+            "type": "object",
+            "description": "Whether the built image reached the shared artifact store, and is therefore obtainable by nodes other than the one that built it.",
+            "properties": {
+              "attempted": {
+                "type": "boolean",
+                "description": "False when this control plane has no artifact store or no database."
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "build_id": {
+                "type": "string"
+              },
+              "template_id": {
+                "type": "string",
+                "description": "The tag without its version suffix; what a node resolves against."
+              },
+              "size": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "store": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "payload": {
+                "type": "string",
+                "enum": [
+                  "image.tar",
+                  "rootfs"
+                ],
+                "description": "The artifact name the objects were written under, and the same value the artifact's metadata.json carries \u2014 so a client reading this response and a node reading the artifact agree without a second lookup."
+              }
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "deprecated": true,
+            "description": "DEPRECATED. Emitted for one release only, and now always a SINGLE-ELEMENT array describing the one node the build ran on. It used to carry one entry per node in the fleet, because the build was fanned out to all of them; that fan-out was removed (tasks.md section 6.2) and this field describes a mechanism that no longer exists. Read `build` instead. Removed in the release after next.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "NodeCapabilities": {
+        "type": "object",
+        "description": "One node's answer: the engine it has and the ceilings it applies.",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "node"
+            ]
+          },
+          "runtime": {
+            "type": "string",
+            "description": "Engine name: firecracker, docker or process."
+          },
+          "isolation_level": {
+            "type": "string",
+            "enum": [
+              "strong",
+              "shared",
+              "trusted"
+            ],
+            "description": "The tenant boundary this node provides. See docs/runtimes.md."
+          },
+          "isolation": {
+            "type": "boolean",
+            "description": "The raw capability bit, as sent on this node's heartbeat. True for both firecracker and docker, which is why isolation_level exists."
+          },
+          "snapshot": {
+            "type": "boolean",
+            "description": "Pause frees the sandbox's RAM. False means pause is a SIGSTOP and the memory stays resident."
+          },
+          "multiport": {
+            "type": "boolean",
+            "description": "The preview URL reaches any guest port, not only the declared app port."
+          },
+          "auto_pause": {
+            "type": "boolean",
+            "description": "True when idle sandboxes are paused automatically: the runtime can snapshot and the idle timer is on. On the fleet answer, true only when every counted node pauses. Reported explicitly so a client cannot mistake an absent field for a capability."
+          },
+          "templates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Template ids this node HOLDS LOCALLY and can boot with no fetch."
+          },
+          "templates_enumerated": {
+            "type": "boolean",
+            "description": "Whether this node enumerates its templates at all. False with an empty `templates` means \"boots anything\"; TRUE with an empty `templates` means \"holds nothing yet\". Opposite facts, identical arrays \u2014 read this field."
+          },
+          "limits": {
+            "$ref": "#/components/schemas/NodeCapabilityLimits"
+          }
+        }
+      },
+      "NodeCapabilityLimits": {
+        "type": "object",
+        "description": "The ceilings a create here is held to: the caller's plan, plus this node's own.",
+        "properties": {
+          "max_vcpu": {
+            "type": "integer"
+          },
+          "max_mem_mb": {
+            "type": "integer"
+          },
+          "max_storage_mb": {
+            "type": "integer",
+            "description": "Per-sandbox writable disk. An ENFORCED ceiling: firecracker sizes the sandbox's ext4 overlay from it, and a docker node verifies at boot that its storage driver honours the option, refusing to run in production if it does not."
+          },
+          "max_concurrent": {
+            "type": "integer",
+            "description": "0 = unlimited."
+          },
+          "session_ttl_hrs": {
+            "type": "integer"
+          },
+          "node_max_active": {
+            "type": "integer",
+            "description": "This node's own concurrent-sandbox ceiling, which bounds every org together and is in no plan. The smaller of this and max_concurrent applies."
+          }
+        }
+      },
+      "FleetCapabilities": {
+        "type": "object",
+        "description": "The control plane's answer: the union across the fleet.",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "fleet"
+            ]
+          },
+          "isolation_levels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "strong",
+                "shared",
+                "trusted"
+              ]
+            },
+            "description": "Every level some node offers, STRONGEST FIRST. The order is a ranking and is part of the answer."
+          },
+          "runtimes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Engine names behind those levels. What to pass as `runtime` on a create to pin placement."
+          },
+          "templates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Union of what nodes hold locally. A template absent here may still be bootable if can_fetch_templates is true."
+          },
+          "can_fetch_templates": {
+            "type": "boolean",
+            "description": "At least one node has a shared artifact store and can boot a published template nobody holds yet."
+          },
+          "auto_pause": {
+            "type": "boolean"
+          },
+          "nodes": {
+            "$ref": "#/components/schemas/FleetNodeCounts"
+          }
+        }
+      },
+      "FleetNodeCounts": {
+        "type": "object",
+        "description": "The population the capability answer was computed from.",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "description": "Every node in the registry, reachable or not."
+          },
+          "counted": {
+            "type": "integer",
+            "description": "Healthy nodes, which is what the levels above are derived from. Includes cordoned and draining nodes: they still HAVE their isolation."
+          },
+          "schedulable": {
+            "type": "integer",
+            "description": "How many of those would take a placement right now. Capacity, reported beside the capability rather than mixed into it."
+          }
+        }
+      }
+    }
+  }
+}

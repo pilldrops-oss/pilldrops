@@ -1,0 +1,10 @@
+#!/bin/sh
+# Run the Playwright suite (default /root/tests) headless with video, trace,
+# screenshots and an HTML report. Everything lands in /root/recordings, which
+# the sandbox preview port serves — open the sandbox URL to browse them.
+cd /root || exit 1
+npx playwright test "$@"
+status=$?
+echo ""
+echo "recordings on the preview port: report/  test-results/"
+exit $status

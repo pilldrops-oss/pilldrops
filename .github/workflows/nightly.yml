@@ -1,0 +1,171 @@
+# Nightly verification against the reference KVM host.
+#
+# Two jobs, mirroring contract-tests.yml's existing blocking/informational
+# split: the security suite must pass, and the latency gate fails only on a
+# regression against a committed baseline.
+#
+# ── Why SSH from a hosted runner, and what it costs ──────────────────────────
+#
+# The alternative was a self-hosted runner on the box, which would have given a
+# GitHub Actions runner passwordless sudo on a machine that boots untrusted
+# sandboxes — anyone able to land a workflow change could run code as root
+# there. This shape keeps the runner disposable, and pays for it with a
+# credential for a root-capable host living in repository secrets.
+#
+# That credential is the thing to protect, so:
+#
+#   * Secrets are scoped to the `bench` GitHub Environment, not the repository,
+#     so a workflow on a fork or an unrelated branch cannot reach them. Create
+#     it with a branch protection rule limiting it to the default branch.
+#   * Host key verification is ON. `StrictHostKeyChecking=no` in CI is an
+#     invitation to a machine-in-the-middle for exactly the credential above;
+#     BENCH_SSH_KNOWN_HOSTS pins it instead.
+#   * The host address is a secret too, so the workflow cannot hardcode it.
+#   * Use a dedicated key for this, not an operator's personal one, so it can be
+#     revoked without locking anyone out.
+#
+# Required secrets in the `bench` environment:
+#   BENCH_SSH_HOST         user@host of the reference node
+#   BENCH_SSH_KEY          private key, dedicated to this workflow
+#   BENCH_SSH_KNOWN_HOSTS  output of `ssh-keyscan <host>`
+name: nightly
+
+on:
+  schedule:
+    # 02:40 UTC — after contract-tests (02:20) so the two do not contend for the
+    # same host.
+    - cron: '40 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time: both jobs create sandboxes on the same node, and a latency
+  # measurement taken while the security suite is forking bombs is not a
+  # latency measurement.
+  group: nightly-bench-node
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    # Needs a reference KVM node (BENCH_SSH_* in the 'bench' environment); set
+    # the repository variable BENCH_ENABLED=true once one exists.
+    if: vars.BENCH_ENABLED == 'true'
+    name: security suite + latency gate
+    runs-on: ubuntu-latest
+    environment: bench
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: open an ssh channel to the reference node
+        env:
+          KEY: ${{ secrets.BENCH_SSH_KEY }}
+          KNOWN: ${{ secrets.BENCH_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY"   || { echo "BENCH_SSH_KEY is not set in the 'bench' environment" >&2; exit 1; }
+          test -n "$KNOWN" || { echo "BENCH_SSH_KNOWN_HOSTS is not set — refusing to connect without host key verification" >&2; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY"   > ~/.ssh/id_bench && chmod 600 ~/.ssh/id_bench
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<'EOF'
+          Host benchnode
+            IdentityFile ~/.ssh/id_bench
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            ConnectTimeout 20
+            ServerAliveInterval 30
+          EOF
+
+      # HostName and User are appended separately, by the step holding that
+      # secret. The address goes into the ssh config rather than onto a command
+      # line, because argv appears in logs and the address is deliberately not
+      # committed.
+      - name: point the ssh alias at the node
+        env:
+          HOST: ${{ secrets.BENCH_SSH_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" || { echo "BENCH_SSH_HOST is not set" >&2; exit 1; }
+          user="${HOST%@*}"; addr="${HOST#*@}"
+          printf '  HostName %s\n  User %s\n' "$addr" "$user" >> ~/.ssh/config
+          ssh benchnode 'echo connected: $(hostname)'
+
+      - name: ship the harness and the scripts
+        run: |
+          set -euo pipefail
+          GOOS=linux GOARCH=amd64 go build -o bin/pilldrops-bench-linux ./cmd/pilldrops-bench/
+          ssh benchnode 'mkdir -p ~/pdbuild/bin'
+          tar czf - scripts templates | ssh benchnode 'tar xzf - -C ~/pdbuild'
+          scp bin/pilldrops-bench-linux benchnode:~/pdbuild/bin/
+
+      # Blocking. --strict also fails on a probe that could not run for any
+      # reason other than "not applicable to this runtime": a suite that quietly
+      # stopped testing is not a passing suite.
+      - name: security suite — firecracker
+        run: |
+          set -euo pipefail
+          ssh benchnode 'cd ~/pdbuild && sudo PILLDROPS_API_KEY=$(sudo cat /var/lib/sandbox/state/bootstrap.key) \
+            bash scripts/security-suite.sh --runtime firecracker --template probe --strict'
+
+      - name: security suite — docker
+        run: |
+          set -euo pipefail
+          ssh benchnode 'cd ~/pdbuild && sudo PILLDROPS_API_KEY=$(sudo cat /var/lib/sandboxd-docker/bootstrap.key) \
+            bash scripts/security-suite.sh --runtime docker --host http://localhost:18081 \
+              --image pilldrops-probe:latest --strict'
+
+      # The harness must run ON the node: the measurement includes every hop, so
+      # driving it over this SSH connection would measure GitHub's network too,
+      # and the two are not separable afterwards.
+      - name: measure latency
+        run: |
+          set -euo pipefail
+          ssh benchnode "set -euo pipefail; cd ~/pdbuild && sudo rm -rf results && mkdir -p results
+            for cache in hot warm; do
+              sudo PILLDROPS_API_KEY=\$(sudo cat /var/lib/sandbox/state/bootstrap.key) ./bin/pilldrops-bench-linux \
+                -mode latency -runtime firecracker -runner-class kvm-bare-1 -node-id test-local \
+                -template base -cache \$cache -n 30 -commit ${{ github.sha }} -allow-drop-caches -out ~/pdbuild/results
+              sudo PILLDROPS_API_KEY=\$(sudo cat /var/lib/sandboxd-docker/bootstrap.key) ./bin/pilldrops-bench-linux \
+                -mode latency -host http://localhost:18081 -runtime docker -runner-class kvm-bare-1 -node-id test-local-docker \
+                -template base -cache \$cache -n 30 -commit ${{ github.sha }} -allow-drop-caches -out ~/pdbuild/results
+            done
+            sudo chown \$(id -u):\$(id -g) results/*.json"
+          mkdir -p /tmp/bench
+          scp 'benchnode:~/pdbuild/results/*.json' /tmp/bench/
+
+      # The gate runs HERE, not on the node: it compares against the baselines
+      # committed in this checkout. Exit 3 (no baseline) is deliberately not a
+      # pass — see scripts/bench-gate.sh.
+      - name: latency regression gate
+        run: |
+          set -euo pipefail
+          rc=0
+          for f in /tmp/bench/*.json; do
+            ./scripts/bench-gate.sh --result "$f" || rc=$?
+          done
+          exit $rc
+
+      # Kept regardless of the verdict: a failing run is the one whose numbers
+      # you most want to look at.
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: latency-${{ github.sha }}
+          path: /tmp/bench/*.json
+          if-no-files-found: warn
+
+      - name: how to adopt these as the new baseline
+        if: always()
+        run: |
+          echo "The baseline advances by review, never by whatever ran last."
+          echo "To adopt: download the artifact, copy into docs/benchmarks/\$(date -u +%F)/,"
+          echo "and open a PR. Do not overwrite an existing dated directory."

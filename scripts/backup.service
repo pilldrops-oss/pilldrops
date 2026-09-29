@@ -1,0 +1,19 @@
+[Unit]
+Description=Back up the sandboxd metadata store
+Documentation=https://github.com/pilldrops-oss/pilldrops/blob/main/docs/deployment.md
+# The dump is consistent while sandboxd runs (WAL mode), so this deliberately
+# does NOT order itself against sandboxd.service: a node that is down must
+# still have its last database state captured.
+
+[Service]
+Type=oneshot
+# Override in /etc/systemd/system/sandboxd-backup.service.d/override.conf
+Environment=BACKUP_DIR=/var/backups/sandboxd
+Environment=SANDBOXD_DATA=/var/lib/sandboxd
+ExecStart=/usr/local/bin/sandboxd-backup.sh
+# The dump holds every key and org record in the fleet.
+UMask=0077
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/sandboxd
+NoNewPrivileges=true

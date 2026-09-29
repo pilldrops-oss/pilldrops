@@ -1,0 +1,6 @@
+#!/bin/sh
+# Record a headless browsing session of a URL and serve the video on the
+# sandbox preview port. Usage: pwrecord <url> [seconds]
+[ -n "$1" ] || { echo "usage: pwrecord <url> [seconds]" >&2; exit 2; }
+cd /root || exit 1
+exec node /root/.pwrecord.js "$@"

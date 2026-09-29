@@ -1,0 +1,40 @@
+# Sandbox Platform — Development Infrastructure
+#
+# This runs PostgreSQL for the platform.
+# Sandboxes run as Firecracker microVMs (not containers).
+# Templates use Dockerfiles as BUILD RECIPES to create rootfs images.
+#
+# Usage:
+#   make db-up               # Start Postgres (docker compose up -d)
+#   make dev                 # Start the sandbox server (port 8080)
+#
+# For production on Linux:
+#   make db-up               # Postgres
+#   make prod-run            # Server + Firecracker VMs
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sandbox-postgres
+    environment:
+      POSTGRES_DB: sandbox
+      POSTGRES_USER: sandbox
+      POSTGRES_PASSWORD: sandbox_dev
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # No /docker-entrypoint-initdb.d mount, deliberately. The schema is owned
+      # by internal/store/migrations.go, which store.Open() applies on every
+      # connect. A SQL file here runs BEFORE the app and wins, because those
+      # migrations are CREATE TABLE IF NOT EXISTS — so an init script silently
+      # shadows the real schema instead of erroring.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sandbox"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:

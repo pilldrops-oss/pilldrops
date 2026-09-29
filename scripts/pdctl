@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# pdctl — tiny CLI for the PillDrops sandbox API.
+#
+#   export PD_HOST=http://<node-public-ip>:18080   # defaults to http://localhost:18080
+#   export PD_KEY=sf_live_...
+#
+#   pdctl templates                 # list the template catalog
+#   pdctl create <template>         # create a sandbox, prints its id
+#   pdctl exec <id> <cmd...>        # run a shell command inside the sandbox
+#   pdctl list                      # list running sandboxes
+#   pdctl logs <id>                 # fetch sandbox logs
+#   pdctl rm <id>                   # destroy a sandbox
+#   pdctl run <template> <cmd...>   # create → exec → destroy (one-shot)
+set -euo pipefail
+
+PD_HOST="${PD_HOST:-http://localhost:18080}"
+PD_KEY="${PD_KEY:-}"
+[ -n "$PD_KEY" ] || { echo "PD_KEY is not set (export PD_KEY=sf_live_...)" >&2; exit 2; }
+
+AUTH=(-H "Authorization: Bearer $PD_KEY")
+JSON=(-H "Content-Type: application/json")
+
+# pull a top-level string field out of a JSON object without jq
+jget() { python3 -c 'import sys,json;print(json.load(sys.stdin).get(sys.argv[1],""))' "$1"; }
+
+_create() { # <template> -> id on stdout
+  curl -fsS -m 120 "${AUTH[@]}" "${JSON[@]}" -X POST "$PD_HOST/v1/sandboxes" \
+    -d "{\"template\":\"$1\"}" | jget id
+}
+
+_exec() { # <id> <cmd...>
+  local id="$1"; shift
+  local cmd="$*"
+  curl -fsS -m 60 "${AUTH[@]}" "${JSON[@]}" -X POST "$PD_HOST/v1/sandboxes/$id/exec" \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"cmd":sys.argv[1]}))' "$cmd")"
+}
+
+case "${1:-}" in
+  templates)
+    curl -fsS -m 15 "${AUTH[@]}" "$PD_HOST/v1/templates" \
+      | python3 -c 'import sys,json
+for t in json.load(sys.stdin):
+    print("%-18s %scpu/%sMB  %s" % (t["id"], t.get("cpu","?"), t.get("memory_mb","?"), t["description"]))'
+    ;;
+  create) # id on stdout (script-parseable); the app url, if any, on stderr
+    resp=$(curl -fsS -m 120 "${AUTH[@]}" "${JSON[@]}" -X POST "$PD_HOST/v1/sandboxes" \
+      -d "{\"template\":\"${2:?usage: pdctl create <template>}\"}")
+    echo "$resp" | jget id
+    url=$(echo "$resp" | jget url)
+    [ -z "$url" ] || echo "url: $url" >&2
+    ;;
+  exec)    id="${2:?usage: pdctl exec <id> <cmd...>}"; shift 2; _exec "$id" "$@"; echo ;;
+  list)    curl -fsS -m 15 "${AUTH[@]}" "$PD_HOST/v1/sandboxes" ; echo ;;
+  logs)    curl -fsS -m 15 "${AUTH[@]}" "$PD_HOST/v1/sandboxes/${2:?usage: pdctl logs <id>}/logs" ; echo ;;
+  rm)      curl -fsS -m 20 "${AUTH[@]}" -X DELETE "$PD_HOST/v1/sandboxes/${2:?usage: pdctl rm <id>}" ; echo ;;
+  run)
+    tmpl="${2:?usage: pdctl run <template> <cmd...>}"; shift 2
+    id=$(_create "$tmpl"); echo "[$tmpl] sandbox=$id" >&2
+    trap 'curl -fsS -m 20 "${AUTH[@]}" -X DELETE "$PD_HOST/v1/sandboxes/$id" >/dev/null 2>&1 || true' EXIT
+    _exec "$id" "$@"; echo
+    ;;
+  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
+esac

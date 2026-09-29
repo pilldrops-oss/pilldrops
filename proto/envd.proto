@@ -1,0 +1,76 @@
+syntax = "proto3";
+package envd;
+option go_package = "github.com/pilldrops-oss/pilldrops/proto/envdpb";
+
+// Health: call after snapshot restore — confirms envd is usable, not just running
+message HealthRequest {}
+message HealthResponse {
+  bool   ready   = 1;
+  string version = 2;
+}
+
+// Execute: run shell command, stream output back
+message ExecuteRequest {
+  string            cmd             = 1;  // /bin/sh -c {cmd}
+  string            cwd             = 2;  // default: /root
+  map<string,string> env            = 3;  // extra env vars
+  int32             timeout_seconds = 4;  // kill after N seconds (default: 30)
+  bool              detach          = 5;  // persistent server: don't reap the
+                                          // process group or cap CPU time, so a
+                                          // backgrounded app (deploy/functions)
+                                          // survives the exec RPC.
+  bytes             stdin           = 6;  // whole standard input; empty = /dev/null
+  bool              no_output_cap   = 7;  // skip the 10 MiB output kill (raw egress)
+}
+
+enum OutputType {
+  STDOUT    = 0;
+  STDERR    = 1;
+  EXIT      = 2;
+  TRUNCATED = 3;  // output hit 10MB cap, process killed
+}
+
+message ExecuteResponse {
+  OutputType type      = 1;
+  bytes      data      = 2;  // stdout or stderr bytes
+  int32      exit_code = 3;  // set when type=EXIT
+}
+
+// File operations: both directions stream 1 MiB chunks. The first WriteFile
+// chunk carries the path; envd writes to a temp file beside the target and
+// renames on the last chunk, so an interrupted upload leaves nothing.
+message WriteFileRequest {
+  string path = 1;
+  bytes  data = 2;
+  reserved 3;  // was `mode`: nothing above this API could set it, so every
+               // upload landed 0644 anyway. Reserved so the number cannot
+               // come back meaning something else to an already-baked envd.
+}
+message WriteFileResponse { int64 bytes = 1; }
+
+message ReadFileRequest  { string path = 1; }
+message ReadFileResponse { bytes data = 1; }
+
+message ListFilesRequest { string path = 1; }
+message FileEntry {
+  string name          = 1;
+  bool   is_dir        = 2;
+  int64  size          = 3;
+  int64  modified_unix = 4;
+}
+message ListFilesResponse { repeated FileEntry entries = 1; }
+
+// SetEnv merges env into /etc/template.env and rewrites the profile drop-in,
+// so create-time env reaches exec, the terminal, login shells and the start
+// command without riding on any command line.
+message SetEnvRequest { map<string,string> env = 1; }
+message SetEnvResponse {}
+
+service EnvdService {
+  rpc Health(HealthRequest)              returns (HealthResponse);
+  rpc Execute(ExecuteRequest)            returns (stream ExecuteResponse);
+  rpc WriteFile(stream WriteFileRequest) returns (WriteFileResponse);
+  rpc ReadFile(ReadFileRequest)          returns (stream ReadFileResponse);
+  rpc ListFiles(ListFilesRequest)        returns (ListFilesResponse);
+  rpc SetEnv(SetEnvRequest)              returns (SetEnvResponse);
+}

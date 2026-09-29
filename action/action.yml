@@ -1,0 +1,94 @@
+name: 'PillDrops — run in a sandbox'
+description: 'Run tests, builds or a preview server inside an isolated PillDrops microVM, straight from CI.'
+author: 'PillDrops'
+branding:
+  icon: 'box'
+  color: 'green'
+
+inputs:
+  api-key:
+    description: 'PillDrops API key. Store it as a repository secret.'
+    required: true
+  api-url:
+    description: 'Your PillDrops server, e.g. https://sandbox.example.com.'
+    required: true
+  template:
+    description: 'Template to boot (base, playwright, code-interpreter, loadtest, android, …).'
+    required: false
+    default: 'base'
+  run:
+    description: 'Command to execute in the sandbox. Its exit code becomes the job status. Mutually exclusive with `serve`.'
+    required: false
+  serve:
+    description: 'Command that starts a long-lived server. The step returns as soon as it is up and leaves the sandbox running so the preview URL stays live. Requires `port`. Mutually exclusive with `run`.'
+    required: false
+  path:
+    description: 'File or directory to upload before running. Defaults to the checked-out repo. Use `none` to skip.'
+    required: false
+    default: '.'
+  dest:
+    description: 'Where the uploaded path lands inside the sandbox.'
+    required: false
+    default: '/workspace'
+  port:
+    description: 'App port to publish. Required with `serve`; with `run` it gives the sandbox a preview URL for reports and artifacts.'
+    required: false
+  public:
+    description: 'Make the preview URL tokenless so anyone with the link can open it.'
+    required: false
+    default: 'false'
+  timeout:
+    description: 'Sandbox lifetime in seconds.'
+    required: false
+    default: '900'
+  keep:
+    description: 'Leave the sandbox running after the step (implied by `serve`). Useful for debugging a failed run.'
+    required: false
+    default: 'false'
+
+outputs:
+  sandbox-id:
+    description: 'Id of the sandbox that was created.'
+    value: ${{ steps.pilldrops.outputs.sandbox-id }}
+  preview-url:
+    description: 'Preview URL for the published port, when one was requested.'
+    value: ${{ steps.pilldrops.outputs.preview-url }}
+  exit-code:
+    description: 'Exit code of the command that ran in the sandbox.'
+    value: ${{ steps.pilldrops.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install the PillDrops CLI
+      shell: bash
+      run: |
+        if command -v pilldrops >/dev/null 2>&1; then
+          echo "▸ pilldrops already installed: $(pilldrops version 2>/dev/null || true)"
+          exit 0
+        fi
+        case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "::error::unsupported runner $(uname -m)"; exit 1 ;; esac
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSL -o "$HOME/.local/bin/pilldrops" \
+          "https://github.com/pilldrops-oss/pilldrops-cli/releases/latest/download/pilldrops_${os}_${arch}"
+        chmod +x "$HOME/.local/bin/pilldrops"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        "$HOME/.local/bin/pilldrops" version
+
+    - name: Run in the sandbox
+      id: pilldrops
+      shell: bash
+      env:
+        INPUT_API_KEY: ${{ inputs.api-key }}
+        INPUT_API_URL: ${{ inputs.api-url }}
+        INPUT_TEMPLATE: ${{ inputs.template }}
+        INPUT_RUN: ${{ inputs.run }}
+        INPUT_SERVE: ${{ inputs.serve }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_DEST: ${{ inputs.dest }}
+        INPUT_PORT: ${{ inputs.port }}
+        INPUT_PUBLIC: ${{ inputs.public }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_KEEP: ${{ inputs.keep }}
+      run: bash "${{ github.action_path }}/run.sh"

@@ -1,0 +1,130 @@
+version: "2"
+
+linters:
+  # v2 defaults already enable errcheck, govet, ineffassign, staticcheck
+  # (which now includes gosimple), and unused.
+  enable:
+    - gocritic
+    # The rest are chosen for the failure modes this codebase actually has:
+    #   bodyclose     — 28 client.Do sites across the proxy/bridge/webhook paths;
+    #                   a leaked body holds a pooled connection open.
+    #   noctx         — guards the store/FileSystem context work: every DB and
+    #                   HTTP call must carry a deadline and be cancellable.
+    #   errorlint     — a bare `err.(*T)` stops matching the moment anything
+    #                   wraps the error, silently changing control flow.
+    #   rowserrcheck  — rows.Err() after iteration; without it a truncated
+    #                   result set reads as a complete one.
+    #   sqlclosecheck — an unclosed Rows holds a connection from a bounded pool.
+    #   depguard      — the layering below. httpapi imports 25 of our packages
+    #                   and orchestrator 20; nothing but this stops a backedge,
+    #                   and the compiler only complains once it is a cycle.
+    - depguard
+    - bodyclose
+    - noctx
+    - errorlint
+    - rowserrcheck
+    - sqlclosecheck
+  # errcheck runs with its default behavior: a returned error must be handled or
+  # explicitly discarded (`_ = f()`). We do not enable check-blank — a deliberate
+  # `_ =` is an accepted, idiomatic way to ignore a best-effort error.
+  settings:
+    # depguard freezes the layering the packages already follow. Measured
+    # 2026-09-06: config, observability and httpx import nothing of ours;
+    # store reaches only auth/aat and observability; httpapi and orchestrator
+    # import each other in neither direction. Every rule below is a fact about
+    # today's graph, not an aspiration — so any hit is a genuinely new edge,
+    # and the first import cycle gets caught in review instead of at the
+    # compiler, when untangling is cheap.
+    depguard:
+      rules:
+        # The leaves. Everything is allowed to depend on these three, which
+        # only stays safe while they depend on nothing of ours.
+        foundation:
+          list-mode: lax
+          files:
+            - "**/internal/config/**"
+            - "**/internal/observability/**"
+            - "**/internal/httpx/**"
+          deny:
+            - pkg: github.com/pilldrops-oss/pilldrops/internal
+              desc: >-
+                config, observability and httpx are the leaves every other
+                package imports. An edge OUT of one of them is how the first
+                import cycle gets built — put the shared type in the caller,
+                or in a new leaf.
+        # The data and machine layers must not reach up into the layer that
+        # serves HTTP. A store that imports httpapi cannot be tested without
+        # one, and the cycle arrives with the next handler that needs a query.
+        no-upward-edges:
+          list-mode: lax
+          files:
+            - "**/internal/store/**"
+            - "**/internal/runtime/**"
+            - "**/internal/vm/**"
+            - "**/internal/cluster/**"
+            - "**/internal/artifact/**"
+            - "**/internal/templates/**"
+          deny:
+            - pkg: github.com/pilldrops-oss/pilldrops/internal/httpapi
+              desc: the storage/runtime layer must not import the serving layer — invert it with an interface the caller satisfies
+            - pkg: github.com/pilldrops-oss/pilldrops/internal/orchestrator
+              desc: the storage/runtime layer must not import the control plane — invert it with an interface the caller satisfies
+            - pkg: github.com/pilldrops-oss/pilldrops/internal/nodeboot
+              desc: nodeboot is process wiring; a package it wires must not import it back
+            - pkg: github.com/pilldrops-oss/pilldrops/internal/webui
+              desc: the storage/runtime layer must not import the dashboard
+        # The node's API surface and the control plane are peers, not a stack.
+        # Several helpers are deliberately duplicated between them (see the
+        # "mirrors ... duplicated, not imported" comments) precisely to keep
+        # this edge from existing; the rule is what makes that choice hold.
+        node-and-control-plane-are-peers:
+          list-mode: lax
+          files:
+            - "**/internal/httpapi/**"
+            - "**/internal/orchestrator/**"
+          deny:
+            - pkg: github.com/pilldrops-oss/pilldrops/internal/orchestrator
+              desc: httpapi (a node) must not import the control plane; move the shared piece down a layer
+            - pkg: github.com/pilldrops-oss/pilldrops/internal/httpapi
+              desc: the control plane must not import a node's API surface; move the shared piece down a layer
+    errcheck:
+      # Deferred/cleanup Close and best-effort response writes are idiomatic to
+      # ignore; the errcheck maintainers recommend excluding these by name
+      # rather than annotating every call site.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.DB).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (net/http.ResponseWriter).Write
+  exclusions:
+    paths:
+      - proto/envdpb
+    rules:
+      # Tests: a deliberate `_ =`, an unclosed body on a response the test never
+      # reads, and a context-free helper request are all fine in a test — the
+      # failure modes these linters guard against (leaked pool connections,
+      # unbounded production requests) do not exist in a process that exits.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - bodyclose
+          - noctx
+          - rowserrcheck
+          - errorlint
+      # net.Listen / net.Dial at process startup. A listener is not a request:
+      # it has no deadline to inherit and nothing to cancel it with, and
+      # ListenConfig buys nothing here. Scoped to the specific files rather than
+      # disabled globally, so a genuine request-path Dial still gets flagged.
+      - path: (internal/extras/agent/agentd/(server|gatesock)\.go|internal/runtime/process/process\.go|internal/envd/vsock_other\.go|cmd/envd/(main|terminal)\.go)
+        linters:
+          - noctx
+      # Developer tooling, not a served path: a benchmark driver. A short-lived
+      # program whose whole run is the request's lifetime, so a context adds a
+      # parameter and no guarantee.
+      - path: (cmd/pilldrops-bench/|internal/mcp/http\.go)
+        linters:
+          - noctx

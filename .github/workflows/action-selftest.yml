@@ -1,0 +1,88 @@
+# Self-test for the PillDrops GitHub Action (./action).
+#
+# Needs the PILLDROPS_API_KEY repository secret. It is skipped automatically when
+# the secret is absent (forks, or before the key is configured) so a missing
+# secret never shows up as a red build.
+name: action-selftest
+
+on:
+  push:
+    paths: ['action/**', '.github/workflows/action-selftest.yml']
+  pull_request:
+    paths: ['action/**', '.github/workflows/action-selftest.yml']
+  workflow_dispatch:
+
+# This workflow runs a third-party action (shellcheck) on every pull_request
+# touching action/**, including from forks. With no permissions block it ran
+# with the repository's DEFAULT token permissions — so an action that turned
+# hostile, or a compromised upstream, held whatever that default granted on
+# this repository. It needs to read the tree and nothing else.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # Cheap, no-credentials validation: the action metadata must stay parseable
+    # and the script must stay shellcheck-clean.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: action.yml parses and declares what we expect
+        run: |
+          python3 - <<'PY'
+          import sys, yaml
+          a = yaml.safe_load(open('action/action.yml'))
+          assert a['runs']['using'] == 'composite', a['runs']['using']
+          for key in ('api-key', 'template', 'run', 'serve', 'port', 'keep'):
+              assert key in a['inputs'], f'missing input: {key}'
+          assert a['inputs']['api-key']['required'] is True
+          for key in ('sandbox-id', 'preview-url', 'exit-code'):
+              assert key in a['outputs'], f'missing output: {key}'
+          print('action.yml OK')
+          PY
+      - name: run.sh is syntactically valid
+        run: bash -n action/run.sh
+      - uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
+        with:
+          scandir: ./action
+
+  live:
+    # End-to-end against a real server. Skipped without the PILLDROPS_API_KEY
+    # secret and the PILLDROPS_API_URL variable.
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - id: guard
+        run: echo "has_key=${{ secrets.PILLDROPS_API_KEY != '' && vars.PILLDROPS_API_URL != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: passing command → green job
+        if: steps.guard.outputs.has_key == 'true'
+        uses: ./action
+        with:
+          api-key: ${{ secrets.PILLDROPS_API_KEY }}
+          api-url: ${{ vars.PILLDROPS_API_URL }}
+          template: python-3.11
+          path: none
+          run: python3 -c "print('ok from CI')"
+
+      - name: failing command → the step must fail
+        if: steps.guard.outputs.has_key == 'true'
+        id: expect_fail
+        continue-on-error: true
+        uses: ./action
+        with:
+          api-key: ${{ secrets.PILLDROPS_API_KEY }}
+          api-url: ${{ vars.PILLDROPS_API_URL }}
+          template: python-3.11
+          path: none
+          run: exit 7
+
+      - name: assert the failure was reported
+        if: steps.guard.outputs.has_key == 'true'
+        run: |
+          test "${{ steps.expect_fail.outcome }}" = "failure" \
+            || { echo "::error::a failing command did not fail the step"; exit 1; }
+          test "${{ steps.expect_fail.outputs.exit-code }}" = "7" \
+            || { echo "::error::exit-code output was not 7"; exit 1; }
+          echo "failure path OK"

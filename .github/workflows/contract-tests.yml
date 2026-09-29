@@ -1,0 +1,81 @@
+name: Platform contract tests
+
+# Executable parity scorecard.
+# Runs against the LIVE fleet through the released CLI — exactly what agents use.
+#
+#   guards  (-m guard)      must stay green; red = a deploy regressed the platform
+#   parity  (-m parity)     encode open scorecard gaps; they flip green as
+#                           workstreams land (red here is informative, not fatal)
+#
+# Nightly full run + manual dispatch. Release-gating: release.yml can call the
+# `guards` job via workflow_call after a node rollout.
+
+on:
+  schedule:
+    - cron: '20 2 * * *' # nightly 02:20 UTC
+  workflow_dispatch:
+  workflow_call:
+
+# Least privilege: these jobs check out the tree and drive the live fleet
+# through the released CLI. They never write to the repository.
+permissions:
+  contents: read
+
+env:
+  PILLDROPS_API_KEY: ${{ secrets.PILLDROPS_API_KEY }}
+  # The deployment under test; the suite never assumes one.
+  PILLDROPS_API_URL: ${{ vars.PILLDROPS_API_URL }}
+  # Pin the CLI so contract runs aren't perturbed by CLI releases.
+  PILLDROPS_CLI_VERSION: v1.8.0
+
+jobs:
+  guards:
+    # Drives a live deployment through the released CLI (PILLDROPS_API_KEY,
+    # PILLDROPS_API_URL); set the repository variable CONTRACT_ENABLED=true.
+    if: vars.CONTRACT_ENABLED == 'true'
+    name: Regression guards (deploy gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Install pinned pilldrops CLI
+        run: |
+          curl -fsSL -o /usr/local/bin/pilldrops \
+            "https://github.com/pilldrops-oss/pilldrops-cli/releases/download/${PILLDROPS_CLI_VERSION}/pilldrops_linux_amd64"
+          chmod +x /usr/local/bin/pilldrops
+          pilldrops version
+      - name: Install test deps
+        run: pip install pytest requests certifi
+      - name: Run guards
+        run: python -m pytest tests/contract -m guard -v --tb=short
+
+  parity:
+    if: vars.CONTRACT_ENABLED == 'true'
+    name: Parity scorecard (informative)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true # open gaps are expected to fail until their WS lands
+    if: github.event_name != 'workflow_call'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Install pinned pilldrops CLI
+        run: |
+          curl -fsSL -o /usr/local/bin/pilldrops \
+            "https://github.com/pilldrops-oss/pilldrops-cli/releases/download/${PILLDROPS_CLI_VERSION}/pilldrops_linux_amd64"
+          chmod +x /usr/local/bin/pilldrops
+      - name: Install test deps
+        run: pip install pytest requests certifi
+      - name: Run parity scorecard
+        run: |
+          python -m pytest tests/contract -m parity -v --tb=line \
+            | tee parity-report.txt
+          echo '## Parity scorecard' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -30 parity-report.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

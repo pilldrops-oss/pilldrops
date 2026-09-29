@@ -1,0 +1,17 @@
+# Reviewed findings that are not secrets. One line per fingerprint, each with
+# the reason — an entry without one is indistinguishable from a suppression
+# nobody read.
+#
+# All three are the same value in commit 81cca8f: `intgopkey`, the operator key
+# a throwaway local integration rig started its own orchestrator with. It never
+# existed outside a side-car on a test machine and authenticates nothing that
+# survives the rig. The scanner is right that it matches a bearer token, and
+# right to keep matching it.
+#
+# The working tree no longer contains it: the rig now generates its credentials
+# per run into a file it does not commit. These entries exist only because the
+# scan reads all history, and rewriting merged commits to erase a test key would
+# cost more than it is worth.
+81cca8fcdb7e3378b6d2c4cf0f3e464bdd7310bb:docs/testing/merged-main-diskwatchdog.sh:curl-auth-header:53
+81cca8fcdb7e3378b6d2c4cf0f3e464bdd7310bb:docs/testing/merged-main-integration-rig.sh:curl-auth-header:79
+81cca8fcdb7e3378b6d2c4cf0f3e464bdd7310bb:docs/testing/merged-main-integration-rig.sh:curl-auth-header:119

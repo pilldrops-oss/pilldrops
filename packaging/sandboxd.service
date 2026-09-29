@@ -1,0 +1,105 @@
+[Unit]
+Description=sandboxd — self-hosted sandbox server
+After=network-online.target
+Wants=network-online.target
+
+# Egress isolation must be back in the kernel BEFORE this node can be asked for
+# a sandbox. `Requires=` (not `Wants=`) is the whole point: iptables rules do
+# not survive a reboot, and a node that comes back serving with `-P FORWARD
+# ACCEPT` and no DROP rules is a node with unrestricted tenant egress that still
+# takes work. If sandbox-egress-restore.service is not installed, systemd
+# refuses to start sandboxd ("Unit sandbox-egress-restore.service not found")
+# instead of starting it unprotected — a missing control has to be louder than a
+# working one, because the whole class of bug here is controls that are absent
+# and believed present.
+Requires=sandbox-egress-restore.service
+After=sandbox-egress-restore.service
+
+# Ordering only, no Requires: a node without docker ignores this. Installing
+# docker is what sets `-P FORWARD DROP`, and sandboxd's netns accepts belong in
+# DOCKER-USER, the one chain a dockerd restart leaves alone. Starting first
+# would put them in FORWARD instead — still correct, but it is the arrangement
+# nobody tested, and the failure mode is a sandbox with no network at all.
+After=docker.service
+
+[Service]
+Type=simple
+ExecStart=/opt/pilldrops/bin/sandboxd-linux
+WorkingDirectory=/opt/pilldrops
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+# Firecracker/KVM needs root (tap devices, jailer, /dev/kvm) for sandboxd ITSELF.
+# The Firecracker VMM processes it launches are a different story: each jailer
+# child drops privilege to a per-sandbox uid in 10000-60000 (see uidForSandbox
+# in internal/vm/firecracker.go), NOT root — that uid range is intentionally
+# unmapped in /etc/passwd, so `ps`/`ls -l` on the overlay files and jailer
+# processes will show bare numeric uids/gids rather than names; this is
+# expected, not a misconfiguration. Overlay .ext4 files created before this
+# change are root:root and predate per-sandbox chowning — there is no in-place
+# migration, a rolling deploy simply drains those old sandboxes; only newly
+# created sandboxes get non-root VMM ownership.
+User=root
+KillMode=mixed
+TimeoutStopSec=30
+
+# ── Resource + privilege ceiling on the DAEMON ───────────────────────────────
+# Read the scope before tuning these: they bound sandboxd and its helper
+# children (mkfs.ext4, mksquashfs, docker CLI, the jailer's brief lifetime).
+# They do NOT bound the guests. The jailer moves each Firecracker VMM out of
+# this unit's cgroup and into /sys/fs/cgroup/firecracker/<sandbox id> before it
+# execs, so a VM's memory is charged there and not here — an operator who reads
+# MemoryMax as "this node cannot exceed X" would be wrong by the size of the
+# whole fleet on the box. The per-VMM ceiling is written by prepareVMMCgroup
+# (internal/vm/cgroup.go), which is the other half of this pair.
+#
+# Percentages, not absolutes, because the same unit ships to a 4 GB VPS and a
+# 256 GB bare-metal node. MemoryHigh throttles and reclaims first; MemoryMax is
+# the kill line, left well clear of it so a transient spike in a template build
+# (mksquashfs sizes its own cache from physical RAM) reclaims rather than dies.
+MemoryHigh=40%
+MemoryMax=60%
+# Threads, not processes. A node runs one VMM per sandbox plus the daemon's
+# goroutine-backed threads; 8192 is far above any real fleet and far below the
+# host's pid_max, so it stops a fork loop without capping legitimate scale.
+TasksMax=8192
+# sandboxd runs as root and needs to stay able to DROP privilege — which this
+# does not prevent. NoNewPrivileges blocks privilege GAIN through execve
+# (set-user-ID bits, file capabilities); setuid(2)/setgid(2), which is how the
+# jailer descends to the per-sandbox uid, is unaffected. Checked against every
+# binary this daemon execs — jailer, firecracker, mkfs.ext4, mksquashfs, docker,
+# git, pgrep, pkill, /bin/sh — none is set-user-ID or carries file caps on a
+# stock host, so nothing here relies on gaining privilege at exec.
+NoNewPrivileges=yes
+
+# HTTP port + data.
+Environment=PORT=18080
+Environment=SANDBOXD_DATA=/var/lib/sandbox/state
+
+# Turns the fail-closed guards ON. Without it they are all inert, and this unit
+# is the path a self-hoster takes — the deployment scripts set it, the packaged
+# unit did not, so the shipped default was the unguarded one. Four guards key on this: ProductionDBError (refuses SQLite for a fleet),
+# IsolationGuardError (refuses a node with no real boundary),
+# StorageCapGuardError (refuses a node whose per-sandbox disk cap is unenforced
+# OR unverifiable) and SnapshotGuardError. Each was written to refuse rather
+# than warn; none of them could fire here.
+#
+# Set to 0 ONLY for a local dev box you are the only tenant of.
+Environment=SANDBOXD_PRODUCTION=1
+
+# KVM runtime: kernel, binaries, and image/overlay directories.
+Environment=KERNEL_PATH=/var/lib/sandbox/vmlinux
+Environment=FIRECRACKER_BIN=/usr/bin/firecracker
+Environment=JAILER_BIN=/usr/bin/jailer
+Environment=SNAPSHOT_DIR=/var/lib/sandbox/templates
+Environment=OVERLAY_DIR=/var/lib/sandbox/overlays
+
+# Templates this node offers (comma list) and the preview domain. Listing a
+# template does not build it: a create for a listed-but-unbuilt id answers 400.
+Environment=TEMPLATE=base,node,go,claude,codex,code-interpreter,grok,opencode,amp,desktop,playwright
+# Set this to the domain sandbox preview URLs should be served under, e.g. a
+# nip.io/sslip.io wildcard pointed at this node's IP, or your own domain.
+Environment=SANDBOXD_SANDBOX_DOMAIN=<your-sandbox-domain>
+
+[Install]
+WantedBy=multi-user.target

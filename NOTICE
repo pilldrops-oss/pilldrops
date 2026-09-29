@@ -1,0 +1,11 @@
+PillDrops
+Copyright 2026 The PillDrops Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes third-party software under its own licenses:
+
+- xterm.js and its fit and attach addons (MIT), embedded in the in-guest
+  agent's web terminal: cmd/envd/assets/LICENSE-xterm.
+- Go modules vendored in vendor/, each with its license file in its directory;
+  vendor/modules.txt lists them.

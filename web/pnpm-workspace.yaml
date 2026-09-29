@@ -1,0 +1,10 @@
+# pnpm 11 moved build-script approval out of package.json's "pnpm" field (which
+# it now ignores) and into this file. Without it, `pnpm install` stops with
+# ERR_PNPM_IGNORED_BUILDS and `make web` fails before Vite ever runs.
+#
+# esbuild: true — Vite's bundler needs its postinstall to fetch the platform
+# binary, so the build genuinely depends on it.
+# core-js: false — its postinstall only prints a funding banner; nothing builds.
+allowBuilds:
+  esbuild: true
+  core-js: false

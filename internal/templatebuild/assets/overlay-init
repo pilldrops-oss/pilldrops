@@ -1,0 +1,46 @@
+#!/bin/sh
+# First process inside every VM. Sets up overlay FS then execs real init.
+set -e
+
+mkdir -p /rom
+mount -t squashfs /dev/vda /rom
+
+mkdir -p /overlay
+mount -t ext4 /dev/vdb /overlay
+mkdir -p /overlay/upper /overlay/work /newroot
+
+mount -t overlay overlay \
+    -o lowerdir=/rom,upperdir=/overlay/upper,workdir=/overlay/work \
+    /newroot
+
+mkdir -p /newroot/{proc,sys,dev,tmp}
+# Mount fresh procfs/sysfs (not a bind of the initramfs's empty /proc) so the
+# guest gets a real /proc — /proc/self/exe (go's GOROOT detection), /proc/meminfo,
+# ps, etc. all depend on this.
+mount -t proc  proc  /newroot/proc
+mount -t sysfs sysfs /newroot/sys
+mount --bind /dev  /newroot/dev
+
+# POSIX shared memory. Chromium (desktop template) aborts without it, and
+# Python multiprocessing/joblib silently falls back to serial mode.
+mkdir -p /newroot/dev/shm
+mount -t tmpfs -o size=256m,mode=1777 tmpfs /newroot/dev/shm
+
+# Pseudo-terminals. Without devpts, forkpty()/openpty() fail with ENOENT, so
+# anything that needs a PTY breaks: ttyd (browser terminal), tmux/screen,
+# `script`, node-pty, and interactive `exec` sessions. gid=5 is the tty group.
+mkdir -p /newroot/dev/pts
+mount -t devpts -o gid=5,mode=620,ptmxmode=666 devpts /newroot/dev/pts
+
+# /tmp as tmpfs -- huge perf win for pip/npm/compilation
+mount -t tmpfs -o size=256m,mode=1777 tmpfs /newroot/tmp
+
+# The writable ext4 itself, bound in beside the merged root. Everything under /
+# goes through the overlayfs above, and overlayfs cannot stack on overlayfs — so
+# a container daemon's data root (overlay2) has nowhere else to live and fails
+# with a bare EINVAL. A bind of the mount we already made, never a second
+# `mount -t ext4` of the same device: one superblock, and nothing to race at boot.
+mkdir -p /newroot/mnt/disk
+mount --bind /overlay /newroot/mnt/disk
+
+exec switch_root /newroot /sbin/init

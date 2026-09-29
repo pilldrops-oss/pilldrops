@@ -1,0 +1,21 @@
+{
+  "description": "Flask TODO API with CRUD endpoints and in-memory storage",
+  "files": [
+    {
+      "path": "app.py",
+      "content": "from flask import Flask, jsonify, request\nimport uuid\n\napp = Flask(__name__)\ntodos = {}\n\n@app.route('/todos', methods=['GET'])\ndef list_todos():\n    return jsonify(list(todos.values()))\n\n@app.route('/todos', methods=['POST'])\ndef create_todo():\n    data = request.json or {}\n    todo_id = str(uuid.uuid4())[:8]\n    todo = {'id': todo_id, 'title': data.get('title', 'Untitled'), 'done': False}\n    todos[todo_id] = todo\n    return jsonify(todo), 201\n\n@app.route('/todos/<todo_id>', methods=['GET'])\ndef get_todo(todo_id):\n    if todo_id not in todos:\n        return jsonify({'error': 'not found'}), 404\n    return jsonify(todos[todo_id])\n\n@app.route('/todos/<todo_id>', methods=['PATCH'])\ndef update_todo(todo_id):\n    if todo_id not in todos:\n        return jsonify({'error': 'not found'}), 404\n    data = request.json or {}\n    if 'title' in data: todos[todo_id]['title'] = data['title']\n    if 'done' in data: todos[todo_id]['done'] = data['done']\n    return jsonify(todos[todo_id])\n\n@app.route('/todos/<todo_id>', methods=['DELETE'])\ndef delete_todo(todo_id):\n    todos.pop(todo_id, None)\n    return '', 204\n\nif __name__ == '__main__':\n    print('TODO API running on http://0.0.0.0:5000')\n    print('Endpoints:')\n    print('  GET    /todos')\n    print('  POST   /todos')\n    print('  GET    /todos/<id>')\n    print('  PATCH  /todos/<id>')\n    print('  DELETE /todos/<id>')\n    app.run(host='0.0.0.0', port=5000)\n"
+    },
+    {
+      "path": "requirements.txt",
+      "content": "flask"
+    },
+    {
+      "path": "test.py",
+      "content": "import requests, json, sys\n\nBASE = 'http://localhost:5000'\n\ndef test(name, method, path, data=None, expected_status=200):\n    r = getattr(requests, method)(BASE + path, json=data, timeout=5)\n    ok = r.status_code == expected_status\n    print(f\"{'PASS' if ok else 'FAIL'} {method.upper()} {path} -> {r.status_code}\")\n    if not ok:\n        print(f\"  Expected {expected_status}, got {r.status_code}: {r.text[:100]}\")\n    return r.json() if r.text else None\n\nprint('Testing TODO API...')\nprint()\n\n# Create\ntodo = test('create', 'post', '/todos', {'title': 'Buy milk'}, 201)\nprint(f\"  Created: {json.dumps(todo)}\")\n\n# List\ntodos = test('list', 'get', '/todos')\nprint(f\"  Count: {len(todos)}\")\n\n# Get\ntest('get', 'get', f\"/todos/{todo['id']}\")\n\n# Update\nupdated = test('update', 'patch', f\"/todos/{todo['id']}\", {'done': True})\nprint(f\"  Done: {updated['done']}\")\n\n# Delete\ntest('delete', 'delete', f\"/todos/{todo['id']}\", expected_status=204)\n\n# Verify deleted\ntest('verify_deleted', 'get', f\"/todos/{todo['id']}\", expected_status=404)\n\nprint()\nprint('All tests passed!')\n"
+    }
+  ],
+  "setup_commands": [
+    "pip3 install -q flask requests"
+  ],
+  "run_command": "python3 test.py"
+}

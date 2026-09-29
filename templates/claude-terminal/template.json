@@ -1,0 +1,14 @@
+{
+  "name": "Claude Terminal",
+  "description": "Claude Code CLI in a browser terminal (ttyd) — open the URL and run `claude`",
+  "language": "shell",
+  "icon": "ct",
+  "tags": ["agent", "terminal", "claude"],
+  "cpu": 2,
+  "memory_mb": 2048,
+  "storage_mb": 4096,
+  "port": 8000,
+  "visibility": "public",
+  "kind": "shell",
+  "outcome": "terminal"
+}

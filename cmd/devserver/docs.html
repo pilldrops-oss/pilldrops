@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PillDrops API Documentation</title>
+<style>
+:root{--primary:#FF8800;--primary-dark:#E57B00;--primary-light:#FFF3E0;--bg:#FFFFFF;--sidebar-bg:#FAFAFA;--text:#1a1a1a;--text-muted:#6B7280;--text-light:#9CA3AF;--border:#E5E7EB;--hover-bg:#F3F4F6;--active-bg:#FFF7ED;--green:#22C55E;--green-light:#DCFCE7;--green-text:#16A34A;--red:#EF4444;--red-light:#FEE2E2;--red-text:#DC2626;--yellow:#F59E0B;--yellow-light:#FEF3C7;--yellow-text:#D97706;--blue:#3B82F6;--blue-light:#DBEAFE;--blue-text:#2563EB;--code-bg:#1E1E2E;--code-text:#CDD6F4;--font:Inter,-apple-system,system-ui,sans-serif;--mono:'SF Mono','Fira Code',monospace}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.6;display:flex;min-height:100vh}
+/* Sidebar */
+.sidebar{width:260px;background:var(--sidebar-bg);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;overflow-y:auto;z-index:100;transition:transform .2s}
+.sidebar-header{padding:20px 20px 12px;border-bottom:1px solid var(--border)}
+.sidebar-header h1{font-size:16px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px}
+.sidebar-header h1 span{color:var(--primary)}
+.sidebar-version{font-size:11px;color:var(--text-light);font-family:var(--mono);margin-top:2px}
+.nav-group{padding:12px 0}
+.nav-group-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-light);padding:0 20px 6px}
+.nav-item{display:flex;align-items:center;justify-content:space-between;padding:6px 20px;font-size:13px;color:var(--text-muted);cursor:pointer;transition:all .12s;text-decoration:none;border-left:2px solid transparent}
+.nav-item:hover{background:var(--hover-bg);color:var(--text)}
+.nav-item.active{background:var(--active-bg);color:var(--primary);border-left-color:var(--primary);font-weight:600}
+.nav-method{font-size:10px;font-weight:700;font-family:var(--mono);padding:1px 5px;border-radius:3px}
+.m-get{background:var(--green-light);color:var(--green-text)}
+.m-post{background:var(--blue-light);color:var(--blue-text)}
+.m-delete{background:var(--red-light);color:var(--red-text)}
+.m-put{background:var(--yellow-light);color:var(--yellow-text)}
+/* Main */
+.main{margin-left:260px;flex:1;max-width:900px;padding:32px 40px 80px}
+.section{margin-bottom:48px;scroll-margin-top:20px}
+.section h2{font-size:24px;font-weight:700;margin-bottom:8px}
+.section h3{font-size:18px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.section>p{color:var(--text-muted);margin-bottom:16px}
+.method-badge{font-size:12px;font-weight:700;font-family:var(--mono);padding:3px 8px;border-radius:4px;letter-spacing:.02em}
+.endpoint-path{font-family:var(--mono);font-size:14px;color:var(--text);background:var(--hover-bg);padding:4px 10px;border-radius:6px;font-weight:500}
+.endpoint-path .param{color:var(--primary)}
+.desc{color:var(--text-muted);font-size:14px;margin:8px 0 16px}
+/* Collapsible */
+details{border:1px solid var(--border);border-radius:8px;margin-bottom:12px;overflow:hidden}
+details summary{padding:10px 16px;font-weight:600;font-size:13px;cursor:pointer;background:var(--hover-bg);list-style:none;display:flex;align-items:center;gap:8px;user-select:none}
+details summary::before{content:'';display:inline-block;width:0;height:0;border-left:5px solid var(--text-muted);border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .15s}
+details[open] summary::before{transform:rotate(90deg)}
+details>div{padding:16px}
+/* Tables */
+.param-table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}
+.param-table th{text-align:left;padding:8px 12px;background:var(--hover-bg);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+.param-table td{padding:8px 12px;border-top:1px solid var(--border)}
+.param-table code{font-family:var(--mono);font-size:12px;background:var(--hover-bg);padding:1px 5px;border-radius:3px}
+.required{color:var(--red);font-size:11px;font-weight:600}
+.optional{color:var(--text-light);font-size:11px}
+/* Code blocks */
+.code-wrap{position:relative;margin:8px 0}
+.code-block{background:var(--code-bg);color:var(--code-text);padding:16px;border-radius:8px;font-family:var(--mono);font-size:12.5px;line-height:1.6;overflow-x:auto;white-space:pre;tab-size:2}
+.copy-btn{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.1);border:none;color:#aaa;font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:var(--font);transition:background .15s}
+.copy-btn:hover{background:rgba(255,255,255,.2);color:#fff}
+.code-block .kw{color:#CBA6F7}.code-block .str{color:#A6E3A1}.code-block .num{color:#FAB387}.code-block .cm{color:#6C7086}
+/* Try It */
+.try-it{border:1px solid var(--border);border-radius:8px;padding:16px;background:var(--sidebar-bg);margin-top:12px}
+.try-it h4{font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)}
+.try-field{margin-bottom:10px}
+.try-field label{display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:3px}
+.try-field input,.try-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:12px;background:var(--bg);color:var(--text);transition:border-color .15s}
+.try-field input:focus,.try-field textarea:focus{outline:none;border-color:var(--primary)}
+.try-field textarea{min-height:100px;resize:vertical}
+.try-send{background:var(--primary);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer;font-family:var(--font);transition:background .15s}
+.try-send:hover{background:var(--primary-dark)}
+.try-response{margin-top:12px;display:none}
+.try-response.visible{display:block}
+.try-meta{display:flex;gap:16px;margin-bottom:8px;font-size:12px;font-family:var(--mono)}
+.try-status{font-weight:700}.try-status.s2{color:var(--green-text)}.try-status.s4{color:var(--red-text)}.try-status.s5{color:var(--red-text)}
+.try-time{color:var(--text-muted)}
+/* Errors */
+.error-table{width:100%;border-collapse:collapse;font-size:13px}
+.error-table th{text-align:left;padding:8px 12px;background:var(--hover-bg);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+.error-table td{padding:8px 12px;border-top:1px solid var(--border)}
+.error-table code{font-family:var(--mono);font-size:12px}
+.status-code{font-weight:700;font-family:var(--mono)}
+/* Hamburger */
+.hamburger{display:none;position:fixed;top:12px;left:12px;z-index:200;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;cursor:pointer;line-height:0}
+.hamburger svg{width:20px;height:20px;color:var(--text)}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:99}
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%)}
+  .sidebar.open{transform:translateX(0)}
+  .hamburger{display:block}
+  .overlay.visible{display:block}
+  .main{margin-left:0;padding:24px 16px 80px;max-width:100%}
+}
+/* Intro cards */
+.intro-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:16px 0}
+.intro-card{border:1px solid var(--border);border-radius:8px;padding:16px}
+.intro-card h4{font-size:13px;font-weight:600;margin-bottom:4px}
+.intro-card p{font-size:12px;color:var(--text-muted)}
+</style>
+</head>
+<body>
+<button class="hamburger" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('visible')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg></button>
+<div class="overlay" onclick="document.querySelector('.sidebar').classList.remove('open');this.classList.remove('visible')"></div>
+
+<nav class="sidebar" id="sidebar"></nav>
+
+<main class="main" id="main"></main>
+
+<script>
+const BASE=window.location.origin;
+const ENDPOINTS=[
+{g:"Getting Started",items:[
+{id:"intro",name:"Introduction"},
+{id:"auth",name:"Authentication"},
+{id:"quickstart",name:"Quick Start"}
+]},
+{g:"Sandboxes",items:[
+{id:"create-sandbox",name:"Create Sandbox",m:"POST",path:"/v1/sandboxes"},
+{id:"list-sandboxes",name:"List Sandboxes",m:"GET",path:"/v1/sandboxes"},
+{id:"get-sandbox",name:"Get Sandbox",m:"GET",path:"/v1/sandboxes/{id}"},
+{id:"exec-command",name:"Execute Command",m:"POST",path:"/v1/sandboxes/{id}/exec"},
+{id:"destroy-sandbox",name:"Destroy Sandbox",m:"DELETE",path:"/v1/sandboxes/{id}"},
+{id:"pause-sandbox",name:"Pause Sandbox",m:"POST",path:"/v1/sandboxes/{id}/pause"},
+{id:"resume-sandbox",name:"Resume Sandbox",m:"POST",path:"/v1/sandboxes/{id}/resume"},
+{id:"set-timeout",name:"Set Timeout",m:"POST",path:"/v1/sandboxes/{id}/timeout"},
+{id:"refresh-sandbox",name:"Refresh",m:"POST",path:"/v1/sandboxes/{id}/refresh"},
+{id:"get-logs",name:"Get Logs",m:"GET",path:"/v1/sandboxes/{id}/logs"},
+{id:"get-metrics",name:"Get Metrics",m:"GET",path:"/v1/sandboxes/{id}/metrics"}
+]},
+{g:"Filesystem",items:[
+{id:"write-file",name:"Write File",m:"POST",path:"/v1/sandboxes/{id}/files/write"},
+{id:"read-file",name:"Read File",m:"GET",path:"/v1/sandboxes/{id}/files/read"},
+{id:"list-dir",name:"List Directory",m:"GET",path:"/v1/sandboxes/{id}/files/list"},
+{id:"create-dir",name:"Create Directory",m:"POST",path:"/v1/sandboxes/{id}/files/mkdir"},
+{id:"move-file",name:"Move File",m:"POST",path:"/v1/sandboxes/{id}/files/move"},
+{id:"remove-file",name:"Remove File",m:"POST",path:"/v1/sandboxes/{id}/files/remove"},
+{id:"file-info",name:"File Info",m:"GET",path:"/v1/sandboxes/{id}/files/info"}
+]},
+{g:"Process",items:[
+{id:"list-processes",name:"List Processes",m:"GET",path:"/v1/sandboxes/{id}/processes"},
+{id:"send-signal",name:"Send Signal",m:"POST",path:"/v1/sandboxes/{id}/processes/signal"}
+]},
+{g:"Templates",items:[
+{id:"list-templates",name:"List Templates",m:"GET",path:"/v1/templates"},
+{id:"create-template",name:"Create Template",m:"POST",path:"/v1/templates"},
+{id:"get-template",name:"Get Template",m:"GET",path:"/v1/templates/{id}"},
+{id:"update-template",name:"Update Template",m:"PUT",path:"/v1/templates/{id}"},
+{id:"delete-template",name:"Delete Template",m:"DELETE",path:"/v1/templates/{id}"},
+{id:"build-template",name:"Build Template",m:"POST",path:"/v1/templates/{id}/build"}
+]},
+{g:"API Keys",items:[
+{id:"list-keys",name:"List Keys",m:"GET",path:"/v1/keys"},
+{id:"create-key",name:"Create Key",m:"POST",path:"/v1/keys"},
+{id:"revoke-key",name:"Revoke Key",m:"DELETE",path:"/v1/keys/{id}"}
+]},
+{g:"More",items:[
+{id:"webhooks",name:"Webhooks"},
+{id:"members",name:"Members"},
+{id:"usage",name:"Usage"},
+{id:"billing",name:"Billing"},
+{id:"builds",name:"Builds"}
+]}
+];
+
+// Build sidebar
+let sideHTML='<div class="sidebar-header"><h1><span>&#9632;</span> PillDrops API</h1><div class="sidebar-version">v1.0.0</div></div>';
+ENDPOINTS.forEach(g=>{
+sideHTML+=`<div class="nav-group"><div class="nav-group-label">${g.g}</div>`;
+g.items.forEach(e=>{
+const mc=e.m?{GET:'m-get',POST:'m-post',DELETE:'m-delete',PUT:'m-put'}[e.m]:'';
+const mb=e.m?`<span class="nav-method ${mc}">${e.m}</span>`:'';
+sideHTML+=`<a class="nav-item" data-id="${e.id}" href="#${e.id}">${e.name}${mb}</a>`;
+});
+sideHTML+='</div>';
+});
+document.getElementById('sidebar').innerHTML=sideHTML;
+
+// Helpers
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function pathHL(p){return esc(p).replace(/\{(\w+)\}/g,'<span class="param">{$1}</span>')}
+function mc(m){return{GET:'m-get',POST:'m-post',DELETE:'m-delete',PUT:'m-put'}[m]||''}
+function badge(m){return`<span class="method-badge ${mc(m)}">${m}</span>`}
+function codeBlock(text,id){
+return`<div class="code-wrap"><button class="copy-btn" onclick="copyCode('${id}')">Copy</button><pre class="code-block" id="${id}">${esc(text)}</pre></div>`;
+}
+function paramTable(rows,hasReq){
+let h=`<table class="param-table"><tr><th>Name</th><th>Type</th>${hasReq?'<th>Required</th>':''}<th>Description</th></tr>`;
+rows.forEach(r=>{
+h+=`<tr><td><code>${r[0]}</code></td><td>${r[1]}</td>${hasReq?`<td>${r[2]?'<span class="required">Yes</span>':'<span class="optional">No</span>'}</td>`:''}<td>${r[hasReq?3:2]}</td></tr>`;
+});
+return h+'</table>';
+}
+function errorTable(rows){
+let h='<table class="error-table"><tr><th>Status</th><th>Body</th><th>When</th></tr>';
+rows.forEach(r=>{h+=`<tr><td class="status-code">${r[0]}</td><td><code>${esc(r[1])}</code></td><td>${r[2]}</td></tr>`;});
+return h+'</table>';
+}
+function tryItForm(id,method,pathTpl,fields,bodyDefault){
+let h=`<div class="try-it"><h4>Try It</h4>`;
+fields.forEach(f=>{
+h+=`<div class="try-field"><label>${f.label}</label><input id="try-${id}-${f.key}" value="${esc(f.def||'')}" placeholder="${esc(f.ph||'')}"></div>`;
+});
+if(bodyDefault){
+h+=`<div class="try-field"><label>Request Body (JSON)</label><textarea id="try-${id}-body">${esc(bodyDefault)}</textarea></div>`;
+}
+h+=`<button class="try-send" onclick="tryRequest('${id}','${method}','${pathTpl}'${bodyDefault?',true':',false'})">Send Request</button>`;
+h+=`<div class="try-response" id="try-${id}-resp"><div class="try-meta"><span class="try-status" id="try-${id}-status"></span><span class="try-time" id="try-${id}-time"></span></div><div class="code-wrap"><pre class="code-block" id="try-${id}-out"></pre></div></div>`;
+h+='</div>';
+return h;
+}
+
+function endpoint(id,method,path,desc,content){
+return`<div class="section" id="${id}"><h3>${badge(method)} <span class="endpoint-path">${pathHL(path)}</span></h3><p class="desc">${desc}</p>${content}</div>`;
+}
+
+// Build main content
+let mainHTML='';
+
+// Introduction
+mainHTML+=`<div class="section" id="intro"><h2>PillDrops API</h2><p>Build, execute, and manage cloud sandboxes programmatically. The PillDrops API lets you spin up isolated development environments in milliseconds.</p>
+<div class="intro-grid">
+<div class="intro-card"><h4>Base URL</h4><p><code>${esc(BASE)}</code></p></div>
+<div class="intro-card"><h4>Protocol</h4><p>REST over HTTPS, JSON request/response bodies</p></div>
+<div class="intro-card"><h4>Versioning</h4><p>All endpoints prefixed with <code>/v1</code></p></div>
+</div></div>`;
+
+// Authentication
+mainHTML+=`<div class="section" id="auth"><h2>Authentication</h2><p>All API requests require a bearer token in the <code>Authorization</code> header.</p>
+${codeBlock('Authorization: Bearer sf_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx','auth-code')}
+<p style="margin-top:12px;color:var(--text-muted)">Generate API keys in the <strong>API Keys</strong> section of the dashboard. Keys prefixed with <code>sf_live_</code> are production keys, <code>sf_test_</code> are test keys.</p></div>`;
+
+// Quick Start
+mainHTML+=`<div class="section" id="quickstart"><h2>Quick Start</h2><p>Create a sandbox, run a command, and read the output in three API calls.</p>
+<details open><summary>1. Create a sandbox</summary><div>
+${codeBlock(`curl -X POST ${BASE}/v1/sandboxes \\
+  -H "Authorization: Bearer sf_live_xxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"template":"python-3.11","timeout":300}'`,'qs-1')}
+</div></details>
+<details open><summary>2. Execute a command</summary><div>
+${codeBlock(`curl -X POST ${BASE}/v1/sandboxes/sb_123/exec \\
+  -H "Authorization: Bearer sf_live_xxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"cmd":"python3 -c \\"print(42)\\"","timeout":30}'`,'qs-2')}
+</div></details>
+<details open><summary>3. Clean up</summary><div>
+${codeBlock(`curl -X DELETE ${BASE}/v1/sandboxes/sb_123 \\
+  -H "Authorization: Bearer sf_live_xxx"`,'qs-3')}
+</div></details></div>`;
+
+// === SANDBOXES ===
+
+// Create Sandbox
+mainHTML+=endpoint('create-sandbox','POST','/v1/sandboxes','Create a new sandbox from a template. Returns the sandbox details with connection URLs.',`
+<details open><summary>Headers</summary><div>${paramTable([['Authorization','string','Bearer token'],['Content-Type','string','application/json']])}</div></details>
+<details open><summary>Request Body</summary><div>${paramTable([
+['template','string',true,'Template ID (e.g. "python-3.11")'],
+['timeout','integer',false,'TTL in seconds (default: 300)'],
+['files','array',false,'Files to write on creation [{path, content}]'],
+['setup','array',false,'Shell commands to run during setup'],
+['start','string',false,'Background start command'],
+['port','integer',false,'App port for preview URL']
+],true)}
+${codeBlock(`{
+  "template": "python-3.11",
+  "timeout": 300,
+  "files": [
+    {"path": "app.py", "content": "print(42)"}
+  ],
+  "setup": ["pip3 install flask"],
+  "start": "python3 app.py",
+  "port": 8000
+}`,'create-sb-body')}</div></details>
+<details><summary>Example Request</summary><div>${codeBlock(`curl -X POST ${BASE}/v1/sandboxes \\
+  -H "Authorization: Bearer sf_live_xxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "template": "python-3.11",
+    "timeout": 300,
+    "files": [{"path":"app.py","content":"print(42)"}],
+    "setup": ["pip3 install flask"],
+    "start": "python3 app.py",
+    "port": 8000
+  }'`,'create-sb-curl')}</div></details>
+<details><summary>Response <span class="method-badge m-post" style="font-size:11px">201</span></summary><div>
+${codeBlock(`{
+  "id": "sb_1234567890_abcdef",
+  "status": "running",
+  "template": "python-3.11",
+  "boot_type": "dev",
+  "boot_ms": 4,
+  "url": "${BASE}/sandbox/sb_1234567890_abcdef/",
+  "app_url": "${BASE}/preview/sb_1234567890_abcdef/8000/",
+  "setup_log": ["wrote app.py", "setup ok", "started (pid=1234)"],
+  "created_at": "2026-04-08T12:00:00Z",
+  "expires_at": "2026-04-08T12:05:00Z"
+}`,'create-sb-resp')}
+${paramTable([
+['id','string','Unique sandbox identifier'],
+['status','string','Current status: running, paused, stopped'],
+['template','string','Template used to create the sandbox'],
+['boot_type','string','Boot type: dev, snapshot'],
+['boot_ms','integer','Boot time in milliseconds'],
+['url','string','Sandbox workspace URL'],
+['app_url','string','Application preview URL'],
+['setup_log','array','Log lines from setup phase'],
+['created_at','string','ISO 8601 creation timestamp'],
+['expires_at','string','ISO 8601 expiration timestamp']
+])}</div></details>
+<details><summary>Errors</summary><div>${errorTable([
+['400','{"error":"template required"}','Missing template field'],
+['503','{"error":"server busy, try again"}','No capacity available']
+])}</div></details>
+${tryItForm('create-sandbox','POST','/v1/sandboxes',[],`{
+  "template": "python-3.11",
+  "timeout": 300
+}`)}`);
+
+// List Sandboxes
+mainHTML+=endpoint('list-sandboxes','GET','/v1/sandboxes','List all active sandboxes.',`
+<details><summary>Example Request</summary><div>${codeBlock(`curl ${BASE}/v1/sandboxes \\
+  -H "Authorization: Bearer sf_live_xxx"`,'list-sb-curl')}</div></details>
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>
+${codeBlock(`[
+  {
+    "id": "sb_1234567890_abcdef",
+    "status": "running",
+    "template": "python-3.11",
+    "boot_ms": 4,
+    "created_at": "2026-04-08T12:00:00Z",
+    "expires_at": "2026-04-08T12:05:00Z"
+  }
+]`,'list-sb-resp')}</div></details>
+${tryItForm('list-sandboxes','GET','/v1/sandboxes',[])}`);
+
+// Get Sandbox
+mainHTML+=endpoint('get-sandbox','GET','/v1/sandboxes/{id}','Get details of a specific sandbox.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>
+${codeBlock(`{
+  "id": "sb_1234567890_abcdef",
+  "status": "running",
+  "template": "python-3.11",
+  "boot_ms": 4,
+  "workspace": "/workspace",
+  "url": "${BASE}/sandbox/sb_1234567890_abcdef/",
+  "api_exec": "${BASE}/v1/sandboxes/sb_1234567890_abcdef/exec",
+  "api_files": "${BASE}/v1/sandboxes/sb_1234567890_abcdef/files",
+  "created_at": "2026-04-08T12:00:00Z",
+  "expires_at": "2026-04-08T12:05:00Z"
+}`,'get-sb-resp')}</div></details>
+<details><summary>Errors</summary><div>${errorTable([['404','{"error":"sandbox not found"}','Invalid sandbox ID']])}</div></details>
+${tryItForm('get-sandbox','GET','/v1/sandboxes/{id}',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}])}`);
+
+// Execute Command
+mainHTML+=endpoint('exec-command','POST','/v1/sandboxes/{id}/exec','Execute a shell command inside a sandbox.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details open><summary>Request Body</summary><div>${paramTable([
+['cmd','string',true,'Shell command to execute'],
+['cwd','string',false,'Working directory (default: /workspace)'],
+['timeout','integer',false,'Command timeout in seconds (default: 30)']
+],true)}
+${codeBlock(`{
+  "cmd": "echo hello",
+  "cwd": "",
+  "timeout": 30
+}`,'exec-body')}</div></details>
+<details><summary>Example Request</summary><div>${codeBlock(`curl -X POST ${BASE}/v1/sandboxes/sb_123/exec \\
+  -H "Authorization: Bearer sf_live_xxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"cmd":"echo hello","timeout":30}'`,'exec-curl')}</div></details>
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>
+${codeBlock(`{
+  "stdout": "hello\\n",
+  "stderr": "",
+  "exit_code": 0,
+  "truncated": false
+}`,'exec-resp')}
+${paramTable([['stdout','string','Standard output'],['stderr','string','Standard error'],['exit_code','integer','Process exit code'],['truncated','boolean','Whether output was truncated']])}</div></details>
+<details><summary>Errors</summary><div>${errorTable([
+['404','{"error":"sandbox not found"}','Invalid sandbox ID'],
+['400','{"error":"cmd required"}','Missing cmd field']
+])}</div></details>
+${tryItForm('exec-command','POST','/v1/sandboxes/{id}/exec',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}],`{
+  "cmd": "echo hello",
+  "timeout": 30
+}`)}`);
+
+// Destroy Sandbox
+mainHTML+=endpoint('destroy-sandbox','DELETE','/v1/sandboxes/{id}','Destroy a sandbox and free all resources.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details><summary>Example Request</summary><div>${codeBlock(`curl -X DELETE ${BASE}/v1/sandboxes/sb_123 \\
+  -H "Authorization: Bearer sf_live_xxx"`,'destroy-curl')}</div></details>
+<details><summary>Response <span class="method-badge m-delete" style="font-size:11px">204</span></summary><div><p>No content returned on success.</p></div></details>
+<details><summary>Errors</summary><div>${errorTable([['404','{"error":"sandbox not found"}','Invalid sandbox ID']])}</div></details>
+${tryItForm('destroy-sandbox','DELETE','/v1/sandboxes/{id}',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}])}`);
+
+// Pause / Resume / Set Timeout / Refresh / Logs / Metrics
+[
+['pause-sandbox','POST','/v1/sandboxes/{id}/pause','Pause a running sandbox. State is preserved.','{"status":"paused"}'],
+['resume-sandbox','POST','/v1/sandboxes/{id}/resume','Resume a paused sandbox.','{"status":"running","resume_ms":12}'],
+['set-timeout','POST','/v1/sandboxes/{id}/timeout','Update the sandbox TTL.','{"expires_at":"2026-04-08T12:10:00Z"}','{"timeout":600}'],
+['refresh-sandbox','POST','/v1/sandboxes/{id}/refresh','Refresh the sandbox TTL without changing timeout.','{"expires_at":"2026-04-08T12:10:00Z"}'],
+].forEach(([id,m,path,desc,resp,body])=>{
+mainHTML+=endpoint(id,m,path,desc,`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+${body?`<details><summary>Request Body</summary><div>${codeBlock(body,id+'-body')}</div></details>`:''}
+<details><summary>Response <span class="method-badge m-post" style="font-size:11px">200</span></summary><div>${codeBlock(resp,id+'-resp')}</div></details>
+<details><summary>Errors</summary><div>${errorTable([['404','{"error":"sandbox not found"}','Invalid sandbox ID']])}</div></details>
+${tryItForm(id,m,path,[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}],body||undefined)}`);
+});
+
+mainHTML+=endpoint('get-logs','GET','/v1/sandboxes/{id}/logs','Retrieve sandbox logs.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details><summary>Query Parameters</summary><div>${paramTable([['tail','integer',false,'Number of recent lines (default: 100)'],['stream','string',false,'Log stream: stdout, stderr, all (default: all)']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>${codeBlock(`{
+  "lines": [
+    {"ts":"2026-04-08T12:00:01Z","stream":"stdout","text":"Server started on :8000"},
+    {"ts":"2026-04-08T12:00:02Z","stream":"stderr","text":"[warn] debug mode"}
+  ]
+}`,'logs-resp')}</div></details>
+${tryItForm('get-logs','GET','/v1/sandboxes/{id}/logs',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}])}`);
+
+mainHTML+=endpoint('get-metrics','GET','/v1/sandboxes/{id}/metrics','Get sandbox resource metrics.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>${codeBlock(`{
+  "cpu_percent": 12.5,
+  "memory_mb": 128,
+  "memory_limit_mb": 512,
+  "disk_mb": 45,
+  "network_rx_bytes": 102400,
+  "network_tx_bytes": 51200
+}`,'metrics-resp')}</div></details>
+${tryItForm('get-metrics','GET','/v1/sandboxes/{id}/metrics',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}])}`);
+
+// === FILESYSTEM ===
+mainHTML+=endpoint('write-file','POST','/v1/sandboxes/{id}/files/write','Write content to a file inside the sandbox.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details open><summary>Request Body</summary><div>${paramTable([['path','string',true,'File path relative to workspace'],['content','string',true,'File content']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-post" style="font-size:11px">200</span></summary><div>${codeBlock('{"ok":true,"path":"/workspace/app.py","bytes":12}','wf-resp')}</div></details>
+${tryItForm('write-file','POST','/v1/sandboxes/{id}/files/write',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}],`{
+  "path": "app.py",
+  "content": "print('hello')"
+}`)}`);
+
+mainHTML+=endpoint('read-file','GET','/v1/sandboxes/{id}/files/read','Read a file from the sandbox.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details><summary>Query Parameters</summary><div>${paramTable([['path','string',true,'File path relative to workspace']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>${codeBlock('{"path":"app.py","content":"print(42)\\n","size":11}','rf-resp')}</div></details>
+${tryItForm('read-file','GET','/v1/sandboxes/{id}/files/read',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'},{key:'path',label:'File Path',def:'app.py',ph:'app.py'}])}`);
+
+mainHTML+=endpoint('list-dir','GET','/v1/sandboxes/{id}/files/list','List directory contents.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details><summary>Query Parameters</summary><div>${paramTable([['path','string',false,'Directory path (default: /)']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>${codeBlock(`{
+  "path": "/workspace",
+  "entries": [
+    {"name":"app.py","type":"file","size":42},
+    {"name":"node_modules","type":"dir","size":0}
+  ]
+}`,'ld-resp')}</div></details>
+${tryItForm('list-dir','GET','/v1/sandboxes/{id}/files/list',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'},{key:'path',label:'Directory Path',def:'/',ph:'/'}])}`);
+
+mainHTML+=endpoint('create-dir','POST','/v1/sandboxes/{id}/files/mkdir','Create a directory.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details open><summary>Request Body</summary><div>${paramTable([['path','string',true,'Directory path to create']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-post" style="font-size:11px">200</span></summary><div>${codeBlock('{"ok":true,"path":"/workspace/src"}','mkdir-resp')}</div></details>
+${tryItForm('create-dir','POST','/v1/sandboxes/{id}/files/mkdir',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}],`{"path": "src"}`)}`);
+
+mainHTML+=endpoint('move-file','POST','/v1/sandboxes/{id}/files/move','Move or rename a file.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details open><summary>Request Body</summary><div>${paramTable([['source','string',true,'Source path'],['destination','string',true,'Destination path']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-post" style="font-size:11px">200</span></summary><div>${codeBlock('{"ok":true,"source":"old.py","destination":"new.py"}','mv-resp')}</div></details>
+${tryItForm('move-file','POST','/v1/sandboxes/{id}/files/move',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}],`{
+  "source": "old.py",
+  "destination": "new.py"
+}`)}`);
+
+mainHTML+=endpoint('remove-file','POST','/v1/sandboxes/{id}/files/remove','Remove a file or directory.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details open><summary>Request Body</summary><div>${paramTable([['path','string',true,'Path to remove']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-post" style="font-size:11px">200</span></summary><div>${codeBlock('{"ok":true}','rm-resp')}</div></details>
+${tryItForm('remove-file','POST','/v1/sandboxes/{id}/files/remove',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}],`{"path": "old.py"}`)}`);
+
+mainHTML+=endpoint('file-info','GET','/v1/sandboxes/{id}/files/info','Get file metadata.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details><summary>Query Parameters</summary><div>${paramTable([['path','string',true,'File path']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>${codeBlock(`{
+  "path": "app.py",
+  "type": "file",
+  "size": 42,
+  "modified_at": "2026-04-08T12:00:00Z",
+  "permissions": "0644"
+}`,'fi-resp')}</div></details>
+${tryItForm('file-info','GET','/v1/sandboxes/{id}/files/info',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'},{key:'path',label:'File Path',def:'app.py'}])}`);
+
+// === PROCESS ===
+mainHTML+=endpoint('list-processes','GET','/v1/sandboxes/{id}/processes','List running processes in a sandbox.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>${codeBlock(`[
+  {"pid":1,"command":"python3 app.py","cpu":2.1,"memory_mb":45},
+  {"pid":12,"command":"node server.js","cpu":0.5,"memory_mb":32}
+]`,'lp-resp')}</div></details>
+${tryItForm('list-processes','GET','/v1/sandboxes/{id}/processes',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}])}`);
+
+mainHTML+=endpoint('send-signal','POST','/v1/sandboxes/{id}/processes/signal','Send a signal to a process.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Sandbox ID']],true)}</div></details>
+<details open><summary>Request Body</summary><div>${paramTable([['pid','integer',true,'Process ID'],['signal','string',true,'Signal name (SIGTERM, SIGKILL, etc.)']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-post" style="font-size:11px">200</span></summary><div>${codeBlock('{"ok":true,"pid":1,"signal":"SIGTERM"}','sig-resp')}</div></details>
+${tryItForm('send-signal','POST','/v1/sandboxes/{id}/processes/signal',[{key:'id',label:'Sandbox ID',def:'sb_1234567890_abcdef'}],`{
+  "pid": 1,
+  "signal": "SIGTERM"
+}`)}`);
+
+// === TEMPLATES ===
+mainHTML+=endpoint('list-templates','GET','/v1/templates','List all available templates.',`
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>${codeBlock(`[
+  {"id":"python-3.11","name":"Python 3.11","runtime":"python","created_at":"2026-01-01T00:00:00Z"},
+  {"id":"node-20","name":"Node.js 20","runtime":"node","created_at":"2026-01-01T00:00:00Z"}
+]`,'lt-resp')}</div></details>
+${tryItForm('list-templates','GET','/v1/templates',[])}`);
+
+mainHTML+=endpoint('create-template','POST','/v1/templates','Create a new template.',`
+<details open><summary>Request Body</summary><div>${paramTable([
+['name','string',true,'Template display name'],
+['runtime','string',true,'Runtime: python, node, go, rust, etc.'],
+['dockerfile','string',false,'Custom Dockerfile content'],
+['setup','array',false,'Setup commands to bake in']
+],true)}</div></details>
+<details><summary>Response <span class="method-badge m-post" style="font-size:11px">201</span></summary><div>${codeBlock(`{
+  "id": "tpl_abc123",
+  "name": "My Python Template",
+  "runtime": "python",
+  "status": "building",
+  "created_at": "2026-04-08T12:00:00Z"
+}`,'ct-resp')}</div></details>
+${tryItForm('create-template','POST','/v1/templates',[],`{
+  "name": "My Python Template",
+  "runtime": "python",
+  "setup": ["pip3 install flask requests"]
+}`)}`);
+
+mainHTML+=endpoint('get-template','GET','/v1/templates/{id}','Get template details.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Template ID']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>${codeBlock(`{
+  "id": "python-3.11",
+  "name": "Python 3.11",
+  "runtime": "python",
+  "status": "ready",
+  "created_at": "2026-01-01T00:00:00Z"
+}`,'gt-resp')}</div></details>
+${tryItForm('get-template','GET','/v1/templates/{id}',[{key:'id',label:'Template ID',def:'python-3.11'}])}`);
+
+mainHTML+=endpoint('update-template','PUT','/v1/templates/{id}','Update a template.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Template ID']],true)}</div></details>
+<details open><summary>Request Body</summary><div>${paramTable([['name','string',false,'New display name'],['setup','array',false,'Updated setup commands']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-put" style="font-size:11px">200</span></summary><div>${codeBlock('{"id":"python-3.11","name":"Python 3.11 Updated","status":"ready"}','ut-resp')}</div></details>
+${tryItForm('update-template','PUT','/v1/templates/{id}',[{key:'id',label:'Template ID',def:'python-3.11'}],`{"name": "Python 3.11 Updated"}`)}`);
+
+mainHTML+=endpoint('delete-template','DELETE','/v1/templates/{id}','Delete a template.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Template ID']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-delete" style="font-size:11px">204</span></summary><div><p>No content returned on success.</p></div></details>
+${tryItForm('delete-template','DELETE','/v1/templates/{id}',[{key:'id',label:'Template ID',def:'tpl_abc123'}])}`);
+
+mainHTML+=endpoint('build-template','POST','/v1/templates/{id}/build','Trigger a template rebuild.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Template ID']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-post" style="font-size:11px">200</span></summary><div>${codeBlock('{"id":"python-3.11","status":"building","build_id":"bld_xyz"}','bt-resp')}</div></details>
+${tryItForm('build-template','POST','/v1/templates/{id}/build',[{key:'id',label:'Template ID',def:'python-3.11'}])}`);
+
+// === API KEYS ===
+mainHTML+=endpoint('list-keys','GET','/v1/keys','List all API keys (masked).',`
+<details><summary>Response <span class="method-badge m-get" style="font-size:11px">200</span></summary><div>${codeBlock(`[
+  {
+    "id": "key_abc123",
+    "masked_key": "sf_live_xxxx...xxxx",
+    "name": "Production",
+    "created_at": "2026-04-01T00:00:00Z"
+  }
+]`,'lk-resp')}</div></details>
+${tryItForm('list-keys','GET','/v1/keys',[])}`);
+
+mainHTML+=endpoint('create-key','POST','/v1/keys','Create a new API key. The full key is only shown once.',`
+<details open><summary>Request Body</summary><div>${paramTable([['name','string',true,'Key display name']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-post" style="font-size:11px">201</span></summary><div>${codeBlock(`{
+  "id": "key_abc123",
+  "key": "sf_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "masked_key": "sf_live_xxxx...xxxx",
+  "name": "Production",
+  "created_at": "2026-04-08T12:00:00Z"
+}`,'ck-resp')}
+<p style="margin-top:8px;color:var(--red);font-size:13px;font-weight:600">The full key is only returned on creation. Store it securely.</p></div></details>
+${tryItForm('create-key','POST','/v1/keys',[],`{"name": "Production"}`)}`);
+
+mainHTML+=endpoint('revoke-key','DELETE','/v1/keys/{id}','Revoke an API key. This action is permanent.',`
+<details open><summary>Path Parameters</summary><div>${paramTable([['id','string',true,'Key ID']],true)}</div></details>
+<details><summary>Response <span class="method-badge m-delete" style="font-size:11px">204</span></summary><div><p>No content returned on success.</p></div></details>
+${tryItForm('revoke-key','DELETE','/v1/keys/{id}',[{key:'id',label:'Key ID',def:'key_abc123'}])}`);
+
+// === MORE ===
+['webhooks','members','usage','billing','builds'].forEach(id=>{
+const name=id.charAt(0).toUpperCase()+id.slice(1);
+mainHTML+=`<div class="section" id="${id}"><h2>${name}</h2><p style="color:var(--text-muted)">The ${name} API follows standard REST conventions. Full documentation for this endpoint group is coming soon.</p>
+<div class="intro-card" style="margin-top:12px"><h4>Endpoints</h4><p>GET /v1/${id} &mdash; List all ${id}<br>POST /v1/${id} &mdash; Create<br>GET /v1/${id}/{id} &mdash; Get by ID<br>PUT /v1/${id}/{id} &mdash; Update<br>DELETE /v1/${id}/{id} &mdash; Delete</p></div></div>`;
+});
+
+document.getElementById('main').innerHTML=mainHTML;
+
+// Copy
+function copyCode(id){
+const el=document.getElementById(id);
+navigator.clipboard.writeText(el.textContent).then(()=>{
+const btn=el.parentElement.querySelector('.copy-btn');
+btn.textContent='Copied!';setTimeout(()=>btn.textContent='Copy',1500);
+});
+}
+
+// Try It
+function tryRequest(id,method,pathTpl,hasBody){
+const respDiv=document.getElementById('try-'+id+'-resp');
+const statusEl=document.getElementById('try-'+id+'-status');
+const timeEl=document.getElementById('try-'+id+'-time');
+const outEl=document.getElementById('try-'+id+'-out');
+// Build path
+let path=pathTpl;
+const inputs=document.querySelectorAll(`[id^="try-${id}-"]`);
+inputs.forEach(inp=>{
+if(inp.id.endsWith('-body')||inp.id.endsWith('-resp')||inp.id.endsWith('-status')||inp.id.endsWith('-time')||inp.id.endsWith('-out'))return;
+const key=inp.id.replace('try-'+id+'-','');
+if(key&&inp.value)path=path.replace('{'+key+'}',encodeURIComponent(inp.value));
+});
+// Query params for GET with extra fields
+let url=BASE+path;
+if(method==='GET'){
+const params=[];
+inputs.forEach(inp=>{
+if(inp.tagName!=='INPUT')return;
+const key=inp.id.replace('try-'+id+'-','');
+if(!key||!inp.value||path.includes(inp.value))return;
+if(!pathTpl.includes('{'+key+'}'))params.push(key+'='+encodeURIComponent(inp.value));
+});
+if(params.length)url+='?'+params.join('&');
+}
+const opts={method,headers:{'Content-Type':'application/json'}};
+if(hasBody){
+const bodyEl=document.getElementById('try-'+id+'-body');
+if(bodyEl&&bodyEl.value.trim())opts.body=bodyEl.value.trim();
+}
+respDiv.classList.add('visible');
+statusEl.textContent='Sending...';statusEl.className='try-status';
+timeEl.textContent='';outEl.textContent='';
+const t0=performance.now();
+fetch(url,opts).then(async r=>{
+const ms=Math.round(performance.now()-t0);
+const sc=r.status>=200&&r.status<300?'s2':r.status>=400&&r.status<500?'s4':'s5';
+statusEl.textContent=r.status+' '+r.statusText;statusEl.className='try-status '+sc;
+timeEl.textContent=ms+'ms';
+const text=await r.text();
+try{outEl.textContent=JSON.stringify(JSON.parse(text),null,2)}catch(e){outEl.textContent=text||'(empty response)'}
+}).catch(e=>{
+statusEl.textContent='Error';statusEl.className='try-status s5';
+outEl.textContent=e.message;
+});
+}
+
+// Sidebar active state on scroll
+const sections=document.querySelectorAll('.section');
+const navItems=document.querySelectorAll('.nav-item');
+const observer=new IntersectionObserver(entries=>{
+entries.forEach(e=>{
+if(e.isIntersecting){
+navItems.forEach(n=>n.classList.remove('active'));
+const active=document.querySelector(`.nav-item[data-id="${e.target.id}"]`);
+if(active){active.classList.add('active');active.scrollIntoView({block:'nearest',behavior:'smooth'})}
+}
+});
+},{rootMargin:'-20% 0px -70% 0px'});
+sections.forEach(s=>observer.observe(s));
+
+// Sidebar click closes mobile
+navItems.forEach(n=>n.addEventListener('click',()=>{
+document.querySelector('.sidebar').classList.remove('open');
+document.querySelector('.overlay').classList.remove('visible');
+}));
+</script>
+</body>
+</html>

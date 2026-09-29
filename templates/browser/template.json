@@ -1,0 +1,12 @@
+{
+  "name": "Browser",
+  "description": "Headless Chromium you watch and control in the browser, plus a Playwright/Puppeteer-connectable CDP endpoint for agents — lightweight computer-use, no VNC or desktop.",
+  "language": "node",
+  "icon": "🌐",
+  "tags": ["browser", "computer-use", "gui"],
+  "cpu": 2,
+  "memory_mb": 2048,
+  "storage_mb": 5120,
+  "port": 8000,
+  "visibility": "public"
+}

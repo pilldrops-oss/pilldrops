@@ -1,0 +1,8 @@
+{
+  "name": "browser-lab",
+  "private": true,
+  "dependencies": {
+    "@playwright/test": "^1.49.0",
+    "playwright": "^1.49.0"
+  }
+}

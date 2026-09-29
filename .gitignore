@@ -1,0 +1,95 @@
+# Build artifacts
+bin/
+*.ext4
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ...but the binaries embed the built dashboard (go:embed all:dist), so this one
+# dist/ is tracked.
+!internal/webui/dist/
+!internal/webui/dist/**
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific
+screenshots/
+.playwright-mcp/
+node_modules/
+# Loose images belong under docs/assets/ or web/, not the repo root
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+
+# Locally-built binaries (make targets build these to the repo root)
+/envd
+/sandboxd
+/sandboxd-fleet
+/pilldrops
+/orchestrator
+/agentd
+/gendocs
+/devserver
+/web/dist/
+# CLI-minted key store — holds owner IDs, never commit.
+cli_keys.json
+cli_keys.json.tmp
+
+# Coverage
+coverage.out
+*.coverprofile
+
+# Compiled binaries must never be tracked (unauditable in an OSS repo).
+/sandboxd
+/devserver
+/orchestrator
+/pilldrops
+/pilldrops-bench
+/gendocs
+
+# Playwright local run output
+test-results/
+
+# Subagent-driven-development scratch (ledger, briefs, review packages)
+.superpowers/
+
+# Agent worktrees and session state — 2.8GB of checkouts, never part of the source.
+.claude/
+
+# Internal security audits and phase runbooks. They carry live node IPs and
+# private-repo commands; they are working notes, not part of the public core.
+docs/security/
+docs/superpowers/
+
+# Local build binary (macOS)
+/sandforge
+
+# Real production env (use .env.production.example as a template)
+web/.env.production
+
+capability/
+
+# Accidental copies from a malformed rsync destination (rsync treats
+# "user@:path" with an empty host as a LOCAL directory).
+ubuntu@*/
+*@*:*/

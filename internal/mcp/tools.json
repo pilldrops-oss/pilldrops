@@ -1,0 +1,630 @@
+{
+  "add_domain": {
+    "properties": {
+      "host": {
+        "description": "hostname, e.g. app.example.com, or *.example.com for an org wildcard",
+        "type": "string"
+      },
+      "port": {
+        "description": "the sandbox port behind the host (default 8000)",
+        "type": "integer"
+      },
+      "sandbox_id": {
+        "description": "the sandbox to serve it (omit for a wildcard)",
+        "type": "string"
+      }
+    },
+    "required": [
+      "host"
+    ],
+    "type": "object"
+  },
+  "create_backup": {
+    "properties": {
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "create_sandbox": {
+    "properties": {
+      "env": {
+        "description": "environment variables, KEY=VAL",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "idle_seconds": {
+        "description": "idle auto-pause; -1 = never pause (always-on servers)",
+        "type": "integer"
+      },
+      "image": {
+        "description": "custom docker image instead of a template",
+        "type": "string"
+      },
+      "memory_mb": {
+        "description": "memory MB (0 = template default)",
+        "type": "integer"
+      },
+      "networks": {
+        "description": "opt-in network tags. Sandboxes cannot reach each other by default; two in the same org on the same node reach each other only if they share a tag, and resolve each other as \u003cslug\u003e.pd",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "ports": {
+        "description": "preview ports (app must bind $PORT)",
+        "items": {
+          "type": "integer"
+        },
+        "type": "array"
+      },
+      "public": {
+        "description": "make the preview URL reachable without a token (shareable link); default false = private",
+        "type": "boolean"
+      },
+      "runtime": {
+        "description": "pin isolation runtime: firecracker | docker (omit = auto)",
+        "type": "string"
+      },
+      "slug": {
+        "description": "DNS label this sandbox is hosted and resolved under; also its name on a network tag (\u003cslug\u003e.pd)",
+        "type": "string"
+      },
+      "start": {
+        "description": "long-lived app/server command; makes the sandbox serve a preview URL",
+        "type": "string"
+      },
+      "storage_mb": {
+        "description": "disk MB (0 = template default)",
+        "type": "integer"
+      },
+      "template": {
+        "description": "template id (see list_templates); default python-3.11",
+        "type": "string"
+      },
+      "timeout_seconds": {
+        "description": "sandbox lifetime (0 = plan default)",
+        "type": "integer"
+      },
+      "vcpu": {
+        "description": "vCPUs (0 = template default)",
+        "type": "integer"
+      }
+    },
+    "type": "object"
+  },
+  "delete_saved_state": {
+    "properties": {
+      "backup": {
+        "description": "a backup id (durable off-node copy)",
+        "type": "string"
+      },
+      "checkpoint": {
+        "description": "a checkpoint name (on-node save point)",
+        "type": "string"
+      },
+      "confirm": {
+        "description": "must be true; without it nothing happens",
+        "type": "boolean"
+      },
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id",
+      "confirm"
+    ],
+    "type": "object"
+  },
+  "delete_secret": {
+    "properties": {
+      "name": {
+        "description": "secret name (see list_secrets)",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "type": "object"
+  },
+  "delete_snapshot": {
+    "properties": {
+      "confirm": {
+        "description": "must be true; without it nothing happens",
+        "type": "boolean"
+      },
+      "name": {
+        "description": "snapshot name (see list_snapshots)",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "confirm"
+    ],
+    "type": "object"
+  },
+  "destroy_sandbox": {
+    "properties": {
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "fork_sandbox": {
+    "properties": {
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "forward_port": {
+    "properties": {
+      "port": {
+        "description": "the port inside the sandbox to publish",
+        "type": "integer"
+      },
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      },
+      "udp": {
+        "description": "also forward UDP (Firecracker only; default TCP only)",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "sandbox_id",
+      "port"
+    ],
+    "type": "object"
+  },
+  "get_events": {
+    "properties": {
+      "sandbox_id": {
+        "description": "optional: only this sandbox's events",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "get_logs": {
+    "properties": {
+      "limit": {
+        "description": "max lines (default 500)",
+        "type": "integer"
+      },
+      "sandbox_id": {
+        "description": "sandbox id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "get_metrics": {
+    "properties": {
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "get_sandbox": {
+    "properties": {
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "get_usage": {
+    "properties": {},
+    "type": "object"
+  },
+  "list_domains": {
+    "properties": {},
+    "type": "object"
+  },
+  "list_files": {
+    "properties": {
+      "path": {
+        "description": "directory relative to the workspace root (default the root)",
+        "type": "string"
+      },
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "list_port_forwards": {
+    "properties": {
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "list_sandboxes": {
+    "properties": {},
+    "type": "object"
+  },
+  "list_saved_states": {
+    "properties": {
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "list_secrets": {
+    "properties": {},
+    "type": "object"
+  },
+  "list_snapshots": {
+    "properties": {
+      "name": {
+        "description": "optional: one snapshot's detail and versions",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "list_templates": {
+    "properties": {},
+    "type": "object"
+  },
+  "pause_sandbox": {
+    "properties": {
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "put_secret": {
+    "properties": {
+      "auto_inject": {
+        "description": "inject into every new sandbox in the org (default false)",
+        "type": "boolean"
+      },
+      "name": {
+        "description": "env-style name, e.g. OPENAI_API_KEY",
+        "type": "string"
+      },
+      "value": {
+        "description": "the secret value",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "value"
+    ],
+    "type": "object"
+  },
+  "read_file": {
+    "properties": {
+      "path": {
+        "description": "file path relative to the workspace",
+        "type": "string"
+      },
+      "sandbox_id": {
+        "description": "sandbox id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id",
+      "path"
+    ],
+    "type": "object"
+  },
+  "remove_domain": {
+    "properties": {
+      "host": {
+        "description": "hostname to detach (see list_domains)",
+        "type": "string"
+      }
+    },
+    "required": [
+      "host"
+    ],
+    "type": "object"
+  },
+  "remove_port_forward": {
+    "properties": {
+      "port": {
+        "description": "the sandbox port to stop publishing",
+        "type": "integer"
+      },
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id",
+      "port"
+    ],
+    "type": "object"
+  },
+  "renew_sandbox": {
+    "properties": {
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      },
+      "timeout_seconds": {
+        "description": "new hard lifetime in seconds; -1 = never expire. Omit to just reset the idle clock",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "restore_sandbox": {
+    "properties": {
+      "backup": {
+        "description": "a backup id (durable off-node copy)",
+        "type": "string"
+      },
+      "checkpoint": {
+        "description": "a checkpoint name (on-node save point)",
+        "type": "string"
+      },
+      "confirm": {
+        "description": "must be true; without it nothing happens",
+        "type": "boolean"
+      },
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id",
+      "confirm"
+    ],
+    "type": "object"
+  },
+  "resume_sandbox": {
+    "properties": {
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "run_command": {
+    "properties": {
+      "cmd": {
+        "description": "shell command to run",
+        "type": "string"
+      },
+      "cwd": {
+        "description": "working directory (default workspace root)",
+        "type": "string"
+      },
+      "sandbox_id": {
+        "description": "sandbox id",
+        "type": "string"
+      },
+      "timeout_seconds": {
+        "description": "command timeout (default 60)",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "sandbox_id",
+      "cmd"
+    ],
+    "type": "object"
+  },
+  "save_checkpoint": {
+    "properties": {
+      "name": {
+        "description": "checkpoint name, e.g. before-migration",
+        "type": "string"
+      },
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id",
+      "name"
+    ],
+    "type": "object"
+  },
+  "save_snapshot": {
+    "properties": {
+      "name": {
+        "description": "snapshot name, reused as a template id",
+        "type": "string"
+      },
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id",
+      "name"
+    ],
+    "type": "object"
+  },
+  "set_backup_schedule": {
+    "properties": {
+      "cron": {
+        "description": "5-field cron expression instead of period",
+        "type": "string"
+      },
+      "period": {
+        "description": "duration between backups, e.g. 24h; or \"off\" to remove the schedule",
+        "type": "string"
+      },
+      "retention": {
+        "description": "how long backups are kept, e.g. 7d (needs a period)",
+        "type": "string"
+      },
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "set_networks": {
+    "properties": {
+      "networks": {
+        "description": "the tags the sandbox should be on; [] removes it from every network",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "sandbox_id": {
+        "description": "sandbox id or slug",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "standby_sandbox": {
+    "properties": {
+      "sandbox_id": {
+        "description": "sandbox id, e.g. sb_ab12cd",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "start_server": {
+    "properties": {
+      "cmd": {
+        "description": "server command, e.g. `python /app/main.py`",
+        "type": "string"
+      },
+      "port": {
+        "description": "port the app listens on (0 = the sandbox default)",
+        "type": "integer"
+      },
+      "sandbox_id": {
+        "description": "sandbox id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id",
+      "cmd"
+    ],
+    "type": "object"
+  },
+  "wait_ready": {
+    "properties": {
+      "port": {
+        "description": "app port (default 8000)",
+        "type": "integer"
+      },
+      "sandbox_id": {
+        "description": "sandbox id",
+        "type": "string"
+      },
+      "timeout_seconds": {
+        "description": "max seconds to wait (default 30)",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "write_file": {
+    "properties": {
+      "content": {
+        "description": "full file content",
+        "type": "string"
+      },
+      "path": {
+        "description": "file path relative to the workspace, e.g. app/main.py",
+        "type": "string"
+      },
+      "sandbox_id": {
+        "description": "sandbox id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sandbox_id",
+      "path",
+      "content"
+    ],
+    "type": "object"
+  }
+}

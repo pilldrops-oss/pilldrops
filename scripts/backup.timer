@@ -1,0 +1,16 @@
+[Unit]
+Description=Daily sandboxd metadata backup
+Documentation=https://github.com/pilldrops-oss/pilldrops/blob/main/docs/deployment.md
+
+[Timer]
+OnCalendar=daily
+# Spread a fleet's dumps so they do not all hit the database at 00:00.
+RandomizedDelaySec=1h
+# A node that was off at the scheduled time still gets its dump on boot,
+# which is the case that matters: a machine that has been down is the one
+# whose last state you want.
+Persistent=true
+Unit=sandboxd-backup.service
+
+[Install]
+WantedBy=timers.target

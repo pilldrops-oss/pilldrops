@@ -1,0 +1,21 @@
+{
+  "description": "Analyze sales data with pandas and produce summary statistics",
+  "files": [
+    {
+      "path": "data.csv",
+      "content": "date,product,quantity,price,region\n2026-01-05,Widget A,10,29.99,North\n2026-01-05,Widget B,5,49.99,South\n2026-01-12,Widget A,15,29.99,East\n2026-01-12,Widget C,8,19.99,North\n2026-01-19,Widget B,12,49.99,West\n2026-01-19,Widget A,20,29.99,South\n2026-01-26,Widget C,25,19.99,East\n2026-02-02,Widget A,18,29.99,North\n2026-02-02,Widget B,7,49.99,East\n2026-02-09,Widget C,30,19.99,West\n2026-02-09,Widget A,22,29.99,South\n2026-02-16,Widget B,15,49.99,North\n2026-02-16,Widget C,10,19.99,South\n2026-02-23,Widget A,25,29.99,West\n2026-03-01,Widget B,20,49.99,East\n2026-03-01,Widget C,35,19.99,North\n2026-03-08,Widget A,30,29.99,South\n2026-03-08,Widget B,18,49.99,West\n2026-03-15,Widget C,15,19.99,East\n2026-03-15,Widget A,28,29.99,North"
+    },
+    {
+      "path": "analyze.py",
+      "content": "import pandas as pd\nimport json\n\ndf = pd.read_csv('data.csv')\ndf['revenue'] = df['quantity'] * df['price']\ndf['date'] = pd.to_datetime(df['date'])\n\nprint('=' * 60)\nprint('SALES DATA ANALYSIS')\nprint('=' * 60)\n\nprint(f'\\nTotal records: {len(df)}')\nprint(f'Date range: {df.date.min().date()} to {df.date.max().date()}')\nprint(f'Total revenue: ${df.revenue.sum():,.2f}')\nprint(f'Total units sold: {df.quantity.sum()}')\n\nprint('\\n--- Revenue by Product ---')\nby_product = df.groupby('product').agg(\n    total_revenue=('revenue', 'sum'),\n    total_units=('quantity', 'sum'),\n    avg_price=('price', 'mean')\n).sort_values('total_revenue', ascending=False)\nprint(by_product.to_string())\n\nprint('\\n--- Revenue by Region ---')\nby_region = df.groupby('region').agg(\n    total_revenue=('revenue', 'sum'),\n    total_units=('quantity', 'sum'),\n    orders=('quantity', 'count')\n).sort_values('total_revenue', ascending=False)\nprint(by_region.to_string())\n\nprint('\\n--- Monthly Trend ---')\ndf['month'] = df.date.dt.to_period('M')\nby_month = df.groupby('month').revenue.sum()\nfor month, rev in by_month.items():\n    bar = '#' * int(rev / 50)\n    print(f'  {month}: ${rev:>8,.2f} {bar}')\n\nresult = {\n    'total_revenue': round(df.revenue.sum(), 2),\n    'total_units': int(df.quantity.sum()),\n    'top_product': by_product.index[0],\n    'top_region': by_region.index[0],\n    'records': len(df)\n}\nprint(f'\\nJSON: {json.dumps(result)}')\n"
+    },
+    {
+      "path": "requirements.txt",
+      "content": "pandas"
+    }
+  ],
+  "setup_commands": [
+    "pip3 install -q pandas"
+  ],
+  "run_command": "python3 analyze.py"
+}

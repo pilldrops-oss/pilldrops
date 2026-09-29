@@ -1,0 +1,99 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/pilldrops-oss/pilldrops/internal/runtime/process"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox/daemon"
+	"github.com/pilldrops-oss/pilldrops/internal/store"
+)
+
+// TestFleetSmokeDeployPreviewNoDashboard mirrors cmd/sandboxd's smoke test
+// and additionally asserts the dashboard routes 404.
+func TestFleetSmokeDeployPreviewNoDashboard(t *testing.T) {
+	// Preview is fail-closed without a secret; nodeboot.NewNodeAPI reads this one.
+	t.Setenv("PREVIEW_SECRET", "smoke-test-preview-secret")
+
+	dir := t.TempDir()
+	st, _ := store.Open(t.Context(), filepath.Join(dir, "s.db"))
+	defer st.Close()
+	_, key, _ := st.CreateKey(t.Context(), "smoke", "default")
+	d := daemon.New(daemon.Config{
+		Runtime:     process.New(filepath.Join(dir, "sb")),
+		Store:       daemon.StoreAdapter{S: st},
+		SnapshotDir: filepath.Join(dir, "snap"),
+		IdleTimeout: time.Hour, HardTTL: time.Hour,
+	})
+	t.Cleanup(func() { d.Shutdown(context.Background()) })
+	srv := httptest.NewServer(buildHandler(t.Context(), d, st, dir, "", "", "", true))
+	defer srv.Close()
+
+	app := "import os\n" +
+		"from http.server import HTTPServer,BaseHTTPRequestHandler\n" +
+		"class H(BaseHTTPRequestHandler):\n" +
+		"  def do_GET(s):\n" +
+		"    s.send_response(200); s.end_headers(); s.wfile.write(b'live')\n" +
+		"HTTPServer(('127.0.0.1',int(os.environ['PORT'])),H).serve_forever()\n"
+	body, _ := json.Marshal(map[string]any{
+		"template": "python-3.11",
+		"files":    []map[string]string{{"path": "app.py", "content": app}},
+		"start":    "python3 app.py",
+		"port":     8000,
+	})
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/sandboxes", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+key)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	if resp.StatusCode != 201 {
+		t.Fatalf("create: code=%d", resp.StatusCode)
+	}
+	var created map[string]any
+	json.NewDecoder(resp.Body).Decode(&created)
+	id, _ := created["id"].(string)
+	if id == "" {
+		t.Fatalf("create response has no id: %v", created)
+	}
+	// app_url already carries the org-bound ?ptok= the preview gate requires.
+	previewURL, _ := created["app_url"].(string)
+	if previewURL == "" {
+		t.Fatalf("create response has no app_url (expected a ?ptok=-bearing preview link): %v", created)
+	}
+
+	var got string
+	for i := 0; i < 50; i++ {
+		r, err := http.Get(previewURL)
+		if err == nil {
+			b, _ := io.ReadAll(r.Body)
+			r.Body.Close()
+			got = string(b)
+			if got == "live" {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if got != "live" {
+		t.Fatalf("preview body = %q, want live", got)
+	}
+
+	for _, path := range []string{"/dashboard", "/"} {
+		r, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		r.Body.Close()
+		if r.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404 (fleet binary must not serve UI)", path, r.StatusCode)
+		}
+	}
+}

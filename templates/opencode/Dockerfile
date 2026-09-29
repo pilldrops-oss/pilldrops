@@ -1,0 +1,11 @@
+FROM node:20-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g opencode-ai@1.18.15
+
+WORKDIR /root
+
+# The envd binary and overlay-init are injected by build-template.sh

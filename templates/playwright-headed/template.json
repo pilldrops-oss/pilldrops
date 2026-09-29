@@ -1,0 +1,15 @@
+{
+  "name": "Playwright Headed",
+  "description": "Watch Playwright tests live (noVNC) + recordings at /recordings/ — pwtest and pwrecord run headed on the sandbox desktop",
+  "language": "node",
+  "icon": "pw",
+  "tags": ["browser", "testing", "recording", "gui"],
+  "cpu": 2,
+  "memory_mb": 2048,
+  "storage_mb": 5120,
+  "port": 6080,
+  "visibility": "public",
+  "kind": "test",
+  "outcome": "screen",
+  "primary_input": { "type": "tests", "label": "Tests — repo, zip or a spec file (demo suite included)" }
+}

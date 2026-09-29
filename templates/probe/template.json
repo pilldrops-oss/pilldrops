@@ -1,0 +1,13 @@
+{
+  "name": "Security probe",
+  "description": "Network and containment probe image for scripts/security-suite.sh. Not a user-facing template — it ships the tools (ping, nc, socat, ip) that a reachability probe needs in order to fail honestly.",
+  "language": "shell",
+  "icon": "sp",
+  "tags": ["internal", "security", "probe"],
+  "cpu": 1,
+  "memory_mb": 512,
+  "storage_mb": 1024,
+  "visibility": "private",
+  "kind": "shell",
+  "outcome": "terminal"
+}

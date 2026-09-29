@@ -1,0 +1,12 @@
+{
+  "name": "Docker",
+  "description": "A VM with Docker Engine, Compose and Buildx — the daemon is already running, so `docker run -p 8000:80` goes live on the preview URL",
+  "language": "shell",
+  "icon": "dk",
+  "tags": ["docker", "compose", "buildx", "containers"],
+  "cpu": 2,
+  "memory_mb": 2048,
+  "storage_mb": 20480,
+  "port": 8000,
+  "visibility": "public"
+}

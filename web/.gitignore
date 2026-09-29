@@ -1,0 +1,6 @@
+node_modules/
+dist/
+# pnpm-lock.yaml is the canonical lockfile (Makefile's `web` target uses
+# `pnpm install`); an npm-generated package-lock.json can silently resolve
+# different transitive versions (e.g. @clerk/react) and must never be committed.
+package-lock.json

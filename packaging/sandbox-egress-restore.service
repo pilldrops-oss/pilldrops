@@ -1,0 +1,77 @@
+# sandbox-egress-restore.service — restores the egress iptables rules
+# (FORWARD DROPs for Firecracker, DOCKER-USER DROPs for Docker) from
+# /etc/iptables/rules.v4 on every boot, BEFORE sandboxd starts.
+#
+# Why this exists (C3/H1 fast-follow): iptables rules live in the kernel only
+# and are lost on reboot. scripts/setup-host.sh and scripts/setup-docker-egress.sh
+# write the current ruleset to /etc/iptables/rules.v4 (`iptables-save`) after
+# applying it; this unit runs `iptables-restore` from that file so sandboxes
+# can't get a boot-time window with no egress isolation.
+#
+# This file is the source of truth for the unit content. A provisioner that
+# writes the unit inline (because it runs standalone and cannot read this repo)
+# must be kept in sync with it.
+#
+# Enable it with `systemctl enable sandbox-egress-restore.service`, next to the
+# sandboxd unit install and WITHOUT a `|| true`: a node whose restore unit is
+# missing must fail to start, not start without a boundary.
+#
+# ── How this fails, and why it fails that way ────────────────────────────────
+#
+# The first version of this unit was installed behind a swallowed `|| true` and
+# depended on by nothing. On the reference node it was never installed at all,
+# and the node rebooted straight into serving tenants with `-P FORWARD ACCEPT`
+# and no DROP rules — for days, with no signal anywhere. Presence of a unit file
+# in a repo is not a control. So:
+#
+#   1. sandboxd.service declares `Requires=` + `After=` on this unit. If this
+#      unit is MISSING, sandboxd refuses to start ("Unit ... not found") rather
+#      than starting unprotected. If this unit FAILS, sandboxd is not started.
+#      Either way the node is loudly broken instead of quietly open.
+#   2. ExecStartPre refuses to restore a rules.v4 that is missing, empty, or
+#      does not actually contain the metadata DROP — a snapshot taken before
+#      setup-host.sh ran would otherwise "restore" successfully to nothing.
+#   3. ExecStartPost re-reads the live ruleset. `iptables-restore` exiting 0 is
+#      not proof the kernel took the rules.
+#
+# The deep check (all five DROP families, and their ORDERING) belongs to
+# sandboxd's own boot preflight, which runs verify-egress.sh after this unit and
+# fails closed on its own. This unit deliberately only asserts the cheap
+# invariant it is directly responsible for.
+[Unit]
+Description=Restore sandbox egress iptables rules
+Before=sandboxd.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# NOTE: no `-` prefix on any of these. A leading `-` tells systemd to ignore the
+# exit status, which is the systemd spelling of `|| true` and would reintroduce
+# exactly the failure this unit exists to prevent.
+ExecStartPre=/bin/sh -c 'test -s /etc/iptables/rules.v4 || { echo "no saved ruleset at /etc/iptables/rules.v4 — run scripts/setup-host.sh (Firecracker) or scripts/setup-docker-egress.sh (Docker)" >&2; exit 1; }'
+ExecStartPre=/bin/sh -c 'grep -q "169.254.0.0/16 -j DROP" /etc/iptables/rules.v4 || { echo "/etc/iptables/rules.v4 has no metadata DROP — it was saved before the egress rules were applied; restoring it would be a no-op that looks like success" >&2; exit 1; }'
+ExecStart=/usr/sbin/iptables-restore /etc/iptables/rules.v4
+# The IPv6 backstop (setup-docker-egress.sh), restored on hosts that have one.
+# `if` rather than a `-` prefix or `|| true`: absent file is a legitimate state
+# and exits 0, but a restore that genuinely FAILS still fails the unit — which
+# is the distinction the note above is about.
+ExecStart=/bin/sh -c 'if [ -s /etc/iptables/rules.v6 ]; then /usr/sbin/ip6tables-restore /etc/iptables/rules.v6; fi'
+ExecStartPost=/bin/sh -c '/usr/sbin/iptables -S | grep -q "169.254.0.0/16 -j DROP" || { echo "iptables-restore exited 0 but the metadata DROP is not in the live ruleset" >&2; exit 1; }'
+# The rules are not the only host state a reboot destroys. `ip link add fcbr0
+# type bridge` is kernel state too, and on the reference host the first clean
+# reboot came back with every DROP rule correctly restored and no fcbr0 — a NAT
+# MASQUERADE and a full FORWARD ruleset for an interface that did not exist.
+# setup-host.sh is idempotent (guarded -C inserts, delete-then-reinsert for the
+# ordered INPUT pair) and re-saves rules.v4, so re-running it here is a
+# reconcile, not a re-apply.
+#
+# Absent on a Docker-only node, where there is no bridge to rebuild — that skip
+# is safe and is NOT the silent kind: if the script is missing on a host that
+# does need it, sandboxd's Firecracker preflight fails the node closed on the
+# very next line of the boot with "bridge fcbr0 not found".
+ExecStartPost=/bin/sh -c 'if [ -x /opt/pilldrops/bin/setup-host.sh ]; then /opt/pilldrops/bin/setup-host.sh; fi'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

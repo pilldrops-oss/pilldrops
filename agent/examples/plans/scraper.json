@@ -1,0 +1,17 @@
+{
+  "description": "Scrape Hacker News front page and display top stories",
+  "files": [
+    {
+      "path": "scraper.py",
+      "content": "import requests\nfrom bs4 import BeautifulSoup\nimport json\n\nprint('Scraping Hacker News...')\nr = requests.get('https://news.ycombinator.com', timeout=10)\nsoup = BeautifulSoup(r.text, 'html.parser')\n\nstories = []\nfor item in soup.select('.titleline > a')[:10]:\n    stories.append({'title': item.text, 'url': item.get('href', '')})\n\nprint(f'\\nTop {len(stories)} Stories:')\nprint('=' * 60)\nfor i, s in enumerate(stories, 1):\n    print(f\"{i:2}. {s['title']}\")\n    if s['url'].startswith('http'):\n        print(f\"    {s['url']}\")\n\nprint(f'\\n{json.dumps(stories, indent=2)}')\n"
+    },
+    {
+      "path": "requirements.txt",
+      "content": "requests\nbeautifulsoup4"
+    }
+  ],
+  "setup_commands": [
+    "pip3 install -q -r requirements.txt"
+  ],
+  "run_command": "python3 scraper.py"
+}

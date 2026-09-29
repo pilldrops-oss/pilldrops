@@ -1,0 +1,94 @@
+# gitleaks configuration for the CI secret-scan gate.
+#
+# Extends the default ruleset. The allowlists below suppress matches that are
+# benign BY VALUE, not by location.
+#
+# ── why there is no `*_test.go` path allowlist ──────────────────────────────
+#
+# There used to be. `paths` carried '''.*_test\.go$''', '''.*\.test\.ts$''' and
+# '''tests/''', on the sound-sounding grounds that redaction and build-log
+# scrubbing tests carry deliberately-fake secrets. The consequence was that a
+# REAL secret committed in any _test.go file, or anywhere under tests/, was
+# invisible to this gate — and "gitleaks: no leaks found" was reported as
+# evidence the tree was clean. It only ever meant the tree was clean outside
+# the several hundred files nobody was looking at.
+#
+# A path allowlist answers "where is it?". The question that matters is "is
+# this a real credential?". So the fixtures are allowlisted by what they
+# contain: obviously-synthetic filler, and a short list of exact literals for
+# the handful that look plausible.
+#
+# Adding a new fixture secret to a test may require adding a pattern here. That
+# friction is the feature: it is a visible line in a diff, reviewed once, and it
+# cannot silently widen to cover a file's whole contents.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Paths whose contents are public or not ours by construction."
+paths = [
+  # Third-party vendored code (e.g. modernc.org/sqlite C blobs) — not ours.
+  '''vendor/''',
+  # API documentation shows example `Authorization: Bearer <key>` curl commands.
+  '''.*docs\.html$''',
+  '''docs/.*\.html$''',
+  # Built dashboard bundles embed the Clerk PUBLISHABLE key (public by design).
+  '''internal/webui/dist/''',
+  # Vite env holding only the public Clerk publishable key.
+  '''web/\.env\.production$''',
+  # Vendored, minified xterm.js — third-party and not ours, same category as
+  # vendor/ above. Minified JS reliably trips generic-api-key: the match here
+  # is `t.FourKeyMap=t.TwoKeyMap=void`, which is a variable assignment. Scoped
+  # to the vendored asset directory rather than to *.js anywhere, so our own
+  # JavaScript is still scanned.
+  '''cmd/envd/assets/''',
+]
+
+[[allowlists]]
+description = "Synthetic fixture values — allowed anywhere, by what they are rather than where they live."
+# regexTarget defaults to the captured secret, which is what we want: these
+# match the credential itself, not the surrounding line, so a real secret on a
+# line that happens to mention "example" is not swept in with them.
+regexes = [
+  # Self-describing placeholders.
+  '''(?i)(shouldnotleak|donotuse|notreal|placeholder|changeme|secretkeymaterialhere|examplekey|dummy|fakesecret)''',
+  # Monotonic alphabet/digit filler: abcdefgh…, abcdef1234567890, AbCdEfGh…
+  '''(?i)abcdef(gh|1234567890)''',
+  '''(?i)abcdefgh12345678ijkl''',
+  # Repeating hex ramps used as fixed-length key fixtures.
+  '''0123456789abcdef''',
+  '''00112233445566778899aabbccddeeff''',
+  # The jwt.io sample token (payload is {"sub":"1234567890"}).
+  '''eyJzdWIiOiIxMjM0NTY3ODkwIn0''',
+  # RFC 6455 §1.3's example Sec-WebSocket-Key ("the sample nonce" in base64).
+  '''^dGhlIHNhbXBsZSBub25jZQ==$''',
+  # A build-log scrubbing fixture with no synthetic marker in it. Pinned as an
+  # exact literal on purpose: an exact value can never hide a different secret,
+  # whereas a "32 hex chars in a test file" rule would re-open the hole for
+  # every real 32-hex key.
+  '''^8f3b2c1d9e0a7b6c5d4e3f2a1b0c9d8e$''',
+]
+
+[[allowlists]]
+description = "The terminal-auth probe's curl line — a localhost URL with no credential in it."
+# By REGEX on the match, not by path. security-suite.sh legitimately contains
+# credentials elsewhere (it authenticates to a node), so allowlisting the whole
+# file would blind the scanner to a real key pasted into it later. This pins the
+# one line that trips `curl-auth-header`: a request to 127.0.0.1 carrying no
+# Authorization header at all — the rule fires on the curl shape, not on a
+# secret. Added 2026-09-01 with the :7681 terminal probe (task P1-e).
+regexTarget = "line"
+regexes = [
+  '''curl -s -o /dev/null -w '%\{http_code\}' -m 6 http://127\.0\.0\.1:\$\{TERM_PORT\}/ws''',
+]
+
+[[rules]]
+# Clerk publishable keys (pk_live_/pk_test_) are public by design — they are
+# meant to ship in client bundles — so they are never a leak here.
+id = "clerk-publishable-key-allow"
+description = "Allow Clerk publishable keys (public by design)"
+regex = '''pk_(live|test)_[A-Za-z0-9]+'''
+keywords = ["pk_live_", "pk_test_"]
+[rules.allowlist]
+regexTarget = "match"
+regexes = ['''pk_(live|test)_[A-Za-z0-9]+''']

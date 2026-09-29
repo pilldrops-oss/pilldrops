@@ -1,0 +1,97 @@
+#!/bin/sh
+# pdload — run a load test from this sandbox and publish the report on the
+# preview URL.
+#
+#   pdload https://api.example.com/health        # ramp to 10 VUs for 30s
+#   pdload https://api.example.com --vus 50 --duration 60s
+#   pdload --script ./my-k6-script.js            # your own k6 script, verbatim
+#
+# Exit code is k6's: 0 when every threshold passed (GREEN), non-zero when one
+# failed (RED). Results land in /root/loadtest, which the preview port serves.
+#
+# You must own the target, or have written authorisation to test it. Load
+# testing infrastructure you don't control is an attack, not a benchmark.
+set -e
+
+OUT=/root/loadtest
+URL=""
+SCRIPT=""
+VUS=10
+DURATION=30s
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --script) SCRIPT="$2"; shift 2 ;;
+    --vus) VUS="$2"; shift 2 ;;
+    --duration) DURATION="$2"; shift 2 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "pdload: unknown flag $1" >&2; exit 2 ;;
+    *) URL="$1"; shift ;;
+  esac
+done
+
+mkdir -p "$OUT"
+
+if [ -n "$SCRIPT" ]; then
+  [ -f "$SCRIPT" ] || { echo "pdload: script not found: $SCRIPT" >&2; exit 2; }
+  RUN_SCRIPT="$SCRIPT"
+  TARGET="(script: $SCRIPT)"
+elif [ -n "$URL" ]; then
+  case "$URL" in
+    http://*|https://*) ;;
+    *) echo "pdload: target must start with http:// or https://" >&2; exit 2 ;;
+  esac
+  TARGET="$URL"
+  RUN_SCRIPT="$OUT/script.js"
+  # Generated scenario: ramp to $VUS, hold, then wind down. Thresholds define
+  # the verdict — under 1% failures and p95 under 2s passes.
+  cat > "$RUN_SCRIPT" <<EOF
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+
+export const options = {
+  stages: [
+    { duration: '5s', target: ${VUS} },
+    { duration: '${DURATION}', target: ${VUS} },
+    { duration: '5s', target: 0 },
+  ],
+  thresholds: {
+    http_req_failed: ['rate<0.01'],
+    http_req_duration: ['p(95)<2000'],
+  },
+};
+
+export default function () {
+  const res = http.get('${URL}');
+  check(res, { 'status is 2xx/3xx': (r) => r.status >= 200 && r.status < 400 });
+  sleep(1);
+}
+EOF
+else
+  echo "pdload: give a URL or --script. See pdload --help." >&2
+  exit 2
+fi
+
+echo "▸ target:   $TARGET"
+echo "▸ scenario: ${VUS} VUs · ${DURATION} hold · thresholds p95<2000ms, errors<1%"
+echo "▸ you must own this target or be authorised to test it."
+echo ""
+
+set +e
+# Capture k6's own exit status, not tee's: piping through tee would always
+# report success and make every run GREEN. /bin/sh here is dash, which has no
+# pipefail, so the status goes through a file while output still streams live.
+RCFILE=$(mktemp)
+{ k6 run --summary-export "$OUT/summary.json" "$RUN_SCRIPT" 2>&1; echo $? > "$RCFILE"; } | tee "$OUT/run.log"
+RC=$(cat "$RCFILE" 2>/dev/null || echo 1)
+rm -f "$RCFILE"
+set -e
+
+VERDICT=RED
+[ "$RC" -eq 0 ] && VERDICT=GREEN
+pd-report "$OUT/summary.json" "$OUT/index.html" "$TARGET" "$VERDICT" "$VUS" "$DURATION" || true
+
+echo ""
+echo "verdict: $VERDICT (exit $RC)"
+echo "report on the preview port: index.html · summary.json · run.log"
+exit $RC

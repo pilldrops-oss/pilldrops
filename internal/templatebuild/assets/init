@@ -1,0 +1,34 @@
+#!/bin/sh
+# The guest's PID 1, written into every template by both build paths:
+# internal/templatebuild (the node's build API) embeds this file, and
+# scripts/build-template.sh reads the same one for in-tree templates, so a
+# sandbox boots identically whichever built its rootfs.
+#
+# Lines carrying an __INTREE_ONLY__ marker, and the placeholder line below the
+# envd start, belong to the in-tree build alone; templatebuild drops both,
+# because an image converted through the API carries neither of the binaries
+# they name.
+#
+# envd propagates its own environment to exec'd commands, so init loads the
+# Docker image's ENV first — the VM boots via /sbin/init, not Docker, so
+# Config.Env is otherwise lost and the sandbox loses the template's toolchain.
+set -a
+[ -f /etc/sandbox-env ] && . /etc/sandbox-env
+set +a
+# The guest gets a static IP but no DNS resolver; without this every hostname
+# lookup fails (Chromium "DNS_PROBE_STARTED", npm/pip/git/curl all break).
+printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /etc/resolv.conf 2>/dev/null
+# Docker injects /etc/hosts at container runtime too, so the baked rootfs ships
+# an empty one; "localhost" then falls through to DNS and hangs anything that
+# dials it (websockify -> x11vnc, dev servers, DB clients).
+printf '127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\n' > /etc/hosts 2>/dev/null
+# A container daemon refuses to start without a cgroup hierarchy; nothing else
+# in the guest mounts one. Harmless for a template that never runs containers.
+mkdir -p /sys/fs/cgroup
+mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null
+# Optional persistent template app (backgrounded so init stays alive). # __INTREE_ONLY__
+[ -x /usr/local/bin/start.sh ] && /usr/local/bin/start.sh >/var/log/start.log 2>&1 & # __INTREE_ONLY__
+# Start envd in background, then keep init (PID 1) alive.
+/usr/local/bin/envd &
+__AGENTD__
+exec sleep infinity
