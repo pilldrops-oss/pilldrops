@@ -1,7 +1,9 @@
 # Documentation
 
-The [README](../README.md) covers what PillDrops is, its architecture and a
-quick start. These go further.
+The [README](../README.md) covers what PillDrops does and a quick start. These
+go further. [`architecture.md`](architecture.md) explains how it is built: the
+tiers and their credentials, a request end to end, how a paused sandbox
+outlives its node, and the repository layout.
 
 ## Using it
 
