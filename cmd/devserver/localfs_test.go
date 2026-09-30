@@ -181,3 +181,47 @@ func TestLocalFS_CrossOwner404(t *testing.T) {
 		t.Fatalf("alice's mkdir did not create alicedir: %v", err)
 	}
 }
+
+// A symlink the sandbox creates must not become a way out of the workspace,
+// for reads, listings, or writes through a dangling link.
+func TestLocalFS_SymlinksCannotEscape(t *testing.T) {
+	mgr, workDir := newTestDevManager(t, "sb-1", "u:a")
+	r := localFSRouter(mgr, "u:a")
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret"), []byte("host"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, target := range map[string]string{
+		"file": filepath.Join(outside, "secret"), "dir": outside, "dangling": filepath.Join(outside, "new"),
+		"inside": filepath.Join(workDir, "real.txt"),
+	} {
+		if err := os.Symlink(target, filepath.Join(workDir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "real.txt"), []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	do := func(method, path, body string) int {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return w.Code
+	}
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/v1/sandboxes/sb-1/files?path=file"},
+		{"GET", "/v1/sandboxes/sb-1/files?path=dir/secret"},
+		{"GET", "/v1/sandboxes/sb-1/filesystem/list?path=dir"},
+		{"POST", "/v1/sandboxes/sb-1/files?path=dangling"},
+		{"POST", "/v1/sandboxes/sb-1/files?path=dir/planted"},
+	} {
+		if got := do(c.method, c.path, "x"); got != http.StatusBadRequest {
+			t.Errorf("%s %s = %d, want 400", c.method, c.path, got)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(outside, "new")); err == nil {
+		t.Fatal("a write through the dangling link created a file outside the workspace")
+	}
+	if got := do("GET", "/v1/sandboxes/sb-1/files?path=inside", ""); got != http.StatusOK {
+		t.Errorf("a link to a file inside the workspace = %d, want 200", got)
+	}
+}

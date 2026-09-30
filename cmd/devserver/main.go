@@ -1385,15 +1385,57 @@ func (m *DevManager) Destroy(_ context.Context, sandboxID string) {
 // 404 for a missing file.
 var errPathEscapesRoot = errors.New("path escapes sandbox root")
 
-// resolveInWorkDir confines p to workDir; filepath.Join alone does not stop
-// ".." from escaping.
+// resolveInWorkDir confines p to workDir. filepath.Join alone does not stop
+// ".." from escaping, and a lexical check alone does not stop a symlink the
+// sandbox created from pointing outside, so the real path is checked too.
+// ponytail: check-then-use, so a link swapped in between can still race; os.Root per handler closes that.
 func resolveInWorkDir(workDir, p string) (string, error) {
 	full := filepath.Clean(filepath.Join(workDir, p))
-	rel, err := filepath.Rel(workDir, full)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !pathWithin(workDir, full) {
+		return "", errPathEscapesRoot
+	}
+	root, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return "", err
+	}
+	real, err := realPath(full)
+	if err != nil {
+		return "", err
+	}
+	if !pathWithin(root, real) {
 		return "", errPathEscapesRoot
 	}
 	return full, nil
+}
+
+func pathWithin(root, p string) bool {
+	rel, err := filepath.Rel(root, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// realPath resolves symlinks in the longest existing prefix of p; what follows
+// does not exist yet, so it cannot be a link. A dangling link is refused: a
+// write through it would create its target, wherever that is.
+func realPath(p string) (string, error) {
+	rest := ""
+	for {
+		r, err := filepath.EvalSymlinks(p)
+		if err == nil {
+			return filepath.Join(r, rest), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		if fi, lerr := os.Lstat(p); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return "", errPathEscapesRoot
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return "", err
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
+	}
 }
 
 // WriteFile writes content to a path inside the sandbox workspace.
