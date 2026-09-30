@@ -381,10 +381,9 @@ func TestASnapshotNameIsRefusedWhenItCannotBeATemplateID(t *testing.T) {
 			t.Errorf("name %q answered %d, want 400", bad, status)
 		}
 	}
-	// Positive control: the same route accepts a legal name.
-	if status, _ := f.do(t, "POST", "/v1/sandboxes/sb-1/snapshot", "apikey", `{"name":"ok-1"}`); status != http.StatusAccepted {
-		t.Errorf("a legal name answered %d, want 202", status)
-	}
+	// Positive control: the same route accepts a legal name. Waited for, so the
+	// save is not still writing into the test's directories when it ends.
+	f.saveAndWait(t, "ok-1")
 	// And a save of an unknown sandbox is a 404, not a build row nobody can reach.
 	if status, _ := f.do(t, "POST", "/v1/sandboxes/sb-nope/snapshot", "apikey", `{"name":"other"}`); status != http.StatusNotFound {
 		t.Errorf("saving an unplaced sandbox answered %d, want 404", status)
