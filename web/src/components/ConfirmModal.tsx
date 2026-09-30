@@ -35,7 +35,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     if (!pending) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close(false)
-      else if (e.key === 'Enter') close(true)
+      // A destructive dialog leaves Enter to the focused button, which starts on Cancel.
+      else if (e.key === 'Enter' && !pending.danger) close(true)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -55,11 +56,12 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             <h2>{pending.title}</h2>
             {pending.body && <div className="confirm-body">{pending.body}</div>}
             <div className="confirm-actions">
-              <button className="btn" onClick={() => close(false)}>{pending.cancelLabel ?? 'Cancel'}</button>
+              {/* A destructive action starts on Cancel, so a stray Enter does no harm. */}
+              <button className="btn" onClick={() => close(false)} autoFocus={pending.danger}>{pending.cancelLabel ?? 'Cancel'}</button>
               <button
                 className={`btn ${pending.danger ? 'destructive' : 'primary'}`}
                 onClick={() => close(true)}
-                autoFocus
+                autoFocus={!pending.danger}
               >
                 {pending.confirmLabel ?? 'Confirm'}
               </button>
