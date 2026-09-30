@@ -1,14 +1,8 @@
-//go:build !core
-
 package httpapi
 
 import (
-	"errors"
-	"net/http"
 	"strings"
 	"testing"
-
-	"github.com/pilldrops-oss/pilldrops/internal/extras/agent/agentd"
 )
 
 func TestPrometheusMetricsEndpoint(t *testing.T) {
@@ -158,105 +152,5 @@ func TestFunctionCountersExposed(t *testing.T) {
 	}
 	if !strings.Contains(out, `sandboxd_function_cold_starts_total{name="hello"} 1`) {
 		t.Fatalf("cold starts missing: %s", out)
-	}
-}
-
-func TestAgentMetricsAreLabelledPerAgent(t *testing.T) {
-	m := newMetrics()
-	m.incAgentTurn("claude", "accepted")
-	m.incAgentTurn("claude", "accepted")
-	m.incAgentTurn("codex", "refused")
-	m.incAgentInterrupt("claude")
-	m.incAgentUnreachable("grok")
-	m.incAgentSpendStop("opencode")
-
-	var b strings.Builder
-	m.writeAgentMetrics(&b)
-	out := b.String()
-
-	for _, want := range []string{
-		`sandboxd_agent_turns_total{agent="claude",result="accepted"} 2`,
-		`sandboxd_agent_turns_total{agent="codex",result="refused"} 1`,
-		`sandboxd_agent_interrupts_total{agent="claude"} 1`,
-		`sandboxd_agent_supervisor_unreachable_total{agent="grok"} 1`,
-		`sandboxd_agent_spend_stops_total{agent="opencode"} 1`,
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing series:\n  %s\ngot:\n%s", want, out)
-		}
-	}
-	// Without a TYPE line Prometheus treats the series as untyped.
-	for _, name := range []string{
-		"sandboxd_agent_turns_total", "sandboxd_agent_interrupts_total",
-		"sandboxd_agent_supervisor_unreachable_total", "sandboxd_agent_spend_stops_total",
-	} {
-		if !strings.Contains(out, "# TYPE "+name+" counter") {
-			t.Errorf("%s has no TYPE line", name)
-		}
-	}
-}
-
-func TestUnreachableSupervisorIsCountedApartFromARefusedTurn(t *testing.T) {
-	s := &Server{metrics: newMetrics()}
-
-	s.countAgentFailure("claude", agentd.ErrAgentUnreachable)
-	s.countAgentFailure("claude", agentd.ErrSpendCapReached)
-	s.countAgentFailure("claude", errors.New("something else"))
-	// A 402 arriving as a StatusError is still a spend stop.
-	s.countAgentFailure("claude", &agentd.StatusError{Code: http.StatusPaymentRequired, Message: "cap"})
-
-	var b strings.Builder
-	s.metrics.writeAgentMetrics(&b)
-	out := b.String()
-
-	if !strings.Contains(out, `sandboxd_agent_supervisor_unreachable_total{agent="claude"} 1`) {
-		t.Error("unreachable not counted")
-	}
-	if !strings.Contains(out, `sandboxd_agent_spend_stops_total{agent="claude"} 2`) {
-		t.Errorf("spend stops not counted twice (direct + StatusError):\n%s", out)
-	}
-	if !strings.Contains(out, `sandboxd_agent_turns_total{agent="claude",result="refused"} 1`) {
-		t.Error("an unclassified failure should count as a refused turn")
-	}
-}
-
-func TestApprovalFrictionIsCountedSeparately(t *testing.T) {
-	m := newMetrics()
-
-	m.noteAgentApprovalsPerTurn("claude", 2)
-	m.noteAgentApprovalsPerTurn("claude", 5) // at the threshold: not friction
-	m.noteAgentApprovalsPerTurn("claude", 9)
-	m.noteAgentApprovalsPerTurn("claude", 0) // not counted as a turn
-
-	var b strings.Builder
-	m.writeAgentMetrics(&b)
-	out := b.String()
-
-	if !strings.Contains(out, `sandboxd_agent_approval_turns_total{agent="claude"} 3`) {
-		t.Errorf("turns-with-approvals miscounted (a zero-approval turn must not count):\n%s", out)
-	}
-	if !strings.Contains(out, `sandboxd_agent_approval_friction_total{agent="claude"} 1`) {
-		t.Errorf("friction miscounted; the threshold is exclusive:\n%s", out)
-	}
-	// The HELP text must say how to read it, or it gets dashboarded as success.
-	if !strings.Contains(out, "treat as a policy bug, not engagement") {
-		t.Error("the friction metric does not say how to interpret it")
-	}
-}
-
-func TestApprovalOutcomesAreLabelled(t *testing.T) {
-	m := newMetrics()
-	m.incAgentApproval("claude", "allowed")
-	m.incAgentApproval("claude", "denied")
-	m.incAgentApproval("claude", "timed_out")
-
-	var b strings.Builder
-	m.writeAgentMetrics(&b)
-	out := b.String()
-	// A timeout is distinct from a denial.
-	for _, want := range []string{`outcome="allowed"`, `outcome="denied"`, `outcome="timed_out"`} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %s:\n%s", want, out)
-		}
 	}
 }

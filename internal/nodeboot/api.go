@@ -53,8 +53,6 @@ func NewNodeAPI(ctx context.Context, d *daemon.Daemon, st *store.Store, dataDir,
 	api.SetLocalTemplates(LocalTemplates(d.RuntimeName(), templates.PublishedIDs))
 	api.SetFunctions(functions.NewRegistry(d, st, filepath.Join(dataDir, "functions")))
 	api.StartCronSweeper()
-	// Agent features; no-op under -tags core until they are removed.
-	startFeatures(api, d, st, dataDir)
 	return api
 }
 

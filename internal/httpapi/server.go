@@ -145,10 +145,6 @@ func (s *Server) logImagePolicy() {
 // Close releases the rate limiters' evictors. Optional in short-lived processes.
 func (s *Server) Close() { s.limiter.close(); s.previewLimiter.close(); s.authFailLimiter.close() }
 
-// DefaultAgentEventRetentionDays is the mirrored-event retention when
-// AGENT_EVENT_RETENTION_DAYS is unset. Exported for cmd/gendocs.
-const DefaultAgentEventRetentionDays = 30
-
 // Limits returns the resolved protective limits.
 func (s *Server) Limits() (maxActive, rateRPS, rateBurst int) {
 	return s.maxActive, s.rateRPS, s.rateBurst
@@ -256,7 +252,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 	route("POST /v1/sandboxes/{id}/visibility", s.auth(s.handleVisibility))
 	route("POST /v1/sandboxes/{id}/timeout", s.auth(s.handleTimeout))
 	route("POST /v1/sandboxes/{id}/refresh", s.auth(s.handleRefresh))
-	route("GET /v1/sandboxes/{id}/channels", s.auth(s.handleChannels))
 
 	// Config is applied per-exec, so a change lands on the next command.
 	route("POST /v1/sandboxes/{id}/config", s.auth(s.handleConfigSet))

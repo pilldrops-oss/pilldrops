@@ -41,7 +41,7 @@ func registeredRoutes(t *testing.T) []string {
 // TestEveryRouteSurvivedTheSplit pins the total declared in source, ignoring
 // build tags. Exact rather than a floor so an added route forces a decision on where it goes.
 func TestEveryRouteSurvivedTheSplit(t *testing.T) {
-	const want = 138 // +4: the backup verbs, +1 filesystem/watch, +1 rehome
+	const want = 94 // -44: agent, chat, integration and channels routes removed
 	got := registeredRoutes(t)
 	if len(got) != want {
 		t.Errorf("the node registers %d routes, expected %d.\n\n"+
@@ -125,20 +125,17 @@ func routesInFile(t *testing.T, name string) []string {
 
 // featureRegistrars is every per-feature route module; server.go is the core.
 var featureRegistrars = []string{
-	"agentroutes.go",
 	"imageroutes.go",
 	"opsroutes.go",
 	"functionroutes.go",
 	"cronroutes.go",
-	"integrationroutes.go",
-	"chatroutes.go",
 	"checkpoints.go",
 }
 
 // TestCoreRouteCountIsPinned stops the core growing back; a route added to
 // server.go instead of its registrar leaves the total unchanged, so only this count notices.
 func TestCoreRouteCountIsPinned(t *testing.T) {
-	const wantCore = 52 // +1 filesystem/watch, +1 rehome
+	const wantCore = 51 // -1: channels, which had no bridge left to report on
 	got := routesInFile(t, "server.go")
 	if len(got) != wantCore {
 		t.Errorf("server.go registers %d routes, expected %d.\n\n"+
@@ -225,28 +222,4 @@ func mustRead(t *testing.T, name string) []byte {
 		t.Fatal(err)
 	}
 	return b
-}
-
-// TestAgentRoutesLiveInTheirOwnFile keeps the agent surface liftable.
-func TestAgentRoutesLiveInTheirOwnFile(t *testing.T) {
-	body, err := os.ReadFile("server.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, m := range routeCallRe.FindAllStringSubmatch(string(body), -1) {
-		if strings.Contains(m[1], "/agent") {
-			t.Errorf("agent route %q is registered in server.go — it belongs in agentroutes.go, "+
-				"which is what keeps the feature liftable", m[1])
-		}
-	}
-
-	agent, err := os.ReadFile("agentroutes.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	n := len(routeCallRe.FindAllStringSubmatch(string(agent), -1))
-	if n == 0 {
-		t.Fatal("agentroutes.go registers nothing — the extraction regex has drifted and this " +
-			"guard is passing on an empty set")
-	}
 }

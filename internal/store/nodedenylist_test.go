@@ -25,7 +25,7 @@ func TestNodeTierNeverCallsMethodsOnDeniedTables(t *testing.T) {
 	// Node-tier packages: what cmd/sandboxd and cmd/sandboxd-fleet link.
 	nodePkgs := []string{
 		"../httpapi", "../sandbox/daemon", "../nodeboot", "../dashboard",
-		"../extras/functions", "../cron", "../extras/agent/webhook", "../extras/agent/mirror",
+		"../extras/functions", "../cron",
 	}
 	methodDef := regexp.MustCompile(`(?m)^func \(s \*Store\) ([A-Z]\w*)\(`)
 

@@ -1,5 +1,3 @@
-//go:build !core
-
 package httpapi
 
 import (
@@ -35,6 +33,21 @@ func TestRegisterActuallyMountsEveryRoute(t *testing.T) {
 			}
 			t.Errorf("%q is declared in source but %s %s resolves to %q instead — it is "+
 				"shadowed, not served", want, method, concretize(path), got)
+		}
+	}
+}
+
+// The agent, chat and integration APIs are not part of the engine.
+func TestProductRoutesAreNotMounted(t *testing.T) {
+	srv, key := newTestServer(t)
+	id := createSandbox(t, srv.URL, key)
+	for _, p := range []string{
+		"/v1/sandboxes/" + id + "/agent/status", "/v1/sandboxes/" + id + "/agent/turns",
+		"/v1/sandboxes/" + id + "/chat", "/v1/sandboxes/" + id + "/integrations",
+		"/v1/sandboxes/" + id + "/channels", "/agent/claim",
+	} {
+		if code, _ := do(t, "GET", srv.URL+p, key, ""); code != 404 && code != 405 {
+			t.Errorf("GET %s = %d, want 404", p, code)
 		}
 	}
 }

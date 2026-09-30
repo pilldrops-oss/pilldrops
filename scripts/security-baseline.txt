@@ -39,7 +39,6 @@
 # Adding a line is a decision. Say why, above it, in a comment.
 
 gosec|G101|cmd/devserver/main.go
-gosec|G101|internal/httpapi/agenttoken.go
 gosec|G101|internal/orchestrator/agentorigin.go
 gosec|G101|internal/store/agenttokens.go
 gosec|G103|cmd/envd/entropy_linux.go
@@ -47,7 +46,6 @@ gosec|G103|proto/envdpb/envd.pb.go
 gosec|G104|cmd/devserver/main.go
 gosec|G104|cmd/envd/entropy_linux.go
 gosec|G104|cmd/envd/vsock.go
-gosec|G104|internal/extras/agent/agentd/client.go
 gosec|G104|internal/artifact/open.go
 gosec|G104|internal/envd/vsock.go
 gosec|G104|internal/httpapi/previewstatus.go
@@ -82,9 +80,6 @@ gosec|G115|internal/store/agentwebhooks.go
 gosec|G115|internal/vm/network.go
 gosec|G204|cmd/devserver/main.go
 gosec|G204|cmd/envd/main.go
-gosec|G204|internal/extras/agent/agentd/probe.go
-gosec|G204|internal/extras/agent/agentd/runner.go
-gosec|G204|internal/extras/agent/agentd/templates.go
 gosec|G204|internal/httpapi/imagebuild.go
 gosec|G204|internal/nodeboot/imagefetch.go
 gosec|G204|internal/nodeboot/preflight.go
@@ -107,7 +102,6 @@ gosec|G204|internal/vm/storage.go
 gosec|G301|cmd/devserver/main.go
 gosec|G301|cmd/envd/env.go
 gosec|G301|cmd/envd/main.go
-gosec|G301|cmd/gendocs/main.go
 gosec|G301|cmd/pilldrops-bench/result.go
 gosec|G301|internal/artifact/cache/cache.go
 gosec|G301|internal/artifact/fs.go
@@ -137,11 +131,7 @@ gosec|G304|cmd/devserver/main.go
 gosec|G304|cmd/devserver/vault.go
 gosec|G304|cmd/envd/env.go
 gosec|G304|cmd/envd/main.go
-gosec|G304|cmd/gendocs/main.go
 gosec|G304|cmd/pilldrops-join/main.go
-gosec|G304|internal/extras/agent/agentd/budget.go
-gosec|G304|internal/extras/agent/agentd/gatestore.go
-gosec|G304|internal/extras/agent/agentd/journal.go
 gosec|G304|internal/artifact/fs.go
 gosec|G304|internal/extras/functions/ensure.go
 gosec|G304|internal/extras/functions/registry.go
@@ -166,7 +156,6 @@ gosec|G304|internal/vm/snapshot_sandbox.go
 gosec|G304|internal/vm/storage.go
 gosec|G306|cmd/devserver/main.go
 gosec|G306|cmd/envd/env.go
-gosec|G306|cmd/gendocs/main.go
 gosec|G306|cmd/pilldrops-bench/result.go
 gosec|G306|internal/extras/functions/registry.go
 gosec|G306|internal/nodetls/nodetls.go
@@ -184,7 +173,6 @@ osv|GO-2026-5774|github.com/go-chi/chi/v5
 osv|GO-2026-5775|github.com/go-chi/chi/v5
 osv|GO-2026-5777|github.com/go-chi/chi/v5
 staticcheck|SA4000|internal/vm/uid_test.go
-staticcheck|ST1005|internal/extras/bridge/telegram/agentturns.go
 staticcheck|U1000|internal/httpapi/routesplit_test.go
 
 # Added 2026-09-18 with add-named-snapshots. Both assessed, not waved through.

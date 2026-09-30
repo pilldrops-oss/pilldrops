@@ -110,9 +110,9 @@ for pkg in $(CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go list ./internal/... \
 done
 [ "$extras_ok" -eq 1 ] && echo "  ok  engine packages: no internal/extras"
 
-# cmd/envd and cmd/agentd ship inside a customer's sandbox; of internal/auth
-# only sbtoken (a random token, hash-only) may cross that line.
-for bin in envd agentd; do
+# cmd/envd ships inside a customer's sandbox; of internal/auth only sbtoken
+# (a random token, hash-only) may cross that line.
+for bin in envd; do
   check "$bin" "server-side auth packages" \
     'auth/(aat|adminauth|authcache|orgassert|previewtoken)'
 done

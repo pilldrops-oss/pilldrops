@@ -2,33 +2,9 @@ package runtime
 
 import (
 	"errors"
-	"net"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/pilldrops-oss/pilldrops/internal/extras/agent/agentd"
 )
-
-// agentd ships inside the guest and cannot import this package, so the port is
-// declared twice and only this test keeps the copies equal.
-func TestPlatformPortsMatchTheServicesThatBindThem(t *testing.T) {
-	if AgentPort != agentd.DefaultPort {
-		t.Errorf("runtime.AgentPort = %d but agentd.DefaultPort = %d — the proxy would "+
-			"dial a port agentd is not listening on", AgentPort, agentd.DefaultPort)
-	}
-	_, portStr, err := net.SplitHostPort(agentd.LoopbackAddr)
-	if err != nil {
-		t.Fatalf("agentd.LoopbackAddr = %q is not a host:port: %v", agentd.LoopbackAddr, err)
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		t.Fatalf("agentd.LoopbackAddr port %q is not a number", portStr)
-	}
-	if port != AgentPort {
-		t.Errorf("agentd.LoopbackAddr binds :%d but runtime.AgentPort is %d", port, AgentPort)
-	}
-}
 
 func TestPlatformPortsAreDistinct(t *testing.T) {
 	seen := map[int]string{}
