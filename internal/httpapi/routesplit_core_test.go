@@ -11,10 +11,11 @@ import (
 // since registeredRoutes reads source text and ignores build tags.
 // 81: the original 67 (47 in server.go + 5 image + 14 ops + /preview/) plus
 // the backup, checkpoint, snapshot-export, fork and standby routes added since,
-// and filesystem/watch (82).
+// filesystem/watch (82), and rehome, which the control plane calls on a
+// fleet node to resume a paused sandbox whose own node is gone (83).
 // It went stale while backupschedule_test.go kept the core build from compiling.
 func TestCoreBuildMountsOnlyTheCore(t *testing.T) {
-	const wantMounted = 82
+	const wantMounted = 83
 	got := mountedRoutes(t)
 	if len(got) == 0 {
 		t.Fatal("the core build mounts nothing at all — either Register is empty or " +
