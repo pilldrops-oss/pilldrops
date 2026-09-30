@@ -74,7 +74,7 @@ export default function Usage() {
       <div className="h1row">
         <div>
           <h1 className="h1">Usage</h1>
-          <p>Where your hours, credit and storage are going — buy more on the Billing tab</p>
+          <p>Where your hours and storage are going</p>
         </div>
         <button className="btn" onClick={refetch}>Refresh</button>
       </div>
