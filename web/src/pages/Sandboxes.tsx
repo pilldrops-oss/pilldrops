@@ -3,7 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useSSE } from '../hooks/useSSE'
 import { usePoll } from '../hooks/useApi'
 
-import { previewUrl, getSandbox, pauseSandbox, resumeSandbox, destroySandbox, renameSandbox, getUsage, getConcurrency, getEvents, listTemplates, listSandboxes } from '../api'
+import { previewUrl, getSandbox, pauseSandbox, resumeSandbox, destroySandbox, renameSandbox, getUsage, getConcurrency, getEvents, listTemplates, listSandboxes, IS_LOCAL_RUNTIME } from '../api'
 import type { StatsPayload, SandboxRow, UsageResp, EventRow, Template } from '../types'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmModal'
@@ -193,11 +193,11 @@ function RowMenu({ row, onDone }: RowMenuProps) {
       {open && coords && (
         <div className="menu menu-fixed" style={{ top: coords.top, right: coords.right }}>
           <button onClick={() => { setOpen(false); navigate(`/sandbox/${row.id}`) }}>Open</button>
-          {isRunning ? (
+          {!IS_LOCAL_RUNTIME && (isRunning ? (
             <button onClick={() => action(() => pauseSandbox(row.id))}>Pause</button>
           ) : (
             <button onClick={() => action(() => resumeSandbox(row.id))}>Resume</button>
-          )}
+          ))}
           <button onClick={cloneRow}>Clone</button>
           <button className="danger" onClick={confirmDestroy}>
             Destroy
@@ -509,7 +509,7 @@ function EmptyState({ onLaunch }: { onLaunch: (templateId?: string) => void }) {
       </div>
       <h2>Launch your first sandbox</h2>
       <p>
-        Spin up a disposable, isolated machine in seconds — pick a template, run code
+        Spin up a disposable{IS_LOCAL_RUNTIME ? '' : ', isolated'} machine in seconds — pick a template, run code
         or a web app, and get a live preview URL.
       </p>
       <div className="empty-hero-cta">

@@ -360,6 +360,10 @@ export const listImages = () => request<{ images: ImageInfo[] }>('GET', '/v1/ima
 export const patchImage = (id: string, body: PatchImageReq) =>
   request<ImageInfo>('PATCH', `/v1/images/${id}`, body)
 
+// IS_LOCAL_RUNTIME is make dev's in-process runtime: plain processes, so no
+// pause, fork, sharing or custom domains.
+export const IS_LOCAL_RUNTIME = window.__SANDBOXD__?.runtime === 'local'
+
 export const listTemplates = () => request<Template[]>('GET', '/v1/templates', undefined)
 
 // listPublicTemplates is the same catalog unauthenticated, the signed-out fallback.

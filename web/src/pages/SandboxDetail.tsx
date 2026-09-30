@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { getChannels, getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, createChatLink, setSandboxSlug, slugUrl, setSandboxVisibility } from '../api'
+import { getChannels, getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, createChatLink, setSandboxSlug, slugUrl, setSandboxVisibility, IS_LOCAL_RUNTIME } from '../api'
 import UnsafeEmbedNotice from '../components/UnsafeEmbedNotice'
 import { useConfirm } from '../components/ConfirmModal'
 import { useToast } from '../components/Toast'
@@ -779,7 +779,7 @@ export default function SandboxDetail() {
               Open preview ↗
             </a>
           )}
-          {isRunning ? (
+          {!IS_LOCAL_RUNTIME && (isRunning ? (
             <button
               className="btn"
               disabled={busy}
@@ -795,7 +795,8 @@ export default function SandboxDetail() {
             >
               Resume
             </button>
-          )}
+          ))}
+          {!IS_LOCAL_RUNTIME && <>
           <button
             className="btn"
             disabled={busy}
@@ -814,6 +815,7 @@ export default function SandboxDetail() {
           >
             {isPrivate ? 'Share with org' : 'Make private'}
           </button>
+          </>}
           <button
             className="btn"
             disabled={busy}

@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import ErrorBoundary from './ErrorBoundary'
 import { RowsSkeleton } from './Skeleton'
 import { labelFor } from '../lib/navLabels'
+import { IS_LOCAL_RUNTIME } from '../api'
 import { clearThread } from '../lib/threadStore'
 
 const FUNCTIONS_ENABLED = false
@@ -108,13 +109,15 @@ function UserNav() {
           </svg>
           Vault
         </NavLink>
-        <NavLink to="/domains" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="9" />
-            <path d="M3 12h18M12 3c3 3.5 3 14 0 18M12 3c-3 3.5-3 14 0 18" />
-          </svg>
-          Domains
-        </NavLink>
+        {!IS_LOCAL_RUNTIME && (
+          <NavLink to="/domains" className={({ isActive }) => isActive ? 'on' : ''}>
+            <svg viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M3 12h18M12 3c3 3.5 3 14 0 18M12 3c-3 3.5-3 14 0 18" />
+            </svg>
+            Domains
+          </NavLink>
+        )}
         <NavLink to="/usage" className={({ isActive }) => isActive ? 'on' : ''}>
           <svg viewBox="0 0 24 24">
             <path d="M4 19V9M10 19V4M16 19v-7M22 19H2" />
