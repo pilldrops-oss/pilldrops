@@ -1,0 +1,11 @@
+{
+  "name": "pilldrops-hooks",
+  "private": true,
+  "description": "Git hooks only: the checks CI runs, before a commit or push leaves this machine. The dashboard's own package is web/.",
+  "scripts": {
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "9.1.7"
+  }
+}

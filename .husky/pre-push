@@ -1,0 +1,6 @@
+# The test suites CI runs, before anything reaches the remote. Skip once with --no-verify.
+set -e
+make web >/dev/null
+go vet ./...
+go test ./...
+(cd web && pnpm test)

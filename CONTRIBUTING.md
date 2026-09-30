@@ -32,6 +32,12 @@ make test-cover   # tests with a coverage report
 make check        # everything CI runs: builds, Linux tests, guards, lint, scanners
 ```
 
+Install the git hooks once with `pnpm install` at the repository root. Before
+each commit they run gofmt, golangci-lint (for the host and for Linux, as CI
+does), the dashboard's typecheck and lint, actionlint and gitleaks on what is
+staged; before each push, `go vet` and the Go and dashboard tests.
+`--no-verify` skips them once.
+
 `make dev` binds to loopback and runs with anonymous access for local
 development only. Never set `PORTAL_ALLOW_PUBLIC_ANON=1` on a shared or
 cloud host.

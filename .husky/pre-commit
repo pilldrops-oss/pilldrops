@@ -1,0 +1,29 @@
+# The checks CI runs, on what is being committed. Skip once with --no-verify.
+set -e
+staged() { git diff --cached --name-only --diff-filter=ACMR | grep -E "$1" || true; }
+
+go_files=$(staged '\.go$')
+if [ -n "$go_files" ]; then
+  unformatted=$(gofmt -l $go_files)
+  if [ -n "$unformatted" ]; then
+    echo "gofmt: these files need formatting:"; echo "$unformatted"; exit 1
+  fi
+  # Linux too: CI lints as Linux, and linux-only files never compile on a Mac.
+  golangci-lint run ./...
+  GOOS=linux golangci-lint run ./...
+fi
+
+if [ -n "$(staged '^web/')" ]; then
+  (cd web && pnpm exec tsc --noEmit && pnpm exec eslint . --max-warnings 80)
+fi
+
+if [ -n "$(staged '^\.github/')" ]; then
+  actionlint
+  ./scripts/actions-pin-guard.sh
+fi
+
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml .
+else
+  echo "gitleaks not installed; the secret scan runs in CI only (brew install gitleaks)"
+fi
