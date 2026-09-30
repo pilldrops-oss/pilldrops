@@ -320,3 +320,12 @@ func TestPortalStreamClientHasNoOverallTimeout(t *testing.T) {
 		t.Fatal("redirects are followed; the claim flow's Set-Cookie would be discarded")
 	}
 }
+
+// The dashboard reads the subtree's root; it must get the same explanation.
+func TestAgentRootWithoutFleetSaysWhy(t *testing.T) {
+	rr := httptest.NewRecorder()
+	mountAgentAPI(false, "", "").ServeHTTP(rr, httptest.NewRequest("GET", "/v1/sandboxes/sb1/agent", nil))
+	if rr.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", rr.Code)
+	}
+}

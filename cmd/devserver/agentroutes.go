@@ -63,7 +63,7 @@ func serveAgentProxy(w http.ResponseWriter, r *http.Request, orchURL, orchKey, o
 
 // registerAgentRoutes mounts the agent API subtree on the portal.
 func registerAgentRoutes(r chi.Router, proxyMode bool) {
-	r.Handle(agentSubtree, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !proxyMode {
 			// 501 rather than 404: this is a configuration gap, not a missing feature.
 			http.Error(w, `{"error":"the agent API requires fleet mode: set PORTAL_ORCHESTRATOR_URL and PORTAL_ORCHESTRATOR_KEY. The portal's local runtime does not run agentd, so there is no agent to reach."}`,
@@ -72,5 +72,8 @@ func registerAgentRoutes(r chi.Router, proxyMode bool) {
 		}
 		// Unreachable in fleet mode; a 500 makes a middleware-ordering regression visible.
 		http.Error(w, `{"error":"agent proxy not wired"}`, http.StatusInternalServerError)
-	}))
+	})
+	r.Handle(agentSubtree, h)
+	// The dashboard reads the agent's state from the subtree's root.
+	r.Handle(strings.TrimSuffix(agentSubtree, "/*"), h)
 }

@@ -2781,11 +2781,16 @@ func main() {
 			"/v1/sandboxes/{id}/integrations", "/v1/sandboxes/{id}/chat",
 			// The node probes what the preview would actually serve.
 			"/v1/sandboxes/{id}/preview-status",
+			"/v1/sandboxes/{id}/fork", "/v1/sandboxes/{id}/visibility",
+			"/v1/domains", "/v1/domains/{host}",
 		} {
 			r.Get(pat, fleetPassthrough)
 			r.Post(pat, fleetPassthrough)
 			r.Delete(pat, fleetPassthrough)
 		}
+
+		// Deploying needs the fleet; the local GET stub below lists none.
+		r.Post("/v1/functions", fleetPassthrough)
 
 		// One subtree registration covering every method, including the PATCH
 		// budget cap. See agentroutes.go.
