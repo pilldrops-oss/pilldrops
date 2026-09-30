@@ -50,7 +50,13 @@ func requestKeyID(r *http.Request) string {
 // X-API-Key header, or the portal session cookie the browser dashboard sends.
 // "" means the request is anonymous.
 func presentedToken(r *http.Request) string {
-	tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	// net/http trims trailing spaces, so an empty "Bearer " arrives as "Bearer":
+	// that is no token, not a token spelled "Bearer".
+	tok := strings.TrimSpace(r.Header.Get("Authorization"))
+	if tok == "Bearer" {
+		tok = ""
+	}
+	tok = strings.TrimPrefix(tok, "Bearer ")
 	if tok == "" {
 		tok = r.Header.Get("X-API-Key")
 	}

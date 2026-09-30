@@ -62,8 +62,12 @@ async function bearerToken(): Promise<string> {
   return getKey()
 }
 
+// No key (make dev's anonymous server) sends no Authorization header at all.
 async function authHeaders(): Promise<HeadersInit> {
-  return { Authorization: `Bearer ${await bearerToken()}`, 'Content-Type': 'application/json' }
+  const key = await bearerToken()
+  return key
+    ? { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }
+    : { 'Content-Type': 'application/json' }
 }
 
 // ApiError carries a UI-safe message plus the status, server code, and method/path to branch on.
@@ -122,6 +126,23 @@ function friendlyError(status: number, raw: string): { message: string; code?: s
   return { message, code }
 }
 
+// The login-bounce marker lives for this tab and 30 seconds: long enough to
+// catch an immediate redirect back, short enough that a later expiry still
+// sends the user to sign in. Storage can be unavailable; then it never blocks.
+const LOGIN_BOUNCE = 'pd-login-bounce'
+function loginBounced(): boolean {
+  try {
+    const t = Number(sessionStorage.getItem(LOGIN_BOUNCE))
+    return t > 0 && Date.now() - t < 30_000
+  } catch { return false }
+}
+function markLoginBounce() {
+  try { sessionStorage.setItem(LOGIN_BOUNCE, String(Date.now())) } catch { /* no storage */ }
+}
+function clearLoginBounce() {
+  try { sessionStorage.removeItem(LOGIN_BOUNCE) } catch { /* no storage */ }
+}
+
 async function request<T>(method: string, path: string, body?: unknown, auth = true): Promise<T> {
   const headers: HeadersInit = auth ? await authHeaders() : { 'Content-Type': 'application/json' }
   const res = await fetch(path, {
@@ -130,11 +151,14 @@ async function request<T>(method: string, path: string, body?: unknown, auth = t
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
-    // No sign-in gate exists, so a 401 means the session cookie is missing or stale.
+    // A 401 means the session is missing or stale: go and sign in. Once only —
+    // a server whose login page sends the browser straight back would loop.
     if (
       res.status === 401 &&
-      !window.location.pathname.endsWith('/dashboard/login')
+      !window.location.pathname.endsWith('/dashboard/login') &&
+      !loginBounced()
     ) {
+      markLoginBounce()
       window.location.href = '/dashboard/login'
       throw new Error('unauthenticated — redirecting to login')
     }
@@ -142,6 +166,7 @@ async function request<T>(method: string, path: string, body?: unknown, auth = t
     const { message, code } = friendlyError(res.status, raw)
     throw new ApiError({ status: res.status, code, method, path, message })
   }
+  clearLoginBounce()
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
