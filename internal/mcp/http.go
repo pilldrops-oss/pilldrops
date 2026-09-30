@@ -88,6 +88,13 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	be := func(method, path string, reqBody []byte, ctype string) (int, []byte, error) {
 		req := httptest.NewRequest(method, path, bytes.NewReader(reqBody))
+		// The API builds URLs from the request's host; httptest's default is example.com.
+		req.Host = r.Host
+		for _, h := range []string{"X-Forwarded-Proto", "X-Forwarded-Host"} {
+			if v := r.Header.Get(h); v != "" {
+				req.Header.Set(h, v)
+			}
+		}
 		if auth != "" {
 			req.Header.Set("Authorization", auth)
 		}

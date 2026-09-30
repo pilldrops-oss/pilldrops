@@ -211,3 +211,21 @@ func TestPublicOrigin(t *testing.T) {
 		}
 	}
 }
+
+// The API builds sandbox URLs from the request host, so a tool call must reach
+// it with the caller's host, not httptest's example.com.
+func TestToolCallKeepsTheCallersHost(t *testing.T) {
+	var seen string
+	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Host
+		_, _ = w.Write([]byte(`{"id":"sb1"}`))
+	})
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_sandbox","arguments":{"sandbox_id":"sb1"}}}`))
+	req.Host = "portal.test:8080"
+	req.Header.Set("Authorization", "Bearer k")
+	(&HTTPServer{API: api}).ServeHTTP(httptest.NewRecorder(), req)
+	if seen != "portal.test:8080" {
+		t.Fatalf("API saw host %q, want the caller's portal.test:8080", seen)
+	}
+}
