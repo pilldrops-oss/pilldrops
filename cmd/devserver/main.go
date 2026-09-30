@@ -1201,6 +1201,19 @@ func NewDevManager(envdBin string, log *zap.Logger) *DevManager {
 	return m
 }
 
+// freePort returns the next port in the dev range that nothing on this host
+// is listening on; a left-over or unrelated server would otherwise answer
+// for the new sandbox's app.
+func (m *DevManager) freePort() int {
+	for {
+		p := int(m.nextPort.Add(1))
+		if ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p)); err == nil { //nolint:noctx // a bind probe, closed at once
+			_ = ln.Close()
+			return p
+		}
+	}
+}
+
 func (m *DevManager) Create(ctx context.Context, template, userID string, timeout time.Duration, bootEnv []string) (*DevSandbox, error) {
 	m.mu.RLock()
 	count := len(m.sandboxes)
@@ -1211,7 +1224,7 @@ func (m *DevManager) Create(ctx context.Context, template, userID string, timeou
 	}
 
 	start := time.Now()
-	assignedPort := int(m.nextPort.Add(1)) // unique port per sandbox in dev mode
+	assignedPort := m.freePort()
 	sandboxID := genID()
 
 	workDir := filepath.Join(os.TempDir(), "sandbox-workspaces", sandboxID)

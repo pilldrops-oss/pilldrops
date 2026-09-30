@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -247,5 +248,20 @@ func TestDestroyStopsTheAppServer(t *testing.T) {
 			t.Fatal("the app's process group is still alive after Destroy")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// A port something already listens on is never handed to a new sandbox.
+func TestFreePortSkipsABusyPort(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	busy := ln.Addr().(*net.TCPAddr).Port
+	m := &DevManager{}
+	m.nextPort.Store(int32(busy - 1))
+	if got := m.freePort(); got == busy {
+		t.Fatalf("freePort returned %d, which is in use", got)
 	}
 }
