@@ -102,3 +102,19 @@ func TestEnvDigestRequireFlagAgreesWithTheHTTPLayer(t *testing.T) {
 		t.Error(`envDigestRequireFlag("true") is false — this is the exact input the drift was found on`)
 	}
 }
+
+// Memory rounds up to whole MiB: a container using less than 1 MiB is
+// running, and reporting 0 would read as "uses no memory".
+func TestMemUsedMiBRoundsUp(t *testing.T) {
+	var s statsJSON
+	for _, c := range []struct {
+		usage, inactive uint64
+		want            int
+	}{{700 << 10, 0, 1}, {1 << 20, 0, 1}, {(1 << 20) + 1, 0, 2}, {10 << 20, 4 << 20, 6}, {0, 0, 0}} {
+		s.MemoryStats.Usage = c.usage
+		s.MemoryStats.Stats = map[string]uint64{"inactive_file": c.inactive}
+		if got := memUsedMiB(s); got != c.want {
+			t.Errorf("usage %d, inactive %d: %d MiB, want %d", c.usage, c.inactive, got, c.want)
+		}
+	}
+}

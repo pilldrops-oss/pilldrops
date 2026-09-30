@@ -455,7 +455,8 @@ func memUsedMiB(s statsJSON) int {
 			break
 		}
 	}
-	return int(usage / (1024 * 1024))
+	// Rounded up: a small container under 1 MiB is using memory, not none.
+	return int((usage + 1<<20 - 1) >> 20)
 }
 
 // Top lists processes in a container.
