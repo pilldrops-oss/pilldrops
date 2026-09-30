@@ -81,14 +81,20 @@ jobs:
             exit 0
           fi
           exit "$rc"
+      # The CLI rather than gitleaks-action: the action demands a paid license
+      # for organisation repositories and fails before scanning. Pinned by
+      # version and checksum, like the actions above are pinned by SHA.
       - name: Secret scan (gitleaks)
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Comments off so this job needs no `pull-requests: write`. The gate
-          # is the exit code, not a comment — and granting a third-party action
-          # write access to pull requests to produce one is a bad trade.
-          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLo "$tarball" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" gitleaks
+          ./gitleaks git --redact --no-banner --config .gitleaks.toml .
 
   test:
     name: Test
