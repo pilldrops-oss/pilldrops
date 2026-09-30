@@ -16,8 +16,9 @@ sections cover the tiers, a request end to end and where each part lives;
 - **Go 1.25+** (see `go.mod` for the exact version)
 - `make`, a C compiler (the race detector in `make test` uses cgo), a POSIX
   shell, and Docker (for the container runtime and local DB)
-- Node.js and pnpm if you change the dashboard in `web/` (`make web` rebuilds
-  the bundle embedded in `internal/webui/dist`, which must be committed)
+- Node.js and pnpm: `make web` builds the dashboard into `internal/webui/dist`,
+  which the binaries embed. `make dev`, `make test` and `make build` run it for
+  you; the bundle is build output and is not committed
 - Linux with KVM to exercise the Firecracker runtime. On macOS only `make dev`
   runs sandboxes, and it runs them unisolated as your user
 

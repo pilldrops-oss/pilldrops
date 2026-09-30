@@ -11,10 +11,12 @@ dist/
 build/
 .eggs/
 
-# ...but the binaries embed the built dashboard (go:embed all:dist), so this one
-# dist/ is tracked.
+# The binaries embed the built dashboard (go:embed all:dist). `make web` builds
+# it, as CI and the release workflow do; only the placeholder that keeps the
+# embed compiling on a fresh clone is tracked.
 !internal/webui/dist/
-!internal/webui/dist/**
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
 
 # Environment
 .env

@@ -34,6 +34,18 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.25'
+      # The binaries embed the dashboard (go:embed all:dist); it is build
+      # output, not committed, so build it before anything compiles it in.
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.21.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Build dashboard
+        run: make web
       - name: Run tests
         run: go test -race -timeout 30m ./...
       # Control plane / node / in-guest must stay separate. One script, run

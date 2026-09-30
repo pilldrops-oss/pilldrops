@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/subtle"
 	"embed"
+	"fmt"
 	"html"
 	"io/fs"
 	"net"
@@ -175,7 +176,8 @@ func clientIP(r *http.Request) string {
 func New(sessionKey, runtime, mode string, clustered bool, sandboxDomain string) (*Server, error) {
 	idx, err := distFS.ReadFile("dist/index.html")
 	if err != nil {
-		return nil, err
+		// A fresh clone carries only dist/.gitkeep; the bundle is built, not committed.
+		return nil, fmt.Errorf("dashboard not built: run `make web` before building this binary: %w", err)
 	}
 	if runtime == "" {
 		runtime = "process"

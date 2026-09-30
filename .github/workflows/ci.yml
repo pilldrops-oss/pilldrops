@@ -145,6 +145,18 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.25'
+      # The binaries embed the dashboard (go:embed all:dist); it is build
+      # output, not committed, so build it before anything compiles it in.
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.21.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Build dashboard
+        run: make web
       - name: Run tests
         # 30m, not the 10m default: internal/httpapi opens a migrated store per
         # test, which under -race on a two-core runner takes past ten minutes.
@@ -179,10 +191,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          # The stale-bundle guard below diffs against the merge base, so it
-          # needs history rather than a shallow clone.
-          fetch-depth: 0
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 10.21.0
@@ -203,39 +211,6 @@ jobs:
       - name: Test
         working-directory: web
         run: pnpm test
-
-      # internal/webui/dist is TRACKED and embedded into the portal binary via
-      # //go:embed all:dist, and is regenerated only by `make web`. A change to
-      # web/src that ships without a rebuild is invisible in every test and
-      # silently reverts the dashboard in production — it happened once and cost
-      # a whole phase of work.
-      #
-      # This compares changed paths rather than rebuilding and byte-diffing:
-      # node/pnpm are not pinned tightly enough for a rebuilt bundle to be
-      # reproducible across machines, so a byte-compare would fail on toolchain
-      # drift rather than on the mistake we care about.
-      - name: Guard against a stale embedded bundle
-        run: |
-          set -euo pipefail
-          BASE="${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}"
-          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            echo "No usable base commit — skipping the stale-bundle guard."
-            exit 0
-          fi
-          CHANGED=$(git diff --name-only "$BASE" HEAD)
-          # Test files are never bundled, so touching one must not demand a rebuild.
-          SRC=$(echo "$CHANGED" | grep -E '^web/(src|index\.html|vite\.config\.ts|package\.json)' | grep -vE '\.test\.tsx?$' || true)
-          DIST=$(echo "$CHANGED" | grep -E '^internal/webui/dist/' || true)
-          if [ -n "$SRC" ] && [ -z "$DIST" ]; then
-            echo "::error::Dashboard source changed but internal/webui/dist was not rebuilt."
-            echo "The portal embeds internal/webui/dist via //go:embed, so these changes"
-            echo "would NOT reach users. Run 'make web' and commit the result."
-            echo ""
-            echo "Changed source files:"
-            echo "$SRC" | sed 's/^/  /'
-            exit 1
-          fi
-          echo "Bundle guard OK (src changed: $([ -n "$SRC" ] && echo yes || echo no), dist changed: $([ -n "$DIST" ] && echo yes || echo no))"
 
   build:
     name: Build

@@ -1,1 +1,0 @@
-function i(r,s){const a=new Set(s.map(e=>e.id));return r.flatMap(e=>{if(e.ended_at)return[];const t=(e.services??[]).map(n=>n.sandbox_id).filter(Boolean);return t.length===0?[]:t.every(n=>a.has(n))?[e.id]:[]})}export{i as c};

@@ -14,6 +14,22 @@ This page is how you satisfy yourself it is the binary this repository built.
 | `SHA256SUMS.sig`, `SHA256SUMS.pem` | Sigstore signature and certificate over `SHA256SUMS` |
 | `sbom.spdx.json` | SPDX SBOM of the source tree the binaries were built from |
 
+## Cutting a release
+
+Releases come only from tags on `main`; a push to a branch builds and tests but
+publishes nothing.
+
+```bash
+git switch main && git pull
+git tag sandboxd/v1.0.0
+git push origin sandboxd/v1.0.0
+```
+
+The release workflow refuses a tag whose commit is not on `main`, builds the
+dashboard from the tagged source, runs the tests, then builds, signs and
+publishes the binaries above. The dashboard is not committed; every binary
+embeds the one built for its tag.
+
 ## Verify
 
 ```bash

@@ -42,7 +42,7 @@ serve: web sandboxd
 	@echo "── Serving sandboxd (fresh web UI) on http://localhost:$${PORT:-8080}"
 	@SANDBOXD_DATA=$${SANDBOXD_DATA:-/tmp/sandboxd} PORT=$${PORT:-8080} ./bin/sandboxd
 
-dev-build:
+dev-build: web
 	@echo "── Building envd (local)..."
 	@go build -o bin/envd-local ./cmd/envd/
 	@echo "── Building devserver..."
@@ -102,7 +102,7 @@ agentd-local:
 # No -tags, and specifically not `dev`: an untagged build contains no runtime
 # that runs customer code without a boundary. See release.yml and
 # internal/nodeboot/releaseclosure_test.go, which asserts it against the closure.
-sandboxd-linux:
+sandboxd-linux: web
 	@echo "── Building sandboxd (linux/amd64)..."
 	@GOOS=linux GOARCH=amd64 go build -o bin/sandboxd-linux ./cmd/sandboxd/
 	@GOOS=linux GOARCH=amd64 go build -o bin/pilldrops-join-linux ./cmd/pilldrops-join/
@@ -282,7 +282,7 @@ docs-check:
 check:
 	@CHECK_HOST="$(CHECK_HOST)" ./scripts/check.sh $(if $(STRICT),--strict,) $(if $(ONLY),--only=$(ONLY),)
 
-test:
+test: web
 	@echo "── Running Go tests..."
 	go test -race ./...
 	@echo "── Checking no package with tests silently ran none..."
@@ -469,6 +469,7 @@ help:
 # to disable and nothing to get wrong.
 web:
 	@echo "── Building dashboard SPA…"
-	@cd web && pnpm install --silent && pnpm build
+	@cd web && pnpm install --frozen-lockfile --silent && pnpm build
 	@rm -rf internal/webui/dist && cp -r web/dist internal/webui/dist
+	@touch internal/webui/dist/.gitkeep
 	@echo "── SPA built and synced into internal/webui/dist (rebuild sandboxd to embed)"
