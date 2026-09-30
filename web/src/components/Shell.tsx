@@ -45,7 +45,7 @@ export default function Shell() {
           <div className="nm">
             {IS_ADMIN ? 'pilldrops admin' : 'pilldrops'}
             <span className="beta">Beta</span>
-            <small>{IS_ADMIN ? 'control plane · cluster' : 'cloud sandboxes'}</small>
+            <small>{IS_ADMIN ? 'control plane · cluster' : 'self-hosted sandboxes'}</small>
           </div>
         </div>
 
@@ -54,7 +54,7 @@ export default function Shell() {
         <div className="foot">
           <div className="rt">
             <span className="d" />
-            {IS_ADMIN ? `runtime · ${window.__SANDBOXD__?.runtime ?? 'process'}` : 'pilldrops cloud'} · v1.0
+            runtime · {window.__SANDBOXD__?.runtime ?? 'process'} · v1.0
           </div>
         </div>
       </aside>

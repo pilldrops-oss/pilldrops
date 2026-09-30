@@ -82,7 +82,7 @@ func TestFirstRunOffersSetup(t *testing.T) {
 	if !strings.Contains(body, "/dashboard/setup") {
 		t.Error("first run did not offer the setup form")
 	}
-	if !strings.Contains(body, "Create the administrator account") {
+	if !strings.Contains(body, "Create the admin account") {
 		t.Error("setup form missing its heading")
 	}
 	if strings.Contains(body, "API key") {

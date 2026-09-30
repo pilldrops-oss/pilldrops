@@ -25,6 +25,8 @@ type Server struct {
 	logs      *LogBroadcaster
 	limits    Limits
 	templates []string
+	// consoleKey: see SetConsoleKey.
+	consoleKey string
 
 	done      chan struct{} // closed by Close; ends the SSE streams
 	closeOnce sync.Once
@@ -37,6 +39,10 @@ func New(d *daemon.Daemon, st *store.Store, logs *LogBroadcaster, limits Limits,
 	}
 	return &Server{d: d, st: st, logs: logs, limits: limits, templates: templates, done: make(chan struct{})}
 }
+
+// SetConsoleKey accepts the dashboard's signed account session in place of the
+// key it was signed with, as httpapi.Server.SetConsoleKey does.
+func (s *Server) SetConsoleKey(key string) { s.consoleKey = key }
 
 // Close ends all open SSE streams. Wire it to http.Server.RegisterOnShutdown:
 // an SSE stream never returns on its own, so it would hold Shutdown until the

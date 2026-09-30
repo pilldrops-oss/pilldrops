@@ -936,9 +936,10 @@ closed by TLS itself.
 
 ## First run: claim the console
 
-The operator console has its own accounts. On a deployment nobody has claimed,
-`/dashboard` offers a **setup form** — email and password — and the account it
-creates is the super admin, stored in your own database.
+The dashboard has its own accounts, on a single `sandboxd` node and on a control
+plane alike. On a server nobody has claimed, `/dashboard` offers a **setup
+form** — email and password — and the account it creates is the administrator,
+stored in the server's own database (SQLite or Postgres).
 
 It used to ask for `ORCHESTRATOR_API_KEY` pasted into a password box. That works
 and has three problems: the key is a bearer credential for the whole `/v1`
@@ -964,9 +965,9 @@ without rotating it for every SDK caller.
 `ORCHESTRATOR_API_KEY` still authenticates `/v1` — SDKs and `curl` are
 unchanged. It just no longer opens the console.
 
-**A single-box `sandboxd` with no shared database keeps the API-key prompt.**
-There is nowhere to store an account, and the operator of that box already holds
-the key.
+The API key a node writes to `bootstrap.key` is for SDKs, the CLI and `curl`;
+it does not open the dashboard. `make dev` has no sign-in at all: it is
+anonymous and bound to localhost.
 
 ## The root is the dashboard
 

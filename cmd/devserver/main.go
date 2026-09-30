@@ -2951,31 +2951,34 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	listeners, err := listenLocal(addr)
+	if err != nil {
+		log.Fatal("cannot listen", zap.String("addr", addr), zap.Error(err))
+	}
+	_, port, _ := net.SplitHostPort(addr)
+	base := "http://localhost:" + port
+	for _, ln := range listeners[1:] {
+		go func() {
+			if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+				log.Fatal("server error", zap.Error(err))
+			}
+		}()
+	}
 	go func() {
 		log.Info("server_ready",
-			zap.String("dashboard", "http://localhost:8080/dashboard"),
-			zap.String("api", "http://localhost:8080/v1/sandboxes"),
+			zap.String("dashboard", base+"/dashboard"),
+			zap.String("api", base+"/v1/sandboxes"),
 			zap.String("dev_key", devKey),
 		)
 		fmt.Println()
-		fmt.Println("  ╔══════════════════════════════════════════════════════╗")
-		fmt.Println("  ║  PillDrops — Dev Mode (Real Execution)              ║")
-		fmt.Println("  ╠══════════════════════════════════════════════════════╣")
-		fmt.Println("  ║                                                      ║")
-		fmt.Println("  ║  Dashboard:  http://localhost:8080/dashboard          ║")
-		fmt.Println("  ║  API:        http://localhost:8080/v1/sandboxes       ║")
-		fmt.Println("  ║  Health:     http://localhost:8080/health             ║")
-		fmt.Println("  ║                                                      ║")
-		fmt.Println("  ║  API Key:    " + devKey + "  ║")
-		fmt.Println("  ║                                                      ║")
-		fmt.Println("  ║  Try:                                                ║")
-		fmt.Println("  ║    curl -X POST localhost:8080/v1/sandboxes \\        ║")
-		fmt.Println("  ║      -d '{\"template\":\"python-3.11\"}'                 ║")
-		fmt.Println("  ║                                                      ║")
-		fmt.Println("  ║  Press Ctrl+C to stop                                ║")
-		fmt.Println("  ╚══════════════════════════════════════════════════════╝")
-		fmt.Println()
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		fmt.Printf("\n  PillDrops dev server (local runtime: commands run as you, unisolated)\n\n"+
+			"    Dashboard  %[1]s/dashboard\n    API        %[1]s/v1/sandboxes\n    Health     %[1]s/health\n\n"+
+			"    Try: curl -X POST %[1]s/v1/sandboxes -d '{\"template\":\"python-3.11\"}'\n\n"+
+			"  Press Ctrl+C to stop\n\n", base)
+		if devKey != "" {
+			fmt.Printf("  API key: %s\n\n", devKey)
+		}
+		if err := srv.Serve(listeners[0]); err != nil && err != http.ErrServerClosed {
 			log.Fatal("server error", zap.Error(err))
 		}
 	}()

@@ -165,44 +165,53 @@ var dummyHash = func() string {
 	return h
 }()
 
-// consoleCSS mirrors the dashboard tokens in web/src/theme.css; change both together.
+// consoleCSS mirrors the dashboard's tokens and components in web/src/theme.css
+// (.ws brand block, .mark, .btn.primary, the dotted body); change both together.
 const consoleCSS = `:root{` +
-	`--bg:#fefdfb;--surface:#ffffff;--line:rgba(20,18,12,.13);` +
-	`--ink:#141310;--sub:#565448;--dim:#8b887c;` +
-	`--primbg:#0c8a56;--primfg:#ffffff;--primbg-h:#0a7548;` +
+	`--bg:#fefdfb;--surface:#ffffff;--line:rgba(20,18,12,.13);--line2:rgba(20,18,12,.26);` +
+	`--ink:#141310;--sub:#565448;--dim:#8b887c;--dots:rgba(20,18,12,.055);` +
+	`--primbg:#0c8a56;--primfg:#ffffff;--primbg-h:#0a7548;--ring:rgba(12,138,86,.14);` +
 	`--danger:#b3261e;--dangersoft:rgba(179,38,30,.08);` +
 	`--cardsh:0 1px 3px rgba(20,18,12,.04);--r:5px;` +
 	`--sans:'Hanken Grotesk',system-ui,-apple-system,sans-serif;` +
 	`--mono:'JetBrains Mono',ui-monospace,monospace}` +
 	// Dark variant, keyed on both the root attribute this page sets and the SPA's body.dark.
 	`:root[data-theme="dark"],body.dark{` +
-	`--bg:#131210;--surface:#1a1815;--line:rgba(244,240,230,.12);` +
-	`--ink:#f4f1e8;--sub:#a8a294;--dim:#7a7567;` +
-	`--primbg:#35c98a;--primfg:#131210;--primbg-h:#2fb87e;` +
+	`--bg:#131210;--surface:#1a1815;--line:rgba(244,240,230,.12);--line2:rgba(244,240,230,.26);` +
+	`--ink:#f4f1e8;--sub:#a8a294;--dim:#7a7567;--dots:rgba(244,240,230,.06);` +
+	`--primbg:#35c98a;--primfg:#131210;--primbg-h:#2fb87e;--ring:rgba(53,201,138,.16);` +
 	`--danger:#f87171;--dangersoft:rgba(220,38,38,.08);` +
 	`--cardsh:none}` +
 	`*,*::before,*::after{box-sizing:border-box}` +
 	`html,body{margin:0;height:100%}` +
-	`body{font-family:var(--sans);background:var(--bg);color:var(--ink);` +
+	`body{font-family:var(--sans);font-size:14px;background:var(--bg);color:var(--ink);` +
+	`-webkit-font-smoothing:antialiased;` +
+	`background-image:radial-gradient(var(--dots) 1px,transparent 1px);background-size:22px 22px;` +
 	`display:flex;min-height:100%;align-items:center;justify-content:center;padding:1.5rem}` +
-	`form{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);` +
-	`box-shadow:var(--cardsh);padding:1.75rem;width:100%;max-width:360px}` +
-	`h1{font-size:1rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .35rem;color:var(--ink)}` +
-	`p.sub{color:var(--sub);font-size:.82rem;line-height:1.5;margin:0 0 1.25rem}` +
-	`label{display:block;font-size:.75rem;font-weight:500;color:var(--sub);margin:0 0 .35rem}` +
-	`input{width:100%;padding:.55rem .65rem;font:inherit;font-size:.9rem;color:var(--ink);` +
-	`background:var(--bg);border:1px solid var(--line);border-radius:var(--r);margin:0 0 .9rem;` +
+	`main{width:100%;max-width:380px}` +
+	`.ws{display:flex;align-items:center;gap:11px;margin:0 0 18px 2px}` +
+	`.mark{width:28px;height:28px;border-radius:var(--r);flex:none;position:relative;` +
+	`background:conic-gradient(from 210deg,#e05d2a,#ffb03a 30%,#35c98a 66%,#0f3d28 100%)}` +
+	`.mark::after{content:'';position:absolute;inset:6px;background:var(--bg);border-radius:2px}` +
+	`.nm{font-weight:700;font-size:14px;line-height:1.1;letter-spacing:-.2px}` +
+	`.nm small{display:block;color:var(--dim);font-weight:500;font-size:11px}` +
+	`form{background:var(--surface);border:1px solid var(--line);border-radius:14px;` +
+	`box-shadow:var(--cardsh);padding:28px}` +
+	`h1{font-family:var(--mono);font-size:18px;font-weight:700;letter-spacing:-.02em;margin:0 0 16px;color:var(--ink)}` +
+	`p.sub{color:var(--sub);font-size:13px;line-height:1.55;margin:-10px 0 20px}` +
+	`label{display:block;font-size:12.5px;font-weight:600;color:var(--ink);margin:0 0 5px}` +
+	`input{width:100%;padding:8px 11px;font:inherit;font-size:13.5px;color:var(--ink);` +
+	`background:var(--bg);border:1px solid var(--line2);border-radius:var(--r);margin:0 0 14px;` +
 	`transition:border-color .12s ease}` +
-	`input:focus{outline:none;border-color:var(--primbg);box-shadow:0 0 0 3px rgba(12,138,86,.12)}` +
-	`body.dark input:focus{box-shadow:0 0 0 3px rgba(53,201,138,.15)}` +
-	`button{width:100%;padding:.6rem;font:inherit;font-size:.88rem;font-weight:600;cursor:pointer;` +
-	`color:var(--primfg);background:var(--primbg);border:0;border-radius:var(--r);` +
-	`transition:background .12s ease}` +
-	`button:hover{background:var(--primbg-h)}` +
+	`input:focus{outline:none;border-color:var(--primbg);box-shadow:0 0 0 3px var(--ring)}` +
+	`button{width:100%;margin-top:4px;padding:9px 14px;font-family:var(--mono);font-size:12.5px;` +
+	`font-weight:600;letter-spacing:.01em;cursor:pointer;color:var(--primfg);background:var(--primbg);` +
+	`border:1px solid var(--primbg);border-radius:var(--r);transition:background .12s ease}` +
+	`button:hover{background:var(--primbg-h);border-color:var(--primbg-h)}` +
 	`button:focus-visible{outline:2px solid var(--primbg);outline-offset:2px}` +
 	`.err{color:var(--danger);background:var(--dangersoft);border:1px solid var(--danger);` +
-	`border-radius:var(--r);padding:.5rem .65rem;font-size:.8rem;margin:0 0 .9rem;line-height:1.45}` +
-	`.hint{color:var(--dim);font-size:.75rem;margin:.9rem 0 0;line-height:1.5}` +
+	`border-radius:6px;padding:9px 12px;font-size:13px;margin:0 0 14px;line-height:1.45}` +
+	`.hint{color:var(--dim);font-size:12px;margin:14px 0 0;line-height:1.5}` +
 	`@media (prefers-reduced-motion:reduce){*{transition:none!important}}`
 
 // themeScript reads the SPA's stored theme choice. It runs synchronously in
@@ -216,7 +225,14 @@ func consoleShell(title, body string) []byte {
 		`<meta name="viewport" content="width=device-width,initial-scale=1">` +
 		`<meta name="robots" content="noindex">` +
 		`<title>` + title + `</title>` + themeScript +
-		`<style>` + consoleCSS + `</style></head><body>` + body + `</body></html>`)
+		// The dashboard's own faces, from the same source web/index.html loads them.
+		`<link rel="preconnect" href="https://fonts.googleapis.com">` +
+		`<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>` +
+		`<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700` +
+		`&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">` +
+		`<style>` + consoleCSS + `</style></head><body><main>` +
+		`<div class="ws"><div class="mark"></div><div class="nm">pilldrops<small>self-hosted sandboxes</small></div></div>` +
+		body + `</main></body></html>`)
 }
 
 func banner(errMsg string) string {
@@ -229,9 +245,9 @@ func banner(errMsg string) string {
 // setupHTML is the first-run form.
 func setupHTML(errMsg string) []byte {
 	return consoleShell("PillDrops — set up", `<form method="post" action="/dashboard/setup">`+
-		`<h1>Create the administrator account</h1>`+
-		`<p class="sub">This deployment has no administrator yet. The account you create `+
-		`here is the super admin for this fleet, stored in your own database.</p>`+
+		`<h1>Create the admin account</h1>`+
+		`<p class="sub">Nobody has set up this server yet. The account you create now is `+
+		`its administrator, stored in the server's own database.</p>`+
 		banner(errMsg)+
 		`<label for="email">Email</label>`+
 		`<input id="email" type="email" name="email" autofocus autocomplete="username" required>`+
@@ -241,13 +257,13 @@ func setupHTML(errMsg string) []byte {
 		`<input id="confirm" type="password" name="confirm" autocomplete="new-password" required>`+
 		`<button type="submit">Create account</button>`+
 		`<p class="hint">At least `+strconv.Itoa(adminauth.MinPasswordLen)+` characters. `+
-		`Nothing is sent anywhere — this is your deployment's own database.</p>`+
+		`Nothing leaves this server.</p>`+
 		`</form>`)
 }
 
 func signinHTML(errMsg string) []byte {
 	return consoleShell("PillDrops — sign in", `<form method="post" action="/dashboard/login">`+
-		`<h1>PillDrops control plane</h1>`+
+		`<h1>Sign in</h1>`+
 		banner(errMsg)+
 		`<label for="email">Email</label>`+
 		`<input id="email" type="email" name="email" autofocus autocomplete="username" required>`+

@@ -210,14 +210,19 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("web ui: %w", err)
 	}
+	// The dashboard signs in with an account: the first visitor creates the
+	// administrator, stored in this node's own database.
+	ui.SetAdminStore(store.AccountsOf(st))
 
 	mux := http.NewServeMux()
 	api := nodeboot.NewNodeAPI(bootCtx, d, st, dataDir, sandboxDomain, orchURL, nodeboot.Env("ORCHESTRATOR_API_KEY", ""))
 	// A node hit directly, not via the orchestrator, must also fail closed.
 	api.SetIsolationOK(!preflightFailed)
+	api.SetConsoleKey(sessionKey)
 	api.Register(mux)
 	ma, rps, burst := api.Limits()
 	dash := dashboard.New(d, st, dashLogs, dashboard.Limits{MaxActive: ma, RateRPS: rps, RateBurst: burst})
+	dash.SetConsoleKey(sessionKey)
 	dash.Register(mux)
 	ui.Register(mux)
 

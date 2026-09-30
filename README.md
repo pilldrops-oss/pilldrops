@@ -63,8 +63,11 @@ Linux with KVM (Firecracker) or Docker:
 make sandboxd
 export SANDBOXD_DATA=/var/lib/sandboxd
 sudo -E ./bin/sandboxd                        # serves on :8080
-sudo cat /var/lib/sandboxd/bootstrap.key      # your API key
+sudo cat /var/lib/sandboxd/bootstrap.key      # your API key, for SDKs and the CLI
 ```
+
+Open `http://<server>:8080/dashboard`: the first visit asks you to create the
+admin account (email and password), which signs you in from then on.
 
 `scripts/provision-node.sh` sets up a bare KVM host (Firecracker, kernel,
 templates). See [deployment](docs/deployment.md) for everything else.

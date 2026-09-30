@@ -509,7 +509,7 @@ function EmptyState({ onLaunch }: { onLaunch: (templateId?: string) => void }) {
       </div>
       <h2>Launch your first sandbox</h2>
       <p>
-        Spin up a disposable cloud environment in seconds — pick a template, run code
+        Spin up a disposable, isolated machine in seconds — pick a template, run code
         or a web app, and get a live preview URL.
       </p>
       <div className="empty-hero-cta">

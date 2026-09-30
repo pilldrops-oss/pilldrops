@@ -43,6 +43,9 @@ type Server struct {
 	// allowDirectTenantAPI re-opens the customer API to non-operator keys on a
 	// clustered node. Off by default.
 	allowDirectTenantAPI bool
+	// consoleKey signs the dashboard's account sessions (webui) and is itself the
+	// API key the dashboard acts with; empty when the dashboard uses the key form.
+	consoleKey string
 	// orgOverrideSecret verifies the signed X-Org-Override assertion. Unset means
 	// the override is refused unless devInsecure().
 	orgOverrideSecret []byte
@@ -157,6 +160,11 @@ func (s *Server) SetSandboxDomain(domain string) { s.sandboxDomain = domain }
 
 // SetIsolationOK records whether the boot-time isolation preflight passed.
 func (s *Server) SetIsolationOK(ok bool) { s.isolationOK.Store(ok) }
+
+// SetConsoleKey accepts the dashboard's signed account session in place of the
+// key it was signed with. Without it the dashboard would sign someone in and
+// then be refused on every call it makes.
+func (s *Server) SetConsoleKey(key string) { s.consoleKey = key }
 
 // SetDataDir sets the filesystem the host endpoint reports disk usage for. Empty means "/".
 func (s *Server) SetDataDir(dir string) {

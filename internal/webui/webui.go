@@ -432,7 +432,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // loginHTML is the API-key form a single-box node uses; errMsg is shown when set.
 func loginHTML(errMsg string) []byte {
 	return consoleShell("PillDrops — sign in", `<form method="post" action="/dashboard/login">`+
-		`<h1>PillDrops control plane</h1>`+
+		`<h1>Sign in</h1>`+
 		banner(errMsg)+
 		`<label for="key">API key</label>`+
 		`<input id="key" type="password" name="key" autofocus autocomplete="current-password" required>`+

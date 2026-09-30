@@ -3,6 +3,9 @@ package dashboard
 import (
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/pilldrops-oss/pilldrops/internal/auth/adminauth"
 )
 
 // sessionCookie is the same-origin cookie webui sets; the browser attaches it
@@ -18,6 +21,12 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		if token == "" {
 			if c, err := r.Cookie(sessionCookie); err == nil {
 				token = c.Value
+				// A signed account session stands for the key that signed it.
+				if s.consoleKey != "" {
+					if _, err := adminauth.VerifySession([]byte(s.consoleKey), c.Value, time.Now()); err == nil {
+						token = s.consoleKey
+					}
+				}
 			}
 		}
 		if token == "" {

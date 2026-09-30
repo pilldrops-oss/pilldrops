@@ -268,7 +268,7 @@ func (s *Server) SetStore(st *store.Store) {
 		})
 	}
 	if s.ui != nil && st != nil {
-		s.ui.SetAdminStore(adminStoreAdapter{st: st})
+		s.ui.SetAdminStore(store.AccountsOf(st))
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/pilldrops-oss/pilldrops/internal/auth/adminauth"
 	"github.com/pilldrops-oss/pilldrops/internal/auth/authcache"
 	"github.com/pilldrops-oss/pilldrops/internal/auth/orgassert"
 	"github.com/pilldrops-oss/pilldrops/internal/httpx"
@@ -54,6 +55,12 @@ func (s *Server) auth(next http.HandlerFunc) http.Handler {
 			token = ""
 			if c, err := r.Cookie(sessionCookie); err == nil {
 				token = c.Value
+				// A signed account session stands for the key that signed it.
+				if s.consoleKey != "" {
+					if _, err := adminauth.VerifySession([]byte(s.consoleKey), c.Value, time.Now()); err == nil {
+						token = s.consoleKey
+					}
+				}
 			}
 		}
 		if token == "" {
