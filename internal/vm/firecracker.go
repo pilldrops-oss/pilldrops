@@ -117,7 +117,7 @@ func cleanJailerRoot(chrootRoot string) {
 		return
 	}
 	dir := filepath.Dir(chrootRoot) // …/<execBase>/<jailerID>
-	os.RemoveAll(dir)
+	_ = os.RemoveAll(dir)
 	// Same leaf prepareVMMCgroup created.
 	rmdirCgroupTree(vmmCgroupPath(filepath.Base(dir)))
 }
@@ -134,7 +134,7 @@ func rmdirCgroupTree(path string) {
 			rmdirCgroupTree(filepath.Join(path, e.Name()))
 		}
 	}
-	os.Remove(path)
+	_ = os.Remove(path)
 }
 
 // buildKernelArgs builds the guest's /proc/cmdline. Only the token hash rides it,
@@ -165,7 +165,7 @@ func buildKernelArgs(vmIP net.IP, sandboxID, tokenHash string) string {
 func startFirecracker(ctx context.Context, fc FirecrackerConfig) (FirecrackerMachine, error) {
 	// Chroot-relative; the jailer only provisions /run, so a /tmp socket fails to bind.
 	socketPath := filepath.Join("/run", fc.SandboxID+".sock")
-	os.Remove(socketPath)
+	_ = os.Remove(socketPath)
 
 	// A cold boot is usually the fallback after a snapshot restore under the
 	// same id failed, and that attempt left its jail behind: the jailer then
@@ -263,7 +263,7 @@ func (fc FirecrackerConfig) devices() (net.IP, string, []models.Drive, []firecra
 func restoreFirecrackerSnapshot(fc FirecrackerConfig) (FirecrackerMachine, error) {
 	// Chroot-relative; the jailer only provisions /run.
 	socketPath := filepath.Join("/run", fc.SandboxID+".sock")
-	os.Remove(socketPath)
+	_ = os.Remove(socketPath)
 
 	// A resume reuses the sandbox id and the jailer refuses an existing
 	// chroot/cgroup, so clear the previous run's first.
@@ -480,7 +480,7 @@ func (s snapshotChrootStrategy) AdaptHandlers(handlers *firecracker.Handlers) er
 					if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 						return fmt.Errorf("mkdir snapshot chroot path: %w", err)
 					}
-					os.Remove(dst) // clear a stale link from a prior boot
+					_ = os.Remove(dst) // clear a stale link from a prior boot
 					if err := linkOrCopy(host, dst); err != nil {
 						return fmt.Errorf("mirror snapshot file %s into chroot: %w", host, err)
 					}
@@ -498,13 +498,13 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+		_ = out.Close()
 		return err
 	}
 	return out.Close()

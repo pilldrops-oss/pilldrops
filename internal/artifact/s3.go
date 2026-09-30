@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -282,7 +283,7 @@ func (s *S3) Put(ctx context.Context, key string, r io.Reader, size int64) error
 	}
 	first := make([]byte, s3PartSize)
 	n, err := io.ReadFull(body, first)
-	if err == io.EOF || err == io.ErrUnexpectedEOF {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return s.putOnce(ctx, key, u, bytes.NewReader(first[:n]), int64(n))
 	}
 	if err != nil {

@@ -48,7 +48,7 @@ func (m *Manager) DeliverIdentity(sandboxID string, id runtime.Identity) error {
 		id.APIURL = fmt.Sprintf("http://%s:%d", slotIP(slot, 1), port)
 	}
 	if err := pushToGuest(sb.Machine.ChrootRoot(), sandboxID, identityCommand(id), credPushDeadline); err != nil {
-		return fmt.Errorf("%w: %v", ErrIdentityPush, err)
+		return fmt.Errorf("%w: %w", ErrIdentityPush, err)
 	}
 	return nil
 }

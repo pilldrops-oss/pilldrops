@@ -18,6 +18,7 @@ package vm
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -111,7 +112,7 @@ func vsockUDSPath(chrootRoot, sandboxID string) (string, error) {
 
 	matches, err := filepath.Glob(filepath.Join(runDir, "*.vsock"))
 	if err != nil {
-		return "", fmt.Errorf("%w: globbing %s: %v", ErrVsockUDSNotFound, runDir, err)
+		return "", fmt.Errorf("%w: globbing %s: %w", ErrVsockUDSNotFound, runDir, err)
 	}
 	switch len(matches) {
 	case 1:
@@ -140,23 +141,23 @@ func pushCommand(udsPath string, port int, command string) error {
 		verb = verb[:i]
 	}
 
-	c, err := net.DialTimeout("unix", udsPath, credPushTimeout)
+	c, err := (&net.Dialer{Timeout: credPushTimeout}).DialContext(context.Background(), "unix", udsPath)
 	if err != nil {
-		return fmt.Errorf("%w: dial %s: %v", ErrCredentialPush, udsPath, err)
+		return fmt.Errorf("%w: dial %s: %w", ErrCredentialPush, udsPath, err)
 	}
 	defer func() { _ = c.Close() }()
 	if err := c.SetDeadline(time.Now().Add(credPushTimeout)); err != nil {
-		return fmt.Errorf("%w: set deadline on %s: %v", ErrCredentialPush, udsPath, err)
+		return fmt.Errorf("%w: set deadline on %s: %w", ErrCredentialPush, udsPath, err)
 	}
 	br := bufio.NewReader(c)
 
 	// Firecracker's handshake; its ack only means the guest kernel connected.
 	if _, err := fmt.Fprintf(c, "CONNECT %d\n", port); err != nil {
-		return fmt.Errorf("%w: write CONNECT to %s: %v", ErrCredentialPush, udsPath, err)
+		return fmt.Errorf("%w: write CONNECT to %s: %w", ErrCredentialPush, udsPath, err)
 	}
 	ack, err := br.ReadString('\n')
 	if err != nil {
-		return fmt.Errorf("%w: no CONNECT ack from %s (guest vsock port %d): %v",
+		return fmt.Errorf("%w: no CONNECT ack from %s (guest vsock port %d): %w",
 			ErrCredentialPush, udsPath, port, err)
 	}
 	if !strings.HasPrefix(ack, "OK") {
@@ -166,7 +167,7 @@ func pushCommand(udsPath string, port int, command string) error {
 
 	// envd writes this reply itself after applying the command.
 	if _, err := fmt.Fprintf(c, "%s\n", command); err != nil {
-		return fmt.Errorf("%w: write %s to %s: %v", ErrCredentialPush, verb, udsPath, err)
+		return fmt.Errorf("%w: write %s to %s: %w", ErrCredentialPush, verb, udsPath, err)
 	}
 	reply, err := br.ReadString('\n')
 	if err != nil {

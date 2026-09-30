@@ -3,6 +3,7 @@ package egressproxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"net"
@@ -62,7 +63,7 @@ func sniffSNI(r *recorder) string {
 	// The error is always non-nil and always ignored: either the hello parsed
 	// and we stopped it, or it was not a TLS hello at all — in which case there
 	// is no name, the bytes are still recorded, and the address decides.
-	_ = tls.Server(r, cfg).Handshake()
+	_ = tls.Server(r, cfg).HandshakeContext(context.Background())
 	return name
 }
 

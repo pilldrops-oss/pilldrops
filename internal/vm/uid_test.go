@@ -18,8 +18,9 @@ func TestUidForSandbox_DistinctForPoolIDs(t *testing.T) {
 }
 
 func TestUidForSandbox_Deterministic(t *testing.T) {
-	if uidForSandbox("sb_1784_abc") != uidForSandbox("sb_1784_abc") {
-		t.Fatal("must be deterministic for the same id (pause/resume ownership depends on it)")
+	first := uidForSandbox("sb_1784_abc")
+	if again := uidForSandbox("sb_1784_abc"); again != first {
+		t.Fatalf("got %d then %d: "+"must be deterministic for the same id (pause/resume ownership depends on it)", first, again)
 	}
 }
 

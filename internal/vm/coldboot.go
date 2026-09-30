@@ -65,7 +65,7 @@ func ColdBoot(template, sandboxID string, cfg Config, log *zap.Logger, vcpu, mem
 	})
 	if err != nil {
 		TeardownVMNetwork(net.TapName)
-		os.Remove(overlayPath)
+		_ = os.Remove(overlayPath)
 		return nil, fmt.Errorf("firecracker start: %w", err)
 	}
 
@@ -109,7 +109,7 @@ func coldBootNetNS(template, sandboxID string, cfg Config, log *zap.Logger, uid,
 	})
 	if err != nil {
 		teardownNetNS(ns.Name)
-		os.Remove(overlayPath)
+		_ = os.Remove(overlayPath)
 		return nil, fmt.Errorf("firecracker start (netns): %w", err)
 	}
 

@@ -84,8 +84,8 @@ func Listen(ctx context.Context, path string, uid int, blockSize, maxBytes uint6
 	}
 	ready := make(chan *Server, 1)
 	go func() {
-		defer l.Close()
-		defer os.Remove(path)
+		defer func() { _ = l.Close() }()
+		defer func() { _ = os.Remove(path) }()
 		_ = l.SetDeadline(time.Now().Add(60 * time.Second))
 		conn, err := l.AcceptUnix()
 		if err != nil {
@@ -119,16 +119,16 @@ func handshake(conn *net.UnixConn, blockSize, maxBytes uint64, src Source) (*Ser
 	}
 	msgs, err := unix.ParseSocketControlMessage(oob[:oobn])
 	if err != nil || len(msgs) != 1 {
-		return nil, fmt.Errorf("uffd: handshake carried no descriptor (%v)", err)
+		return nil, fmt.Errorf("uffd: handshake carried no descriptor (%v)", err) //nolint:errorlint // err is nil when the parse succeeded but the count is wrong; %w would print %!w(<nil>)
 	}
 	fds, err := unix.ParseUnixRights(&msgs[0])
 	if err != nil || len(fds) != 1 {
-		return nil, fmt.Errorf("uffd: handshake carried no userfaultfd (%v)", err)
+		return nil, fmt.Errorf("uffd: handshake carried no userfaultfd (%v)", err) //nolint:errorlint // err is nil when the parse succeeded but the count is wrong; %w would print %!w(<nil>)
 	}
 	var regions []region
 	if err := json.Unmarshal(buf[:n], &regions); err != nil {
 		_ = unix.Close(fds[0])
-		return nil, fmt.Errorf("uffd: guest memory layout %q does not parse: %v", buf[:n], err)
+		return nil, fmt.Errorf("uffd: guest memory layout %q does not parse: %w", buf[:n], err)
 	}
 	if err := checkRegions(regions, maxBytes); err != nil {
 		_ = unix.Close(fds[0])
@@ -181,7 +181,7 @@ const (
 
 func (s *Server) serve(ctx context.Context) {
 	defer close(s.done)
-	defer unix.Close(s.uffd)
+	defer func() { _ = unix.Close(s.uffd) }()
 	// The prefetcher fills every block the VM has not touched, so the VM stops
 	// depending on this process as soon as it can.
 	pctx, cancel := context.WithCancel(ctx)
@@ -280,7 +280,7 @@ func (s *Server) fill(ctx context.Context, r region, rel uint64) error {
 	if err != nil {
 		return err
 	}
-	defer unix.Munmap(buf)
+	defer func() { _ = unix.Munmap(buf) }()
 	zero, err := s.src.ReadBlock(ctx, int64(off), buf)
 	if err != nil {
 		return fmt.Errorf("uffd: read memory at %d: %w", off, err)

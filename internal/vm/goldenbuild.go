@@ -13,10 +13,6 @@ import (
 // create cold boots; it is not a restore failure.
 var ErrNoGolden = errors.New("no golden snapshot for this template yet")
 
-// errGoldenSkipped means a build was not started: one is already running, or the
-// last one for this exact rootfs failed recently or was refused outright.
-var errGoldenSkipped = errors.New("golden snapshot build skipped")
-
 // goldenRetryAfter bounds how often a failed golden build is retried. Without it
 // every create against the template would boot another golden VM.
 const goldenRetryAfter = 10 * time.Minute
@@ -47,8 +43,6 @@ type goldenBuildState struct {
 	rootfsMod  time.Time
 	retryAfter time.Time
 }
-
-var goldens = &goldenBuilds{state: map[string]goldenBuildState{}}
 
 // start claims the right to build template's golden, or reports why not.
 func (g *goldenBuilds) start(template string, rootfsMod, now time.Time) bool {

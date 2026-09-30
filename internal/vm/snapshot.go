@@ -20,6 +20,13 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/envdproto"
 )
 
+// errGoldenSkipped means a build was not started: one is already running, or the
+// last one for this exact rootfs failed recently or was refused outright.
+var errGoldenSkipped = errors.New("golden snapshot build skipped")
+
+// goldens is the node's one record of golden builds (see goldenBuilds).
+var goldens = &goldenBuilds{state: map[string]goldenBuildState{}}
+
 // snapshotVersions is the rotation order; if every version fails, rebuild.
 var snapshotVersions = []string{"v1", "v2"}
 
@@ -135,7 +142,7 @@ func RestoreFromSnapshot(template, sandboxID string, cfg Config, log *zap.Logger
 				zap.Error(err),
 			)
 			// Mark this version corrupt so the next restore skips it.
-			os.Remove(filepath.Join(dir, "state"))
+			_ = os.Remove(filepath.Join(dir, "state"))
 			continue
 		}
 
@@ -199,7 +206,7 @@ func RebuildSnapshots(template string, cfg Config, log *zap.Logger) (err error) 
 
 	for _, ver := range snapshotVersions {
 		dir := snapshotDir(template, ver, cfg)
-		os.MkdirAll(dir, 0755)
+		_ = os.MkdirAll(dir, 0755)
 
 		if err := createOneSnapshot(template, dir, cfg, log); err != nil {
 			return fmt.Errorf("create snapshot %s/%s: %w", template, ver, err)
@@ -221,8 +228,8 @@ func createOneSnapshot(template, snapDir string, cfg Config, log *zap.Logger) er
 		return fmt.Errorf("cold boot: %w", err)
 	}
 	defer func() {
-		vm.Machine.Stop(context.Background())
-		os.Remove(vm.OverlayPath)
+		_ = vm.Machine.Stop(context.Background())
+		_ = os.Remove(vm.OverlayPath)
 		if vm.NetNS != "" {
 			teardownNetNS(vm.NetNS)
 		} else {
@@ -398,7 +405,7 @@ func restoreVersion(template, sandboxID, snapDir string, cfg Config, log *zap.Lo
 	}
 
 	failed := func(format string, a ...any) (*RestoredVM, error) {
-		machine.Stop(context.Background())
+		_ = machine.Stop(context.Background())
 		TeardownVMNetwork(tapName)
 		TeardownVMNetwork(golden.TapName)
 		deleteOverlay(overlayPath)
@@ -489,7 +496,7 @@ func restoreVersionNetNS(template, sandboxID, snapDir string, golden goldenIdent
 
 	if tokenHash != "" {
 		if err := deliverCredential(machine.ChrootRoot(), sandboxID, tokenHash, credPushDeadline); err != nil {
-			machine.Stop(context.Background())
+			_ = machine.Stop(context.Background())
 			teardownNetNS(ns.Name)
 			deleteOverlay(overlayPath)
 			return nil, fmt.Errorf("restore %s: %w", sandboxID, err)
@@ -539,15 +546,15 @@ func createRestoreOverlay(sandboxID string, uid int, snapDir, goldenBase string,
 	}
 	dst := filepath.Join(dir, goldenBase)
 	if err := copySparse(src, dst); err != nil {
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		return "", fmt.Errorf("copy the golden image for %s: %w", sandboxID, err)
 	}
 	if err := os.Chown(dst, uid, uid); err != nil {
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		return "", fmt.Errorf("chown overlay to %d: %w", uid, err)
 	}
 	if err := os.Chmod(dst, 0o600); err != nil {
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		return "", fmt.Errorf("chmod overlay: %w", err)
 	}
 	return dst, nil

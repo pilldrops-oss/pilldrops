@@ -8,6 +8,7 @@ package vm
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -148,7 +149,7 @@ func setupNetNS(sandboxID string, uid int, tapName string, guestIP net.IP, rules
 	if err != nil {
 		return nil, err
 	}
-	defer nsHandle.Close()
+	defer func() { _ = nsHandle.Close() }()
 
 	veth := &netlink.Veth{
 		LinkAttrs:     netlink.LinkAttrs{Name: vh},
@@ -227,7 +228,7 @@ func createNamespacedTap(name, tapName string, uid int) (netns.NsHandle, error) 
 		runtime.UnlockOSThread()
 		return netns.None(), fmt.Errorf("netns %s: current namespace: %w", name, err)
 	}
-	defer orig.Close()
+	defer func() { _ = orig.Close() }()
 
 	nsHandle, err := netns.NewNamed(name) // creates AND enters
 	if err != nil {
@@ -265,7 +266,7 @@ func createNamespacedTap(name, tapName string, uid int) (netns.NsHandle, error) 
 		// Leave the thread locked so the runtime retires it instead of scheduling
 		// another goroutine in the wrong namespace.
 		_ = nsHandle.Close()
-		return netns.None(), fmt.Errorf("netns %s: LEAKED THREAD, could not return to host namespace: %v (setup err: %v)", name, restoreErr, inErr)
+		return netns.None(), fmt.Errorf("netns %s: LEAKED THREAD, could not return to host namespace: %w (setup err: %v)", name, restoreErr, inErr) //nolint:errorlint // inErr is nil when setup succeeded; %w would print %!w(<nil>)
 	}
 	runtime.UnlockOSThread()
 
@@ -318,7 +319,7 @@ table ip %[1]s {
 // promises to leave alone. Plain FORWARD on a node with no docker, where a DROP
 // policy is someone's own hardening and the rules still have to survive it.
 func baseFilterChain() string {
-	if exec.Command("iptables", "-S", "DOCKER-USER").Run() == nil {
+	if exec.CommandContext(context.Background(), "iptables", "-S", "DOCKER-USER").Run() == nil {
 		return "DOCKER-USER"
 	}
 	return "FORWARD"
@@ -331,20 +332,20 @@ func baseFilterChain() string {
 // so it survives a reboot through the daemon, not through the restore unit.
 func allowNetNSPastBaseChains() {
 	for _, r := range netnsBaseChainRules(baseFilterChain()) {
-		if exec.Command("iptables", append([]string{"-C"}, r...)...).Run() == nil {
+		if exec.CommandContext(context.Background(), "iptables", append([]string{"-C"}, r...)...).Run() == nil {
 			continue
 		}
-		_ = exec.Command("iptables", append([]string{"-I"}, r...)...).Run()
+		_ = exec.CommandContext(context.Background(), "iptables", append([]string{"-I"}, r...)...).Run()
 	}
 }
 
 // applyRulesetInNS loads a ruleset inside a namespace. nsenter rather than
 // `ip netns exec`, which also unshares a mount namespace and remounts /sys.
 func applyRulesetInNS(nsPath, ruleset string) error {
-	cmd := exec.Command("nsenter", "--net="+nsPath, "nft", "-f", "-")
+	cmd := exec.CommandContext(context.Background(), "nsenter", "--net="+nsPath, "nft", "-f", "-")
 	cmd.Stdin = strings.NewReader(ruleset)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("nft in %s: %v: %s", nsPath, err, bytes.TrimSpace(out))
+		return fmt.Errorf("nft in %s: %w: %s", nsPath, err, bytes.TrimSpace(out))
 	}
 	return nil
 }
@@ -355,10 +356,10 @@ func EnsureNetNSHostRules() error {
 	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0); err != nil {
 		return fmt.Errorf("host ip_forward (netns mode forwards every guest packet through the host namespace): %w", err)
 	}
-	cmd := exec.Command("nft", "-f", "-")
+	cmd := exec.CommandContext(context.Background(), "nft", "-f", "-")
 	cmd.Stdin = strings.NewReader(buildNetNSHostRuleset(detectEgressIf()))
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("host nft table %s: %v: %s", netnsHostTable, err, bytes.TrimSpace(out))
+		return fmt.Errorf("host nft table %s: %w: %s", netnsHostTable, err, bytes.TrimSpace(out))
 	}
 	// After the table loads, and in this order: this table decides nothing on a
 	// node whose base filter FORWARD chain drops the traffic first, and this is
@@ -367,7 +368,7 @@ func EnsureNetNSHostRules() error {
 	if !hostHasIPv6() {
 		return nil
 	}
-	cmd6 := exec.Command("nft", "-f", "-")
+	cmd6 := exec.CommandContext(context.Background(), "nft", "-f", "-")
 	cmd6.Stdin = strings.NewReader(buildNetNSHostRuleset6())
 	if out, err := cmd6.CombinedOutput(); err != nil {
 		return fmt.Errorf("host nft table %s (the IPv6 backstop; this host HAS an IPv6 stack, "+

@@ -144,7 +144,7 @@ func (m *Manager) SnapshotSandbox(ctx context.Context, sandboxID, destDir string
 	// Unlike Destroy, the overlay is kept. On the bridge the tap outlives the VMM
 	// and is reused; a namespace is torn down so its slot is free while paused,
 	// and resume builds a fresh one around the same baked tap name and address.
-	sb.Machine.Stop(ctx)
+	_ = sb.Machine.Stop(ctx)
 	if sb.NetNS != "" {
 		teardownNetNS(sb.NetNS)
 	}
@@ -222,10 +222,9 @@ func (m *Manager) RestoreSandbox(ctx context.Context, sandboxID, srcDir string, 
 	// Network: a fresh namespace around the baked identity, or on the bridge the
 	// kept-alive tap with a fresh same-IP tap as fallback.
 	var (
-		nsName, nsPath string
-		tapName        = meta.TapName
-		nodeAddr       = origIP.String() + ":6001"
-		teardown       func()
+		nsName, nsPath, tapName string
+		nodeAddr                = origIP.String() + ":6001"
+		teardown                func()
 	)
 	if m.config.NetNS {
 		ns, err := setupNetNS(sandboxID, uid, meta.TapName, origIP, meta.Egress, m.log)
@@ -267,7 +266,7 @@ func (m *Manager) RestoreSandbox(ctx context.Context, sandboxID, srcDir string, 
 	// An empty token is refused rather than hashed: HashHex("") is a well-formed
 	// credential envd would accept and nothing could ever satisfy.
 	if meta.Token == "" {
-		machine.Stop(ctx)
+		_ = machine.Stop(ctx)
 		teardown()
 		return nil, fmt.Errorf("resume %s: %w: snapshot %s carries no access token "+
 			"(taken with envd auth off?), and a restored guest cannot be given one it does not have",
@@ -275,7 +274,7 @@ func (m *Manager) RestoreSandbox(ctx context.Context, sandboxID, srcDir string, 
 	}
 	tPush := time.Now()
 	if err := deliverCredential(machine.ChrootRoot(), sandboxID, sbtoken.HashHex(meta.Token), credPushDeadline); err != nil {
-		machine.Stop(ctx)
+		_ = machine.Stop(ctx)
 		teardown()
 		return nil, fmt.Errorf("resume %s: %w", sandboxID, err)
 	}
@@ -285,7 +284,7 @@ func (m *Manager) RestoreSandbox(ctx context.Context, sandboxID, srcDir string, 
 
 	sb, err := m.attachRestored(p, machine, t0)
 	if err != nil {
-		machine.Stop(ctx)
+		_ = machine.Stop(ctx)
 		teardown()
 		return nil, fmt.Errorf("envd not ready after resume: %w", err)
 	}

@@ -100,7 +100,7 @@ func RenderEgressChainErr(allow, deny []Entry, opts ChainOpts) ([]string, error)
 // too — Match puts allow first, so the verdict is the same and the userspace
 // hop buys nothing.
 func RenderDivertRule(allow, deny []Entry, opts ChainOpts) []string {
-	if opts.ProxyPort <= 0 || opts.IifName == "" || !(hasDomain(allow) || hasDomain(deny)) {
+	if opts.ProxyPort <= 0 || opts.IifName == "" || (!hasDomain(allow) && !hasDomain(deny)) {
 		return nil
 	}
 	out := make([]string, 0, len(reserved)+len(allow)+1)

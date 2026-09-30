@@ -129,7 +129,7 @@ func (a *BlobArchive) PutPause(ctx context.Context, id, src, pauseID string) err
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		st, err := f.Stat()
 		if err != nil {
 			return err

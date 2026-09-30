@@ -44,7 +44,7 @@ type RestoredVM struct {
 // Destroy tears down all resources associated with this VM.
 func (vm *RestoredVM) Destroy() {
 	if vm.Machine != nil {
-		vm.Machine.Stop(context.Background())
+		_ = vm.Machine.Stop(context.Background())
 		cleanJailerRoot(vm.Machine.ChrootRoot())
 	}
 	deleteOverlay(vm.OverlayPath)

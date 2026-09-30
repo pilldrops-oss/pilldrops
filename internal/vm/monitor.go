@@ -33,17 +33,18 @@ func diskWatchdog(ctx context.Context, mgr *Manager, log *zap.Logger) {
 				zap.Int("active_sandboxes", mgr.ActiveCount()),
 			)
 
-			if pct > 95 {
+			switch {
+			case pct > 95:
 				log.Error("disk_critical_destroying_sandboxes",
 					zap.Float64("percent", pct),
 				)
 				mgr.SetDiskPressure(true)
-			} else if pct > 80 {
+			case pct > 80:
 				log.Warn("disk_pressure_rejecting_creates",
 					zap.Float64("percent", pct),
 				)
 				mgr.SetDiskPressure(true)
-			} else {
+			default:
 				mgr.SetDiskPressure(false)
 			}
 		}

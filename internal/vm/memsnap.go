@@ -93,7 +93,7 @@ func (s *memSnapshot) finish() error {
 	t0 := time.Now()
 	var dirty int64
 	if s.kind == "diff" {
-		defer os.Remove(s.diff)
+		defer func() { _ = os.Remove(s.diff) }()
 		if err := copySparse(s.base, s.tmp); err != nil {
 			return fmt.Errorf("copy memory base: %w", err)
 		}
@@ -177,12 +177,12 @@ func applyDiff(diff, dst string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.OpenFile(dst, os.O_WRONLY, 0)
 	if err != nil {
 		return 0, err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	fd := int(in.Fd())
 	var off, total int64
 	for {

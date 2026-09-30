@@ -19,7 +19,7 @@ func seedEntropy() {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Mirrors struct rand_pool_info { int entropy_count; int buf_size; char buf[]; }.
 	const n = 512
@@ -30,7 +30,7 @@ func seedEntropy() {
 	}
 	if u, uerr := os.Open("/dev/urandom"); uerr == nil {
 		_, _ = u.Read(info.buf[:])
-		u.Close()
+		_ = u.Close()
 	}
 	binary.LittleEndian.PutUint64(info.buf[:8], uint64(time.Now().UnixNano()))
 	info.bufSize = n

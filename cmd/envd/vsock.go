@@ -27,11 +27,11 @@ func listenVsock(port int) (net.Listener, error) {
 	}
 	sa := &unix.SockaddrVM{CID: unix.VMADDR_CID_ANY, Port: uint32(port)}
 	if err := unix.Bind(fd, sa); err != nil {
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		return nil, fmt.Errorf("vsock bind port %d: %w", port, err)
 	}
 	if err := unix.Listen(fd, 16); err != nil {
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		return nil, fmt.Errorf("vsock listen port %d: %w", port, err)
 	}
 
@@ -51,7 +51,7 @@ func localVsockCID() (uint32, error) {
 	if err != nil {
 		return 0, fmt.Errorf("open /dev/vsock: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	cid, err := unix.IoctlGetInt(int(f.Fd()), unix.IOCTL_VM_SOCKETS_GET_LOCAL_CID)
 	if err != nil {
 		return 0, fmt.Errorf("get local vsock cid: %w", err)
@@ -93,8 +93,7 @@ func (l *vsockListener) Accept() (net.Conn, error) {
 			}
 		}
 	})
-	switch {
-	case err != nil || aerr != nil:
+	if err != nil || aerr != nil {
 		e := err
 		if e == nil {
 			e = aerr

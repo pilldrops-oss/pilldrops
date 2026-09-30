@@ -3,6 +3,7 @@
 package envd
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -17,7 +18,7 @@ import (
 // handshake, which this does not implement.
 func dialVsock(vsockPath string) (net.Conn, error) {
 	if host, _, err := net.SplitHostPort(vsockPath); err == nil && net.ParseIP(host) != nil {
-		return net.Dial("tcp", vsockPath)
+		return (&net.Dialer{}).DialContext(context.Background(), "tcp", vsockPath)
 	}
 	// Never fall back to a default: dialing the node's own loopback either
 	// reports healthy VMs dead or runs a tenant's commands against the wrong process.
@@ -54,13 +55,13 @@ func dialVsockRaw(vsockPath string) (net.Conn, error) {
 		Port: port,
 	}
 	if err := unix.Connect(fd, sa); err != nil {
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		return nil, fmt.Errorf("vsock connect: %w", err)
 	}
 
 	file := os.NewFile(uintptr(fd), "vsock-client")
 	conn, err := net.FileConn(file)
-	file.Close()
+	_ = file.Close()
 	if err != nil {
 		return nil, fmt.Errorf("vsock file conn: %w", err)
 	}

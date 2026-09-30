@@ -69,11 +69,11 @@ func TestVMMCgroupLimitsTrackTheVMSize(t *testing.T) {
 	small := vmmCgroupLimits(512, 1)
 	large := vmmCgroupLimits(8192, 8)
 
-	if !(small.MemoryMaxBytes < large.MemoryMaxBytes) {
+	if small.MemoryMaxBytes >= large.MemoryMaxBytes {
 		t.Errorf("memory.max does not scale: 512MiB→%d, 8192MiB→%d",
 			small.MemoryMaxBytes, large.MemoryMaxBytes)
 	}
-	if !(small.PidsMax < large.PidsMax) {
+	if small.PidsMax >= large.PidsMax {
 		t.Errorf("pids.max does not scale with vCPUs: %d vs %d", small.PidsMax, large.PidsMax)
 	}
 	if small.CPUMax == large.CPUMax {

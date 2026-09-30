@@ -127,7 +127,7 @@ func createTap(tapName string, uid int) (netlink.Link, error) {
 		return nil, fmt.Errorf("create TAP %s: %w", tapName, err)
 	}
 	if err := netlink.LinkSetUp(tap); err != nil {
-		netlink.LinkDel(tap)
+		_ = netlink.LinkDel(tap)
 		return nil, fmt.Errorf("bring TAP %s up: %w", tapName, err)
 	}
 	return tap, nil
@@ -198,11 +198,11 @@ func bridgeTap(tapName string, vmIP net.IP, uid int) (*NetworkSetup, error) {
 	}
 	mac, err := net.ParseMAC(generateMAC(vmIP))
 	if err != nil {
-		netlink.LinkDel(tap)
+		_ = netlink.LinkDel(tap)
 		return nil, fmt.Errorf("guest MAC for %s: %w", vmIP, err)
 	}
 	if err := attachTapToBridge(tap, mac); err != nil {
-		netlink.LinkDel(tap)
+		_ = netlink.LinkDel(tap)
 		return nil, err
 	}
 	return &NetworkSetup{TapName: tapName, VMIP: vmIP, GatewayIP: GatewayIP}, nil
@@ -210,7 +210,7 @@ func bridgeTap(tapName string, vmIP net.IP, uid int) (*NetworkSetup, error) {
 
 func TeardownVMNetwork(tapName string) {
 	if link, err := netlink.LinkByName(tapName); err == nil {
-		netlink.LinkDel(link)
+		_ = netlink.LinkDel(link)
 	}
 }
 

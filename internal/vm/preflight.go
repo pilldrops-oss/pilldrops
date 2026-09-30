@@ -3,6 +3,7 @@
 package vm
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -21,7 +22,7 @@ func PreflightIsolation() error {
 	if err := netlink.LinkAdd(tap); err != nil {
 		return fmt.Errorf("create canary tap: %w", err)
 	}
-	defer netlink.LinkDel(tap)
+	defer func() { _ = netlink.LinkDel(tap) }()
 
 	bridge, err := netlink.LinkByName("fcbr0")
 	if err != nil {
@@ -54,9 +55,9 @@ func PreflightNetNS() error {
 	}
 	defer teardownNetNS(ns.Name)
 
-	inNS, err := exec.Command("nsenter", "--net="+ns.NetNSPath, "nft", "list", "table", "ip", "sandbox").CombinedOutput()
+	inNS, err := exec.CommandContext(context.Background(), "nsenter", "--net="+ns.NetNSPath, "nft", "list", "table", "ip", "sandbox").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("read canary in-ns ruleset: %v: %s", err, strings.TrimSpace(string(inNS)))
+		return fmt.Errorf("read canary in-ns ruleset: %w: %s", err, strings.TrimSpace(string(inNS)))
 	}
 	for _, want := range []struct{ token, meaning string }{
 		{"policy drop", "default-deny forward chain (finding A: without it egress is unrestricted)"},
@@ -70,9 +71,9 @@ func PreflightNetNS() error {
 		}
 	}
 
-	host, err := exec.Command("nft", "list", "table", "ip", netnsHostTable).CombinedOutput()
+	host, err := exec.CommandContext(context.Background(), "nft", "list", "table", "ip", netnsHostTable).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("host table %s missing (EnsureNetNSHostRules did not run or did not survive): %v: %s",
+		return fmt.Errorf("host table %s missing (EnsureNetNSHostRules did not run or did not survive): %w: %s",
 			netnsHostTable, err, strings.TrimSpace(string(host)))
 	}
 	if !strings.Contains(string(host), "masquerade") {
@@ -81,7 +82,7 @@ func PreflightNetNS() error {
 
 	// Without an IPv6 stack there is no packet to filter and the table cannot load.
 	if hostHasIPv6() {
-		host6, err := exec.Command("nft", "list", "table", "ip6", netnsHostTable6).CombinedOutput()
+		host6, err := exec.CommandContext(context.Background(), "nft", "list", "table", "ip6", netnsHostTable6).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("this host has an IPv6 stack (/proc/net/if_inet6) and the ip6 table %s "+
 				"is not loaded, so nothing filters IPv6 across sandbox veths — every other rule on this "+

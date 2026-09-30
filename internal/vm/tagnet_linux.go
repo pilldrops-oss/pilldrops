@@ -8,6 +8,7 @@ package vm
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -32,10 +33,10 @@ var (
 // applyPeerSetLocked pushes the whole membership into the host set. One nft
 // file, so it loads atomically. Called with tagMu held.
 func applyPeerSetLocked() error {
-	cmd := exec.Command("nft", "-f", "-")
+	cmd := exec.CommandContext(context.Background(), "nft", "-f", "-")
 	cmd.Stdin = strings.NewReader(renderPeerSet(tagMembers))
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("nft peer set: %v: %s", err, bytes.TrimSpace(out))
+		return fmt.Errorf("nft peer set: %w: %s", err, bytes.TrimSpace(out))
 	}
 	ensurePeerAcceptRule()
 	return nil
@@ -48,11 +49,11 @@ func applyPeerSetLocked() error {
 // with no index puts it back at the top of the chain, ahead of the slot-to-slot
 // drop, which is the only position that means anything.
 func ensurePeerAcceptRule() {
-	out, err := exec.Command("nft", "list", "chain", "ip", netnsHostTable, "forward").Output()
+	out, err := exec.CommandContext(context.Background(), "nft", "list", "chain", "ip", netnsHostTable, "forward").Output()
 	if err == nil && bytes.Contains(out, []byte("@"+peerSetName+" accept")) {
 		return
 	}
-	_ = exec.Command("nft", "insert", "rule", "ip", netnsHostTable, "forward",
+	_ = exec.CommandContext(context.Background(), "nft", "insert", "rule", "ip", netnsHostTable, "forward",
 		"ip", "saddr", ".", "ip", "daddr", "@"+peerSetName, "accept").Run()
 }
 
@@ -224,7 +225,7 @@ func listenInNS(nsPath, addr string) (net.PacketConn, error) {
 	var pc net.PacketConn
 	err := inNS(nsPath, func() (io.Closer, error) {
 		var err error
-		pc, err = net.ListenPacket("udp", addr)
+		pc, err = (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", addr)
 		return pc, err
 	})
 	return pc, err
@@ -234,7 +235,7 @@ func listenTCPInNS(nsPath, addr string) (net.Listener, error) {
 	var l net.Listener
 	err := inNS(nsPath, func() (io.Closer, error) {
 		var err error
-		l, err = net.Listen("tcp", addr)
+		l, err = (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
 		return l, err
 	})
 	return l, err
@@ -253,13 +254,13 @@ func inNS(nsPath string, open func() (io.Closer, error)) error {
 		runtime.UnlockOSThread()
 		return fmt.Errorf("current namespace: %w", err)
 	}
-	defer orig.Close()
+	defer func() { _ = orig.Close() }()
 	target, err := netns.GetFromPath(nsPath)
 	if err != nil {
 		runtime.UnlockOSThread()
 		return fmt.Errorf("open %s: %w", nsPath, err)
 	}
-	defer target.Close()
+	defer func() { _ = target.Close() }()
 	if err := netns.Set(target); err != nil {
 		runtime.UnlockOSThread()
 		return fmt.Errorf("enter %s: %w", nsPath, err)
@@ -269,7 +270,7 @@ func inNS(nsPath string, open func() (io.Closer, error)) error {
 		if c != nil {
 			_ = c.Close()
 		}
-		return fmt.Errorf("LEAKED THREAD, could not return to the host namespace: %v (open err: %v)", err, openErr)
+		return fmt.Errorf("LEAKED THREAD, could not return to the host namespace: %w (open err: %v)", err, openErr) //nolint:errorlint // openErr is nil when open succeeded; %w would print %!w(<nil>)
 	}
 	runtime.UnlockOSThread()
 	return openErr

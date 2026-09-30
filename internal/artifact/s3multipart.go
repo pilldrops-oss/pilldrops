@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -101,9 +102,9 @@ func (s *S3) putMultipart(ctx context.Context, key, u string, first []byte, body
 		switch {
 		case rerr == nil:
 			part = next
-		case rerr == io.ErrUnexpectedEOF:
+		case errors.Is(rerr, io.ErrUnexpectedEOF):
 			part = next[:m] // the short last part; the read after it answers EOF
-		case rerr == io.EOF:
+		case errors.Is(rerr, io.EOF):
 			part = nil
 		default:
 			failed(fmt.Errorf("artifact: read %q: %w", key, rerr))
@@ -135,7 +136,7 @@ func (s *S3) createMultipart(ctx context.Context, key, u string) (string, error)
 		UploadID string `xml:"UploadId"`
 	}
 	if err := xml.NewDecoder(resp.Body).Decode(&out); err != nil || out.UploadID == "" {
-		return "", fmt.Errorf("artifact: start upload of %q: no upload id in the answer (%v)", key, err)
+		return "", fmt.Errorf("artifact: start upload of %q: no upload id in the answer (%v)", key, err) //nolint:errorlint // err is nil when the answer decoded without an UploadId; %w would print %!w(<nil>)
 	}
 	return out.UploadID, nil
 }

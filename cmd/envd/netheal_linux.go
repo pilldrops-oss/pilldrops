@@ -98,42 +98,42 @@ func healNetwork(c netConfig) {
 func applyGuestNetwork(c netConfig) error {
 	link, err := netlink.LinkByName(c.Device)
 	if err != nil {
-		return fmt.Errorf("no interface %s: %v", c.Device, err)
+		return fmt.Errorf("no interface %s: %w", c.Device, err)
 	}
 
 	if err := netlink.LinkSetDown(link); err != nil {
-		return fmt.Errorf("set %s down: %v", c.Device, err)
+		return fmt.Errorf("set %s down: %w", c.Device, err)
 	}
 	if err := netlink.LinkSetHardwareAddr(link, c.MAC); err != nil {
-		return fmt.Errorf("set %s mac to %s: %v", c.Device, c.MAC, err)
+		return fmt.Errorf("set %s mac to %s: %w", c.Device, c.MAC, err)
 	}
 
 	// AddrReplace alone would add, leaving the golden address answering on the bridge.
 	addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
 	if err != nil {
-		return fmt.Errorf("list %s addresses: %v", c.Device, err)
+		return fmt.Errorf("list %s addresses: %w", c.Device, err)
 	}
 	for i := range addrs {
-		if addrs[i].IPNet != nil && addrs[i].IPNet.IP.Equal(c.Addr.IP) {
+		if addrs[i].IPNet != nil && addrs[i].IP.Equal(c.Addr.IP) {
 			continue // AddrReplace below fixes the mask
 		}
 		if err := netlink.AddrDel(link, &addrs[i]); err != nil {
-			return fmt.Errorf("remove stale address %s from %s: %v", addrs[i].IPNet, c.Device, err)
+			return fmt.Errorf("remove stale address %s from %s: %w", addrs[i].IPNet, c.Device, err)
 		}
 	}
 	if err := netlink.AddrReplace(link, &netlink.Addr{IPNet: c.Addr}); err != nil {
-		return fmt.Errorf("set %s address to %s: %v", c.Device, c.Addr, err)
+		return fmt.Errorf("set %s address to %s: %w", c.Device, c.Addr, err)
 	}
 
 	if err := netlink.LinkSetUp(link); err != nil {
-		return fmt.Errorf("set %s up: %v", c.Device, err)
+		return fmt.Errorf("set %s up: %w", c.Device, err)
 	}
 	if err := netlink.RouteReplace(&netlink.Route{
 		LinkIndex: link.Attrs().Index,
 		Gw:        c.Gateway,
 		Dst:       nil,
 	}); err != nil {
-		return fmt.Errorf("set default route via %s: %v", c.Gateway, err)
+		return fmt.Errorf("set default route via %s: %w", c.Gateway, err)
 	}
 
 	healTarget.Store(&c)

@@ -3,6 +3,7 @@
 package vm
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -38,24 +39,24 @@ func createOverlay(sandboxID string, uid, sizeMB int, cfg Config) (string, error
 	if err != nil {
 		return "", fmt.Errorf("create overlay file: %w", err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	if err := os.Truncate(path, int64(sizeMB)<<20); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", fmt.Errorf("truncate: %w", err)
 	}
 
-	if out, err := exec.Command("mkfs.ext4", "-F", "-q", path).CombinedOutput(); err != nil {
-		os.Remove(path)
+	if out, err := exec.CommandContext(context.Background(), "mkfs.ext4", "-F", "-q", path).CombinedOutput(); err != nil {
+		_ = os.Remove(path)
 		return "", fmt.Errorf("mkfs.ext4: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
 	if err := os.Chown(path, uid, uid); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", fmt.Errorf("chown overlay to %d: %w", uid, err)
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", fmt.Errorf("chmod overlay: %w", err)
 	}
 
@@ -66,9 +67,9 @@ func createOverlay(sandboxID string, uid, sizeMB int, cfg Config) (string, error
 // holes, so io.Copy would write gigabytes of zeros per restore; the stdlib has
 // no hole-aware copy.
 func copySparse(src, dst string) error {
-	out, err := exec.Command("cp", "--sparse=always", "--reflink=auto", src, dst).CombinedOutput()
+	out, err := exec.CommandContext(context.Background(), "cp", "--sparse=always", "--reflink=auto", src, dst).CombinedOutput()
 	if err != nil {
-		os.Remove(dst)
+		_ = os.Remove(dst)
 		return fmt.Errorf("cp %s %s: %s: %w", src, dst, strings.TrimSpace(string(out)), err)
 	}
 	return nil
@@ -80,10 +81,10 @@ func deleteOverlay(path string) {
 	if path == "" {
 		return
 	}
-	os.Remove(path)
+	_ = os.Remove(path)
 	dir := filepath.Dir(path)
 	if filepath.Base(filepath.Dir(dir)) == restoreOverlaySubdir {
-		os.RemoveAll(dir) // also holds the sandbox's memory lineage
+		_ = os.RemoveAll(dir) // also holds the sandbox's memory lineage
 	}
 }
 

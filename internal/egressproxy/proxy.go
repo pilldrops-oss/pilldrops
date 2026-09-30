@@ -64,7 +64,7 @@ func Serve(l net.Listener, p Policy) {
 			continue
 		}
 		go func() {
-			defer c.Close()
+			defer func() { _ = c.Close() }()
 			handle(c, p)
 		}()
 	}
@@ -102,7 +102,7 @@ func handle(c net.Conn, p Policy) {
 		refuse(c, port, "allowed, but the destination could not be reached: "+err.Error())
 		return
 	}
-	defer up.Close()
+	defer func() { _ = up.Close() }()
 
 	// Everything the sniffer consumed goes upstream first, unchanged: this is
 	// the point at which the connection becomes a splice and nothing else.

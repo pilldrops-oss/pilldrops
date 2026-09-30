@@ -344,7 +344,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Sandbox, erro
 			select {
 			case <-t.C:
 				m.log.Info("sandbox_timeout", zap.String("sandbox_id", sandboxID))
-				m.Destroy(context.Background(), sandboxID)
+				_ = m.Destroy(context.Background(), sandboxID)
 			case <-timerCtx.Done():
 			}
 		}()
@@ -570,7 +570,7 @@ func (m *Manager) Destroy(ctx context.Context, sandboxID string) error {
 	if sb.stopTimer != nil { // recovered/restored sandboxes may have no timer
 		sb.stopTimer()
 	}
-	sb.Machine.Stop(ctx)
+	_ = sb.Machine.Stop(ctx)
 	sb.Envd.Close()
 	cleanJailerRoot(sb.Machine.ChrootRoot())
 	// A restored sandbox's image sits in its own directory, which os.Remove would leak.
@@ -750,9 +750,9 @@ func sweepDecision(entryNames []string, modTimes map[string]time.Time, now time.
 // in its name. Only safe once the VMM is down: dropping the boot-time lineage
 // while the sandbox is live breaks its next resume.
 func (m *Manager) removeLineage(id, overlayPath string) {
-	os.RemoveAll(m.lineageDir(id))
+	_ = os.RemoveAll(m.lineageDir(id))
 	if boot := overlayOwnerID(overlayPath); boot != "" && boot != id {
-		os.RemoveAll(m.lineageDir(boot))
+		_ = os.RemoveAll(m.lineageDir(boot))
 	}
 }
 

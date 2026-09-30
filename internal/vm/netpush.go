@@ -58,7 +58,7 @@ func deliverGuestNetwork(chrootRoot, sandboxID string, g guestNetwork, deadline 
 	}
 	cmd := g.command()
 	if err := pushToGuest(chrootRoot, sandboxID, cmd, deadline); err != nil {
-		return fmt.Errorf("%w: %v", ErrGuestNetworkPush, err)
+		return fmt.Errorf("%w: %w", ErrGuestNetworkPush, err)
 	}
 	return nil
 }

@@ -197,7 +197,11 @@ func TestEnsureNetNSHostRulesInstallsTheBaseChainAccepts(t *testing.T) {
 		t.Fatalf("read netns_linux.go: %v", err)
 	}
 	src := string(body)
-	ensure := src[strings.Index(src, "func EnsureNetNSHostRules"):]
+	start := strings.Index(src, "func EnsureNetNSHostRules")
+	if start < 0 {
+		t.Fatal("netns_linux.go no longer defines EnsureNetNSHostRules")
+	}
+	ensure := src[start:]
 	if i := strings.Index(ensure, "\nfunc "); i > 0 {
 		ensure = ensure[:i]
 	}
