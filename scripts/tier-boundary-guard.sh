@@ -88,11 +88,11 @@ check orchestrator "the node-local operator dashboard" 'dashboard'
 # cmd/sandboxd-fleet is the lean node agent: no embedded SPA, no operator dashboard.
 check sandboxd-fleet "dashboard or embedded-UI packages" 'webui|dashboard'
 
-# `-tags core` must produce a node that runs sandboxes and nothing else: nothing from
-# internal/extras and no cron sweeper (aigw and mcpcat are gone but stay listed). auth/aat
-# is absent on purpose: internal/store links it unconditionally, so the rule cannot pass yet.
+# `-tags core` must produce a node that runs sandboxes and nothing else: no agent, chat or
+# integration packages (aigw and mcpcat are gone but stay listed). auth/aat is absent on
+# purpose: internal/store links it unconditionally, so the rule cannot pass yet.
 checktags sandboxd-fleet core "the optional product packages" \
-  'extras|cron|mcpcat|aigw'
+  'extras/agent|extras/bridge|extras/mcp|mcpcat|aigw'
 # Optional features live under internal/extras. Only the two packages that wire
 # routes and boot features may link them, and only from files tagged !core (the
 # check above proves that). Every other internal package is engine.

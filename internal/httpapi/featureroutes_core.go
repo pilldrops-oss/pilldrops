@@ -9,11 +9,7 @@ import "net/http"
 
 func (s *Server) registerAgentRoutes(func(string, http.Handler)) {}
 
-func (s *Server) registerCronRoutes(func(string, http.Handler)) {}
-
 func (s *Server) registerIntegrationRoutes(func(string, http.Handler)) {}
-
-func (s *Server) registerFunctionRoutes(_, _ func(string, http.Handler)) {}
 
 // Chat is an agent front-end, so it goes with the agent.
 func (s *Server) registerChatRoutes(func(string, http.Handler)) {}

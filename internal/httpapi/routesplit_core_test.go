@@ -14,8 +14,9 @@ import (
 // filesystem/watch (82), and rehome, which the control plane calls on a
 // fleet node to resume a paused sandbox whose own node is gone (83).
 // It went stale while backupschedule_test.go kept the core build from compiling.
+// cron, functions and scheduled backups moved into core (+15).
 func TestCoreBuildMountsOnlyTheCore(t *testing.T) {
-	const wantMounted = 83
+	const wantMounted = 98
 	got := mountedRoutes(t)
 	if len(got) == 0 {
 		t.Fatal("the core build mounts nothing at all — either Register is empty or " +
@@ -32,9 +33,10 @@ func TestCoreBuildMountsOnlyTheCore(t *testing.T) {
 }
 
 // TestCoreBuildServesNoFeatureRoute checks no compiled-out feature endpoint
-// answers, which the link-closure guard cannot see.
+// answers, which the link-closure guard cannot see. cron and functions are
+// no longer feature areas — they build with the core.
 func TestCoreBuildServesNoFeatureRoute(t *testing.T) {
-	forbidden := []string{"/agent", "/cron", "/functions", "/integrations", "/chat"}
+	forbidden := []string{"/agent", "/integrations", "/chat"}
 	mounted := mountedRoutes(t)
 	if len(mounted) == 0 {
 		t.Fatal("nothing is mounted at all — this guard would pass on an empty set")
