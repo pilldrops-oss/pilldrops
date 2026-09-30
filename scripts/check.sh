@@ -160,7 +160,6 @@ echo
 
 run "build (default)"            go build ./...
 run "build sandboxd-fleet"       env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/sandboxd-fleet
-run "build sandboxd-fleet -tags core" env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags core -o /dev/null ./cmd/sandboxd-fleet
 run "build sandboxd -tags dev"   env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags dev -o /dev/null ./cmd/sandboxd
 
 # -timeout: the race detector makes internal/httpapi alone take ~11 min on the

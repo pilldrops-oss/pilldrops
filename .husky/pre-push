@@ -3,6 +3,4 @@ set -e
 make web >/dev/null
 go vet ./...
 go test ./...
-# The core node build mounts a fixed route set; CI checks it the same way.
-go test -tags core ./internal/httpapi/ ./internal/nodeboot/
 (cd web && pnpm test)

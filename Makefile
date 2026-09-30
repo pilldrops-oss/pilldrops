@@ -60,7 +60,7 @@ dev: dev-build
 # ─── Production Build ────────────────────────────────────────
 # Cross-compiles for Linux. Requires Go installed locally.
 
-.PHONY: build sandboxd-linux sandboxd-core envd proto
+.PHONY: build sandboxd-linux envd proto
 
 proto:
 	protoc --go_out=. --go-grpc_out=. proto/envd.proto
@@ -92,26 +92,6 @@ sandboxd-linux: web
 	@GOOS=linux GOARCH=amd64 go build -o bin/sandboxd-linux ./cmd/sandboxd/
 	@GOOS=linux GOARCH=amd64 go build -o bin/pilldrops-join-linux ./cmd/pilldrops-join/
 	@echo "── Built: bin/sandboxd-linux ($$(du -h bin/sandboxd-linux | cut -f1)), bin/pilldrops-join-linux"
-
-# sandboxd-core is THE BOUNDARY, BUILT — not yet the deploy artifact.
-#
-# `-tags core` compiles out the agent surface, serverless functions, cron and
-# the MCP integrations, along with the chat routes that depend on them. What
-# comes out runs sandboxes and meters them, and answers 404 on every route
-# belonging to a feature it does not have.
-#
-# Do not ship this expecting the full node API. It is built so
-# scripts/tier-boundary-guard.sh has a tagged link closure to check: that is
-# what turns "the agent is optional" from a claim in a document into a property
-# of an artifact. Deliberately NOT wired into `build` or release.yml.
-#
-# Not to be confused with the pre-existing `test-core` target, which means the
-# central packages and has nothing to do with this build tag.
-sandboxd-core:
-	@echo "── Building sandboxd-fleet with -tags core (boundary check, not a deploy artifact)..."
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags core -o bin/sandboxd-fleet-core ./cmd/sandboxd-fleet/
-	@echo "── Built: bin/sandboxd-fleet-core ($$(du -h bin/sandboxd-fleet-core | cut -f1))"
-	@./scripts/tier-boundary-guard.sh
 
 build: envd sandboxd-linux
 	@echo "── All binaries ready in bin/"

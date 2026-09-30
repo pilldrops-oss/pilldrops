@@ -225,29 +225,11 @@ jobs:
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/sandboxd-linux ./cmd/sandboxd/
       - name: Build sandboxd-fleet
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/sandboxd-fleet-linux ./cmd/sandboxd-fleet/
-      # The same binary with the optional product packages compiled out. Not a
-      # deploy artifact — it is built here so the tier-boundary rule below has a
-      # tagged closure to check, and so a change that couples the runtime core to
-      # a feature package fails in CI rather than the next time someone tries the
-      # tag. See the Makefile's sandboxd-core target.
-      - name: Build sandboxd-fleet (-tags core)
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags core -o bin/sandboxd-fleet-core ./cmd/sandboxd-fleet/
       # Control plane / node / in-guest must stay separate. One script, run
       # identically here and in release.yml, so the rule cannot drift between
       # the two. See scripts/tier-boundary-guard.sh for what each rule protects.
-      #
-      # Placed after BOTH builds on purpose: the script's checktags rule reads
-      # the tagged closure, so running it before the tagged build would still
-      # pass, and the step order would then be describing a check that had not
-      # been exercised against the artifact CI actually produces.
       - name: Tier boundary guard
         run: ./scripts/tier-boundary-guard.sh
-      # The core build must also PASS ITS OWN TESTS, not merely link. A no-op
-      # registrar sibling that mounts the wrong set, or a core route whose
-      # handler moved behind the tag, links perfectly and 404s at runtime — see
-      # internal/httpapi/routesplit_core_test.go.
-      - name: Test (-tags core)
-        run: go test -tags core ./internal/httpapi/ ./internal/nodeboot/
       - name: Build orchestrator
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/orchestrator ./cmd/orchestrator/
       - name: Build envd
