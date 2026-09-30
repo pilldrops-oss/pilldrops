@@ -1108,6 +1108,8 @@ type DevSandbox struct {
 	// appStarted: a start command ran, so the preview serves the user app
 	// rather than the built-in surface.
 	appStarted bool
+	// appPgid is the start command's process group, killed on Destroy.
+	appPgid int
 }
 
 // markAppStarted records that a user app owns the sandbox's port from now on.
@@ -1373,6 +1375,13 @@ func (m *DevManager) Destroy(_ context.Context, sandboxID string) {
 	}
 
 	sb.cancel()
+	sb.logMu.Lock()
+	pgid := sb.appPgid
+	sb.logMu.Unlock()
+	if pgid > 0 {
+		// The app server would otherwise outlive its sandbox, holding the port.
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	}
 	if sb.conn != nil {
 		closeQuietly(sb.conn, "DevManager.Destroy")
 	}
@@ -1933,6 +1942,8 @@ func (m *DevManager) StartProcess(sandboxID, command string, requestedPort int) 
 	// Create-time env first, PORT last, matching the fleet runtimes' precedence.
 	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", actualPort))
 	cmd.Env = append(cmd.Env, sb.BootEnv...)
+	// Its own group, so Destroy can stop the server and whatever it spawned.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return 0, 0, err
@@ -1946,6 +1957,9 @@ func (m *DevManager) StartProcess(sandboxID, command string, requestedPort int) 
 	}
 	sb.setStatus("running", 0)
 	sb.markAppStarted()
+	sb.logMu.Lock()
+	sb.appPgid = cmd.Process.Pid
+	sb.logMu.Unlock()
 	sb.appendLog("$ " + command)
 
 	stream := func(rc io.ReadCloser) {

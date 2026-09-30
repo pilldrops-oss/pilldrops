@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	pb "github.com/pilldrops-oss/pilldrops/proto/envdpb"
@@ -222,5 +224,28 @@ func TestListIsScopedToTheOwner(t *testing.T) {
 	rows := mgr.List("u:a")
 	if len(rows) != 1 || rows[0]["id"] != "sb-a" {
 		t.Fatalf("List(u:a) = %v, want only sb-a", rows)
+	}
+}
+
+// Destroying a sandbox stops its app server and whatever that spawned; they
+// used to outlive it, holding the port.
+func TestDestroyStopsTheAppServer(t *testing.T) {
+	mgr := &DevManager{log: zap.NewNop(), sandboxes: map[string]*DevSandbox{
+		"sb-1": {ID: "sb-1", UserID: "u:a", WorkDir: t.TempDir(), Port: 1, cancel: func() {}},
+	}}
+	pid, _, err := mgr.StartProcess("sb-1", "sleep 30 & sleep 30", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(-pid, 0); err != nil {
+		t.Fatalf("the app is not running as its own process group: %v", err)
+	}
+	mgr.Destroy(t.Context(), "sb-1")
+	deadline := time.Now().Add(3 * time.Second)
+	for syscall.Kill(-pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the app's process group is still alive after Destroy")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
