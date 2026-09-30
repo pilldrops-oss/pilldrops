@@ -198,3 +198,18 @@ func TestPauseAndResumeSayTheyNeedTheFleet(t *testing.T) {
 		}
 	}
 }
+
+// The signal is interpolated into a shell command, so only a name or number reaches it.
+func TestSignalIsValidatedBeforeTheShell(t *testing.T) {
+	envd := &fakeEnvdClient{}
+	mgr := &DevManager{sandboxes: map[string]*DevSandbox{"sb-1": {ID: "sb-1", UserID: "u:a", WorkDir: t.TempDir(), client: envd}}}
+	r := sandboxActionRouter(mgr, NewExecHistory(), NewUsageTracker(), "u:a")
+	if w := postAs(t, r, "/v1/sandboxes/sb-1/process/signal", `{"pid":1,"signal":"0 1; touch /tmp/x #"}`); w.Code != http.StatusBadRequest || envd.calls != 0 {
+		t.Fatalf("injected signal: %d, envd calls %d; want 400 and none", w.Code, envd.calls)
+	}
+	for _, sig := range []string{"KILL", "SIGTERM", "9", ""} {
+		if w := postAs(t, r, "/v1/sandboxes/sb-1/process/signal", `{"pid":1,"signal":"`+sig+`"}`); w.Code != http.StatusOK {
+			t.Errorf("signal %q = %d, want 200", sig, w.Code)
+		}
+	}
+}

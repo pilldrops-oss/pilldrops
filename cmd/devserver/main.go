@@ -1385,6 +1385,8 @@ func (m *DevManager) Destroy(_ context.Context, sandboxID string) {
 // 404 for a missing file.
 var errPathEscapesRoot = errors.New("path escapes sandbox root")
 
+var signalName = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
+
 // resolveInWorkDir confines p to workDir. filepath.Join alone does not stop
 // ".." from escaping, and a lexical check alone does not stop a symlink the
 // sandbox created from pointing outside, so the real path is checked too.
@@ -1865,6 +1867,11 @@ func registerSandboxActionRoutes(r chi.Router, mgr *DevManager, ownerID func(*ht
 		sig := body.Signal
 		if sig == "" {
 			sig = "SIGTERM"
+		}
+		// It is interpolated into a shell command.
+		if !signalName.MatchString(sig) {
+			http.Error(w, `{"error":"signal must be a name like SIGTERM or a number"}`, http.StatusBadRequest)
+			return
 		}
 		if _, _, _, _, err := mgr.Exec(context.Background(), id, fmt.Sprintf("kill -%s %d 2>/dev/null", sig, body.PID), "", 5*time.Second); err != nil {
 			log.Printf("process/signal: exec failed for %s: %v", id, err)
