@@ -3013,9 +3013,11 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	listeners, err := listenLocal(addr)
+	listeners, err := listenLocal(bootCtx, addr)
 	if err != nil {
-		log.Fatal("cannot listen", zap.String("addr", addr), zap.Error(err))
+		// Not Fatal: returning runs the deferred stopEnvd, or envd outlives us holding its port.
+		log.Error("cannot listen", zap.String("addr", addr), zap.Error(err))
+		return
 	}
 	_, port, _ := net.SplitHostPort(addr)
 	base := "http://localhost:" + port

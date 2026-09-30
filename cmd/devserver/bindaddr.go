@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -30,8 +31,9 @@ func safeBindAddr(listenAddr string, authEnforced, allowPublicAnon bool) (string
 // too. A browser tries localhost as ::1 first, so without the second socket
 // another program on [::1]:port answers for this server, silently. No IPv6
 // loopback on the host is fine; the port being taken there is not.
-func listenLocal(addr string) ([]net.Listener, error) {
-	ln, err := net.Listen("tcp", addr)
+func listenLocal(ctx context.Context, addr string) ([]net.Listener, error) {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +41,7 @@ func listenLocal(addr string) ([]net.Listener, error) {
 	if err != nil || host != "127.0.0.1" {
 		return []net.Listener{ln}, nil
 	}
-	ln6, err := net.Listen("tcp", net.JoinHostPort("::1", port))
+	ln6, err := lc.Listen(ctx, "tcp", net.JoinHostPort("::1", port))
 	switch {
 	case err == nil:
 		return []net.Listener{ln, ln6}, nil
