@@ -32,8 +32,8 @@ func TestMergeAdoptsEverythingWhenRequestIsSilent(t *testing.T) {
 }
 
 func TestMergeExplicitTemplateWins(t *testing.T) {
-	got := mergePilldropsConfig(createReq{Spec: sandbox.Spec{Template: "fastapi"}}, cfg())
-	if got.Template != "fastapi" {
+	got := mergePilldropsConfig(createReq{Spec: sandbox.Spec{Template: "node"}}, cfg())
+	if got.Template != "node" {
 		t.Fatalf("Template = %q, want the request's", got.Template)
 	}
 	if got.Start != "npx playwright test" {
@@ -67,13 +67,13 @@ func TestMergeLeavesUnrelatedFieldsAlone(t *testing.T) {
 
 func TestCreateAdoptsPilldropsJSON(t *testing.T) {
 	srv, key := newTestServer(t)
-	body := `{"files":[{"path":"pilldrops.json","content":"{\"version\":1,\"template\":\"fastapi\",\"start\":\"echo hi\"}"}]}`
+	body := `{"files":[{"path":"pilldrops.json","content":"{\"version\":1,\"template\":\"node\",\"start\":\"echo hi\"}"}]}`
 	code, out := do(t, "POST", srv.URL+"/v1/sandboxes", key, body)
 	if code != 201 {
 		t.Fatalf("create = %d (%v)", code, out)
 	}
-	if tmpl, _ := out["template"].(string); tmpl != "fastapi" {
-		t.Fatalf("template = %v, want fastapi (from the file)", out["template"])
+	if tmpl, _ := out["template"].(string); tmpl != "node" {
+		t.Fatalf("template = %v, want node (from the file)", out["template"])
 	}
 }
 

@@ -16,7 +16,7 @@ func rtTemplate(name string, env []string) rt.Template {
 // A template with no tooling of its own must still get a Dockerfile built for
 // it, or "any template" is false for most of the catalogue.
 func TestEveryTemplateImageGetsTheDesktopLayer(t *testing.T) {
-	for _, id := range []string{"node", "code-interpreter", "fastapi", "desktop"} {
+	for _, id := range []string{"node", "code-interpreter", "desktop"} {
 		df, ok := enrichedDockerfiles[canonicalTemplate(id)]
 		if !ok {
 			t.Fatalf("%s has no enriched Dockerfile to append to", id)

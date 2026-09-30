@@ -59,18 +59,14 @@ func TestAgentTemplatesCarryAgentMeta(t *testing.T) {
 func TestManifestKindAssignments(t *testing.T) {
 	want := map[string]string{
 		"base":             KindShell,
+		"docker":           KindShell,
 		"code-interpreter": KindCode,
-		"fastapi":          KindApp,
 		"browser":          KindScreen,
 		"desktop":          KindScreen,
-		"android":          KindScreen,
-		"android-headless": KindTest,
-		"mobile-test":      KindVerdict,
 		"playwright":       KindTest,
-		"security":         KindVerdict,
-		"loadtest":         KindVerdict,
-		"claude":           KindAgent,
-		"opencode":         KindAgent,
+		"node":             KindApp,
+		"go":               KindApp,
+		"rust":             KindApp,
 	}
 	byID := map[string]Template{}
 	for _, tpl := range Catalog() {
@@ -81,13 +77,7 @@ func TestManifestKindAssignments(t *testing.T) {
 			t.Errorf("%s: Kind = %q, want %q", id, got, kind)
 		}
 	}
-	for _, id := range []string{"security", "loadtest", "mobile-test"} {
-		pi := byID[id].PrimaryInput
-		if pi == nil || !pi.Required {
-			t.Errorf("%s: verdict template needs a required PrimaryInput, got %+v", id, pi)
-		}
-	}
-	raw, err := json.Marshal(byID["claude"])
+	raw, err := json.Marshal(byID["code-interpreter"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +85,7 @@ func TestManifestKindAssignments(t *testing.T) {
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.Kind != KindAgent || back.Agent == nil || back.Agent.KeyEnv != "ANTHROPIC_API_KEY" {
-		t.Errorf("claude manifest lost in JSON round-trip: %+v", back)
+	if back.Kind != KindCode || back.PrimaryInput == nil || back.PrimaryInput.Type != "code" {
+		t.Errorf("code-interpreter manifest lost in JSON round-trip: %+v", back)
 	}
 }

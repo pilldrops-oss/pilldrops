@@ -70,9 +70,8 @@ func TestResolveCanonicalAndAliases(t *testing.T) {
 // Every id the portal picker advertises must Resolve on the node or create 400s.
 func TestPortalListedTemplatesAreCreatable(t *testing.T) {
 	portalIDs := []string{
-		"base", "python-3.11", "node-20", "code-interpreter-v1", "claude",
-		"desktop", "openclaw", "opencode", "codex", "amp", "go-1.22",
-		"rust-1.77", "nextjs", "fastapi",
+		"base", "python-3.11", "node-20", "code-interpreter-v1",
+		"desktop", "go-1.22", "rust-1.77",
 	}
 	for _, id := range portalIDs {
 		if _, ok := Resolve(id); !ok {
@@ -95,17 +94,12 @@ func TestLaunchMetadataPopulated(t *testing.T) {
 		wantDefaultPort int
 	}{
 		{"code-interpreter", true, "python3 -m http.server $PORT", false, false, 8000},
-		{"fastapi", true, "uvicorn main:app --host 0.0.0.0 --port $PORT", false, false, 8000},
 		{"go", true, "go run .", false, false, 8000},
 		{"rust", true, "cargo run", false, false, 8000},
-		{"nextjs", true, "cd /root/app && npm run dev", false, false, 8000},
 		// The desktop template previews on the platform desktop port: its viewer
 		// is envd's noVNC, not an app on 8000.
 		{"desktop", true, "", true, true, rt.DesktopPort},
-		{"android", true, "", true, true, 6080},
-		{"mobile-test", true, "", true, true, 8765},
 		{"base", true, "", false, false, 8000},
-		{"claude", true, "", false, false, 8000},
 	}
 	for _, tc := range cases {
 		tpl, ok := byID[tc.id]
@@ -166,6 +160,24 @@ func TestImageBackedTemplatesDeclarePorts(t *testing.T) {
 		}
 		if tpl.DefaultPort == 0 {
 			t.Errorf("%s declares Image %q but no DefaultPort — the preview would prefill 8000", tpl.ID, tpl.Image)
+		}
+	}
+}
+
+// The engine ships base images to build on; curated templates live elsewhere.
+func TestCatalogIsTheBaseImages(t *testing.T) {
+	want := map[string]bool{"base": true, "docker": true, "code-interpreter": true, "browser": true,
+		"desktop": true, "playwright": true, "node": true, "go": true, "rust": true}
+	got := map[string]bool{}
+	for _, tp := range Catalog() {
+		got[tp.ID] = true
+		if !want[tp.ID] {
+			t.Errorf("catalog has %q, which is not a base image", tp.ID)
+		}
+	}
+	for id := range want {
+		if !got[id] {
+			t.Errorf("catalog is missing base image %q", id)
 		}
 	}
 }

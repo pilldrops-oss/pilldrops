@@ -53,7 +53,6 @@ export function DeployProgress({
   onCancel,
   onRetry,
   service,
-  serviceEnv,
   onOpen,
   autoOpening = false,
   onCancelAutoOpen,
@@ -71,7 +70,6 @@ export function DeployProgress({
   onCancel?: () => void
   onRetry?: () => void
   service?: Template | null
-  serviceEnv?: Record<string, string>
   onOpen?: (id: string) => void
 }) {
   const [elapsed, setElapsed] = useState(0)
@@ -123,7 +121,6 @@ export function DeployProgress({
           liveStatus={liveStatus}
           onReset={onReset}
           service={service}
-          serviceEnv={serviceEnv}
           onOpen={onOpen}
         />
       </>
@@ -195,13 +192,11 @@ function DeployReady({
   liveStatus = null,
   onReset,
   service,
-  serviceEnv,
   onOpen,
 }: {
   result: CreateSandboxResp
   onReset: () => void
   service?: Template | null
-  serviceEnv?: Record<string, string>
   onOpen?: (id: string) => void
   previewOutcome?: PollResult | null
   liveStatus?: string | null
@@ -277,7 +272,7 @@ function DeployReady({
     if (service) {
       return (
         <>
-          <ServiceConnBlock conn={serviceConn(service, result.id, serviceEnv)} />
+          <ServiceConnBlock conn={serviceConn(service, result.id)} />
           <div className="dp-actions">{openBtn(true)}{copyIdBtn}</div>
         </>
       )

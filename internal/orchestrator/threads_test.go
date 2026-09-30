@@ -140,18 +140,3 @@ func TestThreadRoutesAbsentWithoutAStore(t *testing.T) {
 		t.Errorf("no-store list = 500 — the routes were mounted without a store and panicked")
 	}
 }
-
-// The pin must key on the template: handleCreate's req.Image check is blind to
-// a service whose image comes from the catalogue.
-func TestServiceTemplatesArePinnedToDockerNodes(t *testing.T) {
-	for _, id := range []string{"postgres", "redis", "mysql", "mongodb", "kafka"} {
-		if got := templateRuntime(id); got != "docker" {
-			t.Errorf("templateRuntime(%q) = %q, want docker — it is image-backed", id, got)
-		}
-	}
-	for _, id := range []string{"base", "node", "go"} {
-		if got := templateRuntime(id); got != "" {
-			t.Errorf("templateRuntime(%q) = %q, want unpinned", id, got)
-		}
-	}
-}

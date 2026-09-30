@@ -56,6 +56,7 @@ func TestConfigEmptyValueUnsets(t *testing.T) {
 }
 
 func TestModelAndBaseURLMapToTheAgentsOwnEnvNames(t *testing.T) {
+	t.Skip("agent templates removed from the catalog; no template carries Agent.ModelEnv/BaseURLEnv until Task 7 revisits config.go")
 	srv, key, _, _, api := newCronSandboxWithAPI(t)
 	_ = api
 	code, out := do(t, "POST", srv+"/v1/sandboxes", key, `{"template":"claude"}`)

@@ -19,6 +19,11 @@ func expandToMap(t *testing.T, body string) map[string]any {
 }
 
 func TestExpandAgentCreateTaskMode(t *testing.T) {
+	// No catalog id has Agent metadata since the OSS strip removed the agent
+	// templates; expandAgentCreate itself is agent-launcher code slated for
+	// removal in Task 7. Skipped rather than rewritten onto a non-agent id,
+	// which would test nothing.
+	t.Skip("agent templates removed from the catalog; expandAgentCreate goes in Task 7")
 	obj := expandToMap(t, `{"template":"claude","args":{"task":"add \"tests\" to src/","access_mode":"task"},"setup":["echo hi"]}`)
 
 	if _, has := obj["args"]; has {
@@ -67,6 +72,7 @@ func TestExpandAgentCreateTaskMode(t *testing.T) {
 }
 
 func TestExpandAgentCreateTerminalMode(t *testing.T) {
+	t.Skip("agent templates removed from the catalog; expandAgentCreate goes in Task 7")
 	// No task means terminal mode.
 	obj := expandToMap(t, `{"template":"codex","args":{}}`)
 	files, _ := obj["files"].([]any)

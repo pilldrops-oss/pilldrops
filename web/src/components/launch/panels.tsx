@@ -409,7 +409,6 @@ export function SummaryPanel({
   busy,
   error,
   onSubmit,
-  declaredEnv,
   ctaDisabledNote,
 }: {
   tpl: Template
@@ -423,7 +422,6 @@ export function SummaryPanel({
   busy: boolean
   error?: string | null
   onSubmit?: () => void
-  declaredEnv?: Record<string, string>
   ctaDisabledNote?: string
 }) {
   const cta = ctaLabel(kind, accessMode)
@@ -460,7 +458,7 @@ export function SummaryPanel({
       </div>
 
       {kind === 'service' ? (
-        <ServiceConnBlock conn={serviceConn(tpl, undefined, declaredEnv)} />
+        <ServiceConnBlock conn={serviceConn(tpl)} />
       ) : (
         <div className="dep-preview">
           <span className="dep-preview-lbl">{previewLabel(kind, accessMode)}</span>

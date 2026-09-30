@@ -129,18 +129,18 @@ func TestUsageAndTemplates(t *testing.T) {
 	if want := len(templates.Catalog()); len(arr) != want {
 		t.Fatalf("templates = %d, want %d (catalog size)", len(arr), want)
 	}
-	var haveClaude, variedMem bool
+	var haveCodeInterpreter, variedMem bool
 	firstMem := arr[0]["memory_mb"]
 	for _, tpl := range arr {
-		if tpl["id"] == "claude" {
-			haveClaude = true
+		if tpl["id"] == "code-interpreter" {
+			haveCodeInterpreter = true
 		}
 		if tpl["memory_mb"] != firstMem {
 			variedMem = true
 		}
 	}
-	if !haveClaude {
-		t.Fatalf("catalog missing claude template: %v", arr)
+	if !haveCodeInterpreter {
+		t.Fatalf("catalog missing code-interpreter template: %v", arr)
 	}
 	if !variedMem {
 		t.Fatalf("templates share identical memory_mb; catalog metadata not wired")

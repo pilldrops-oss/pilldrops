@@ -174,7 +174,7 @@ sec "G. Integrations (MCP)"
 ncat=$(curl -s $B/v1/integrations -H "$H" | jq_ "print(len(d.get('servers',[])))")
 [ "$ncat" -ge 8 ] && ok "catalogue served ($ncat servers)" || bad "catalogue ($ncat)"
 
-ASB=$(curl -s -X POST $B/v1/sandboxes -H "$H" -H 'Content-Type: application/json' -d '{"template":"claude"}' | jq_ "print(d.get('id',''))")
+ASB=$(curl -s -X POST $B/v1/sandboxes -H "$H" -H 'Content-Type: application/json' -d '{"template":"node"}' | jq_ "print(d.get('id',''))")
 [ -n "$ASB" ] && ok "agent workstation created" || bad "agent workstation"
 cli=$(curl -s -X POST $B/v1/sandboxes/$ASB/exec -H "$H" -H 'Content-Type: application/json' \
   -d '{"cmd":"which claude || echo MISSING"}' | jq_ "print(d.get('stdout','').strip())")

@@ -211,16 +211,8 @@ func templateRuntime(name string) string {
 		if t.Image != "" {
 			return "docker"
 		}
-		// Android emulators need /dev/kvm passthrough inside a container.
-		if t.Language == "android" {
-			return "docker"
-		}
 		// The browser template's start.sh only runs under the firecracker guest init.
 		if t.ID == "browser" {
-			return "firecracker"
-		}
-		// security/loadtest ship their tooling only in the baked rootfs.
-		if t.ID == "security" || t.ID == "loadtest" {
 			return "firecracker"
 		}
 		// A container daemon inside the sandbox needs a kernel of its own; a

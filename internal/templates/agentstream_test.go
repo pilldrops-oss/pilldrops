@@ -94,53 +94,18 @@ func TestCostSourceIsKnown(t *testing.T) {
 	}
 }
 
-// Rich streaming does not imply a gate; codex exec rejects --ask-for-approval.
-func TestCodexHasStreamingButNoApprovalHook(t *testing.T) {
-	tmpl, ok := Resolve("codex")
-	if !ok {
-		t.Fatal("template codex missing")
-	}
-	a := tmpl.Agent
-	if a == nil {
-		t.Fatal("codex lost its AgentMeta")
-	}
-	if a.StreamCmd == "" {
-		t.Error("codex lost its StreamCmd — verified emitting JSONL on 0.147.0")
-	}
-	if a.PermissionTool != "" {
-		t.Errorf("codex has a PermissionTool (%q): `codex exec` rejects -a/--ask-for-approval. "+
-			"If a real hook shipped, verify it end to end before offering Guided mode.",
-			a.PermissionTool)
-	}
-}
-
-func TestSomeAgentSupportsApprovalGating(t *testing.T) {
-	for _, tmpl := range Catalog() {
-		if tmpl.Agent != nil && tmpl.Agent.PermissionTool != "" {
-			return
-		}
-	}
-	t.Error("no agent declares a PermissionTool — Guided mode would have nothing to run on")
-}
-
 func TestModelsCmdOnlyWhereVerified(t *testing.T) {
-	var withListing []string
 	for _, tmpl := range Catalog() {
 		a := tmpl.Agent
 		if a == nil || a.ModelsCmd == "" {
 			continue
 		}
-		withListing = append(withListing, tmpl.ID)
 		if bin := a.CLIBin; bin != "" && !strings.HasPrefix(a.ModelsCmd, bin) {
 			t.Errorf("%s: ModelsCmd %q does not invoke %q", tmpl.ID, a.ModelsCmd, bin)
 		}
 		if strings.Contains(a.ModelsCmd, "{task}") {
 			t.Errorf("%s: ModelsCmd carries a {task} placeholder: %q", tmpl.ID, a.ModelsCmd)
 		}
-	}
-	if len(withListing) != 1 || withListing[0] != "opencode" {
-		t.Errorf("agents with ModelsCmd = %v; only opencode's listing has been verified. "+
-			"If another agent gained one, verify it against the installed CLI first.", withListing)
 	}
 }
 
@@ -149,15 +114,6 @@ func TestAutonomyFlagsCarryTheEnvironmentTheyRequire(t *testing.T) {
 		a := tmpl.Agent
 		if a == nil || a.RunFlags == "" {
 			continue
-		}
-		if tmpl.ID == "claude" {
-			if a.RunFlagsEnv == "" {
-				t.Errorf("claude lost RunFlagsEnv: --dangerously-skip-permissions is refused as root " +
-					"without IS_SANDBOX=1, so every autonomous task would fail")
-			}
-			if !strings.Contains(a.RunFlagsEnv, "IS_SANDBOX=1") {
-				t.Errorf("claude RunFlagsEnv = %q, want it to set IS_SANDBOX=1", a.RunFlagsEnv)
-			}
 		}
 		if a.RunFlagsEnv != "" && !strings.Contains(a.RunFlagsEnv, "=") {
 			t.Errorf("%s: RunFlagsEnv %q is not NAME=VALUE", tmpl.ID, a.RunFlagsEnv)

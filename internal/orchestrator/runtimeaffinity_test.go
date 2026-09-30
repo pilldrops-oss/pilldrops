@@ -22,20 +22,10 @@ func TestWantRuntime(t *testing.T) {
 	}
 }
 
-// Aliases inherit the pin through the catalog's Language field.
 func TestTemplateRuntimeAffinity(t *testing.T) {
-	for _, name := range []string{
-		"android", "android-emulator", "android-14",
-		"android-headless", "android-ci", "android-appium",
-		"mobile-test", "android-test", "mobile-e2e",
-	} {
-		if got := templateRuntime(name); got != "docker" {
-			t.Errorf("templateRuntime(%q) = %q, want docker", name, got)
-		}
-	}
-	// browser, security and loadtest ship their tooling only in the baked
-	// rootfs; docker runs a daemon that needs a kernel of its own.
-	for _, name := range []string{"browser", "security", "loadtest", "scan", "k6", "docker"} {
+	// browser ships its tooling only in the baked rootfs; docker runs a
+	// daemon that needs a kernel of its own.
+	for _, name := range []string{"browser", "docker"} {
 		if got := templateRuntime(name); got != "firecracker" {
 			t.Errorf("templateRuntime(%q) = %q, want firecracker", name, got)
 		}

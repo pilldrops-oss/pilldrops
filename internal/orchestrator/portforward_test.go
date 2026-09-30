@@ -152,9 +152,10 @@ func TestForwardLimitAndReExposeAndTenancy(t *testing.T) {
 // Docker publishes only the ports declared at create, so a forward to anything
 // else is refused rather than accepted as a listener that can never connect.
 func TestDockerForwardRefusesAnUndeclaredPort(t *testing.T) {
-	s := forwardServer(t, "docker", "postgres")
+	s := forwardServer(t, "docker", "base")
 
-	if w := apiReq(t, s, http.MethodPost, "u:one", "/v1/sandboxes/sb1/forwards", `{"port":5432}`); w.Code != http.StatusCreated {
+	// The sandbox's own app port (PublicPort) is always declared.
+	if w := apiReq(t, s, http.MethodPost, "u:one", "/v1/sandboxes/sb1/forwards", `{"port":8000}`); w.Code != http.StatusCreated {
 		t.Fatalf("declared port: %d %s", w.Code, w.Body.String())
 	}
 	w := apiReq(t, s, http.MethodPost, "u:one", "/v1/sandboxes/sb1/forwards", `{"port":5433}`)
@@ -167,18 +168,18 @@ func TestDockerForwardRefusesAnUndeclaredPort(t *testing.T) {
 	}
 	// Docker publishes container ports as TCP only, so a UDP forward is refused
 	// rather than bound to a socket nothing can answer.
-	u := apiReq(t, s, http.MethodPost, "u:one", "/v1/sandboxes/sb1/forwards", `{"port":5432,"udp":true}`)
+	u := apiReq(t, s, http.MethodPost, "u:one", "/v1/sandboxes/sb1/forwards", `{"port":8000,"udp":true}`)
 	if u.Code != http.StatusConflict || !strings.Contains(u.Body.String(), "udp_not_supported") {
 		t.Fatalf("docker udp forward: %d %s", u.Code, u.Body.String())
 	}
 
 	// Positive controls on a firecracker node: the same undeclared port and the
 	// same UDP request both succeed there.
-	fc := forwardServer(t, "firecracker", "postgres")
+	fc := forwardServer(t, "firecracker", "base")
 	if w := apiReq(t, fc, http.MethodPost, "u:one", "/v1/sandboxes/sb1/forwards", `{"port":5433}`); w.Code != http.StatusCreated {
 		t.Fatalf("firecracker undeclared port: %d %s", w.Code, w.Body.String())
 	}
-	if w := apiReq(t, fc, http.MethodPost, "u:one", "/v1/sandboxes/sb1/forwards", `{"port":5432,"udp":true}`); w.Code != http.StatusCreated {
+	if w := apiReq(t, fc, http.MethodPost, "u:one", "/v1/sandboxes/sb1/forwards", `{"port":8000,"udp":true}`); w.Code != http.StatusCreated {
 		t.Fatalf("firecracker udp forward: %d %s", w.Code, w.Body.String())
 	}
 }

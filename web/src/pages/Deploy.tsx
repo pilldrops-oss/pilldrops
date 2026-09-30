@@ -360,7 +360,7 @@ export default function Deploy() {
 
   function pickTemplate(t: Template) {
     cfg.selectTemplate(t)
-    setIsPublic(t.id === 'webhook-inbox')
+    setIsPublic(false)
     launch.reset()
     window.scrollTo(0, 0)
   }
@@ -787,7 +787,6 @@ export default function Deploy() {
                   error={launch.error}
                   onReset={launch.reset}
                   service={cfg.kind === 'service' ? tpl : null}
-                  serviceEnv={cfg.declaredEnv}
                   onOpen={id => { launch.cancelAutoOpen(); navigate(`/sandbox/${id}`) }}
                   autoOpening={launch.autoOpening}
                   onCancelAutoOpen={launch.cancelAutoOpen}
@@ -1054,7 +1053,6 @@ export default function Deploy() {
                 previewPort={cfg.previewPort}
                 previewUrl={cfg.previewUrl}
                 cliSnippet={cliSnippet}
-                declaredEnv={cfg.declaredEnv}
                 busy={launch.phase !== 'form'}
                 ctaDisabledNote={
                   tpl.kind === 'verdict' &&

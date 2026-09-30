@@ -1217,7 +1217,7 @@ func NewDevManager(envdBin string, log *zap.Logger) *DevManager {
 		maxActive:     50,
 		poolSize:      2,
 		maxConcurrent: 10,
-		templates:     []string{"base", "python-3.11", "node-20", "code-interpreter-v1", "claude", "desktop", "openclaw", "opencode", "codex", "amp", "go-1.22", "rust-1.77", "nextjs", "fastapi"},
+		templates:     []string{"base", "docker", "code-interpreter", "browser", "desktop", "playwright", "node", "go", "rust"},
 		log:           log,
 	}
 	m.nextPort.Store(7000)

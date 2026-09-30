@@ -87,62 +87,6 @@ with socketserver.TCPServer(("0.0.0.0", port), http.server.SimpleHTTPRequestHand
     httpd.serve_forever()
 `
 
-const SCRAPER_STARTER = `# scrape.py — demo scraper: fetch a page, extract title + links, serve results.
-# Describe YOUR target in the AI Configure box and this file gets rewritten.
-import os, json
-import requests
-from bs4 import BeautifulSoup
-
-URL = os.environ.get("SCRAPE_URL", "https://example.com")
-soup = BeautifulSoup(requests.get(URL, timeout=20).text, "html.parser")
-data = {
-    "url": URL,
-    "title": (soup.title.string or "").strip() if soup.title else "",
-    "links": [a.get("href") for a in soup.find_all("a", href=True)][:50],
-}
-with open("index.html", "w") as f:
-    f.write(
-        "<!doctype html><meta charset='utf-8'><title>Scrape results</title>"
-        "<body style='font-family:ui-monospace,monospace;max-width:720px;margin:40px auto'>"
-        "<h1>🕷 " + data["title"] + "</h1><p>" + URL + "</p><pre>"
-        + json.dumps(data, indent=2)[:20000] + "</pre>"
-    )
-print(json.dumps(data)[:500])
-import http.server, socketserver
-port = int(os.environ.get("PORT", "8000"))
-with socketserver.TCPServer(("0.0.0.0", port), http.server.SimpleHTTPRequestHandler) as httpd:
-    httpd.serve_forever()
-`
-
-const WEBHOOK_STARTER = `// inbox.js — webhook inbox: POST anything here, watch it appear live.
-const http = require('http');
-const PORT = process.env.PORT || 8000;
-const hits = []; // newest first, capped
-http.createServer((req, res) => {
-  if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    const rows = hits.map(h =>
-      '<details><summary><b>' + h.method + '</b> ' + h.path + ' · ' + h.at +
-      '</summary><pre>' + h.headers + '\\n\\n' + h.body.replace(/[<&]/g, c => c === '<' ? '&lt;' : '&amp;') +
-      '</pre></details>').join('');
-    res.end('<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="3">' +
-      '<title>Webhook Inbox</title><body style="font-family:ui-monospace,monospace;max-width:760px;margin:40px auto">' +
-      '<h1>📥 Webhook Inbox</h1><p>' + hits.length + ' request(s). Send anything to this URL — this page refreshes every 3s.</p>' +
-      (rows || '<p><i>Waiting for the first request…</i></p>'));
-    return;
-  }
-  let body = '';
-  req.on('data', c => { body += c; if (body.length > 65536) req.destroy(); });
-  req.on('end', () => {
-    hits.unshift({ method: req.method, path: req.url, at: new Date().toISOString(),
-      headers: JSON.stringify(req.headers, null, 2), body });
-    if (hits.length > 200) hits.pop();
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end('{"ok":true}');
-  });
-}).listen(PORT, '0.0.0.0', () => console.log('inbox on ' + PORT));
-`
-
 const NODE_STARTER = `const http = require('http');
 const PORT = process.env.PORT || 8000;
 
@@ -150,16 +94,6 @@ http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html' });
   res.end('<h1>🚀 Your Node sandbox is running</h1><p>Edit <code>server.js</code> and redeploy.</p>');
 }).listen(PORT, '0.0.0.0', () => console.log('listening on ' + PORT));
-`
-
-const FASTAPI_STARTER = `from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
-
-app = FastAPI()
-
-@app.get("/", response_class=HTMLResponse)
-def root():
-    return "<h1>🚀 Your FastAPI sandbox is running</h1><p>Edit <code>main.py</code> and redeploy.</p>"
 `
 
 const GO_STARTER = `package main
@@ -187,20 +121,6 @@ const GO_MOD = `module sandbox
 go 1.22
 `
 
-const PY_HTTP_STARTER = `import http.server, socketserver, os
-
-PORT = int(os.environ.get("PORT", "8000"))
-
-class Handler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.end_headers()
-        self.wfile.write(b"<h1>\\U0001F680 Your sandbox is running</h1><p>Edit app.py and redeploy.</p>")
-
-socketserver.TCPServer(("0.0.0.0", PORT), Handler).serve_forever()
-`
-
 
 // starterFiles returns the default project files for a template, or [] when it
 // ships its own server or needs a full uploaded project. The first file is the primary one.
@@ -214,21 +134,14 @@ export function starterFiles(tpl: Template): Array<{ path: string; content: stri
   const lang = (tpl.language || '').toLowerCase()
   const has = (...w: string[]) => w.some(x => id.includes(x) || lang === x)
 
-  if (has('web-scraper', 'scraper'))
-    return [{ path: 'scrape.py', content: SCRAPER_STARTER }]
-  if (has('webhook-inbox', 'webhook-tester'))
-    return [{ path: 'inbox.js', content: WEBHOOK_STARTER }]
-  if (has('nextjs', 'next')) return []
   if (has('rust', 'cargo')) return []
   if (has('node', 'typescript', 'javascript') || lang === 'node' || lang === 'ts' || lang === 'js')
     return [{ path: 'server.js', content: NODE_STARTER }]
-  if (has('fastapi')) return [{ path: 'main.py', content: FASTAPI_STARTER }]
   if (has('go', 'golang') || lang === 'go')
     return [
       { path: 'main.go', content: GO_STARTER },
       { path: 'go.mod', content: GO_MOD },
     ]
-  if (has('openclaw')) return [{ path: 'app.py', content: PY_HTTP_STARTER }]
   if (has('code-interpreter', 'python', 'flask', 'django', 'jupyter') || lang === 'python')
     return [
       { path: 'analysis.py', content: PY_ANALYSIS_STARTER },
@@ -247,7 +160,6 @@ export function starterStart(tpl: Template): string | undefined {
     ['code-interpreter', 'python', 'jupyter'].some(x => id.includes(x)) ||
     lang === 'python'
   ) {
-    if (id.includes('fastapi') || id.includes('openclaw')) return undefined
     return 'python3 analysis.py'
   }
   return undefined

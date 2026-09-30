@@ -115,30 +115,10 @@ RUN printf '%s\n' \
   '});' \
   > tests/example.spec.js`,
 
-	// Mirrors templates/fastapi/Dockerfile.
-	"fastapi": `FROM python:3.11-slim-bookworm
-RUN apt-get update && apt-get install -y --no-install-recommends curl git build-essential && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir fastapi "uvicorn[standard]" sqlalchemy pydantic requests httpx
-WORKDIR /workspace`,
-
 	// Mirrors templates/node/Dockerfile.
 	"node": `FROM node:20-slim
 RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN npm install -g typescript tsx ts-node
-WORKDIR /workspace`,
-
-	// Same starter the firecracker rootfs bakes, inline because there is no
-	// build context to COPY from.
-	"nextjs": `FROM node:20-slim
-RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN npm install -g create-next-app typescript tailwindcss
-WORKDIR /root/app
-RUN mkdir -p pages && printf '%s' '{"name":"pilldrops-next-starter","private":true,"scripts":{"dev":"next dev -p ${PORT:-3000} -H 0.0.0.0","build":"next build","start":"next start -p ${PORT:-3000} -H 0.0.0.0"},"dependencies":{"next":"^14.2.5","react":"^18.3.1","react-dom":"^18.3.1"}}' > package.json && printf '%s' 'export default function Home(){return <main style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"monospace"}}><h1>It is alive - edit /root/app/pages/index.jsx</h1></main>}' > pages/index.jsx && npm install --no-audit --no-fund && npm cache clean --force
-WORKDIR /workspace`,
-
-	"openclaw": `FROM python:3.11-slim-bookworm
-RUN apt-get update && apt-get install -y --no-install-recommends curl git build-essential chromium && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir playwright selenium beautifulsoup4 requests flask
 WORKDIR /workspace`,
 
 	// Desktop for computer-use agents. The screen itself is DesktopLayer,

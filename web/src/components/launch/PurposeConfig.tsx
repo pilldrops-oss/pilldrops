@@ -9,9 +9,6 @@ import McpPicker from '../McpPicker'
 
 import { type AccessMode, ACCESS_MODES, envPlaceholder } from '../../lib/launchKinds'
 
-// Verdict templates ship one CLI each; anything else has no runner to name.
-const VERDICT_CLI: Record<string, string> = { loadtest: 'pdload', security: 'pdscan' }
-
 import { useLaunchConfig } from './useLaunchConfig'
 
 export function StartConfig({
@@ -440,38 +437,6 @@ function NonAgentPurposeConfig({ cfg }: { cfg: ReturnType<typeof useLaunchConfig
     )
   }
 
-  if (tpl.kind === 'verdict' && tpl.primary_input) {
-    const pi = tpl.primary_input
-    const runner = VERDICT_CLI[tpl.id] ?? null
-    if (runner) {
-      return (
-        <div className="lm-sec">
-          <div className="lm-sec-h">
-            {pi.label}
-            {pi.required && <span className="lm-req"> *</span>}
-          </div>
-          <input
-            className="pa-input mono"
-            type="url"
-            value={cfg.primaryValue}
-            placeholder="https://…"
-            onChange={e => cfg.setPrimaryValue(e.target.value)}
-          />
-          {cfg.primaryValue.trim() ? (
-            <p className="lm-help">
-              <code>{runner}</code> runs against it on boot and the GREEN/RED report replaces the
-              preview when it finishes. Only test targets you own.
-            </p>
-          ) : (
-            <p className="lm-hint pa-warn">
-              Required — without a target the sandbox has nothing to {tpl.id === 'loadtest' ? 'load-test' : 'scan'} and
-              the preview shows an empty “No run yet” page.
-            </p>
-          )}
-        </div>
-      )
-    }
-  }
 
 
   return (

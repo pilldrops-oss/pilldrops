@@ -2,7 +2,7 @@ package pdconfig
 
 import "testing"
 
-var ids = []string{"playwright", "base", "fastapi"}
+var ids = []string{"playwright", "base", "node"}
 
 func TestParseMinimal(t *testing.T) {
 	c, err := Parse(`{"version":1,"template":"base"}`, ids)

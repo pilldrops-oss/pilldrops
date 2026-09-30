@@ -237,15 +237,7 @@ function TemplateCard({
   const langBadge = tpl.language || tpl.tags?.[0]
   const port = tpl.default_port ?? tpl.port
   const cpu = tpl.cpu || 1
-  const [primary, setPrimary] = useState('')
-  const pi = tpl.primary_input
-  const urlQuick =
-    !!onQuickLaunch &&
-    tpl.kind === 'verdict' &&
-    !!pi &&
-    (pi.type === 'url' || pi.type === 'target') &&
-    (tpl.id === 'loadtest' || tpl.id === 'security')
-  const zeroQuick = !!onQuickLaunch && !urlQuick && quickLaunchable(tpl, vaultNames)
+  const zeroQuick = !!onQuickLaunch && quickLaunchable(tpl, vaultNames)
   return (
     <div
       className="dep-card"
@@ -306,36 +298,6 @@ function TemplateCard({
           <span className="chip dep-chip-g">Opens a web app</span>
         ) : null}
       </div>
-      {urlQuick && (
-        <div
-          className="dep-quick"
-          onClick={e => e.stopPropagation()}
-          onKeyDown={e => e.stopPropagation()}
-        >
-          <input
-            className="dep-quick-in"
-            type="url"
-            value={primary}
-            placeholder="https://target…"
-            aria-label={pi.label}
-            onChange={e => setPrimary(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && primary.trim()) {
-                e.preventDefault()
-                onQuickLaunch!(tpl, primary.trim())
-              }
-            }}
-          />
-          <button
-            type="button"
-            className="dep-quick-btn"
-            disabled={!primary.trim()}
-            onClick={() => onQuickLaunch!(tpl, primary.trim())}
-          >
-            ▶ Run
-          </button>
-        </div>
-      )}
       {zeroQuick && (
         <div
           className="dep-quick"

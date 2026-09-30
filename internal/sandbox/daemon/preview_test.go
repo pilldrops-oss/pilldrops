@@ -246,7 +246,7 @@ func TestPlatformPortsAreReachableAlongsideADeclaredApp(t *testing.T) {
 	d, _ := newTestDaemon(t)
 	ctx := context.Background()
 
-	sb, err := d.Create(ctx, CreateSpec{Template: "claude"})
+	sb, err := d.Create(ctx, CreateSpec{Template: "base"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

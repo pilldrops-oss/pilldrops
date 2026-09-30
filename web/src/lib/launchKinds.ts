@@ -280,42 +280,18 @@ export interface ServiceConn {
   url?: string
 }
 
-// serviceUrlFor returns undefined when the scheme needs a credential that is missing.
-function serviceUrlFor(
-  t: Template,
-  host: string,
-  port: number,
-  env: Record<string, string>,
-): string | undefined {
-  switch (t.id) {
-    case 'postgres': {
-      const pass = env['POSTGRES_PASSWORD'] ?? ''
-      const db = env['POSTGRES_DB'] || 'app'
-      return pass ? `postgres://postgres:${pass}@${host}:${port}/${db}` : undefined
-    }
-    case 'mysql': {
-      const pass = env['MYSQL_ROOT_PASSWORD'] ?? ''
-      return pass ? `mysql://root:${pass}@${host}:${port}/` : undefined
-    }
-    case 'redis':
-      return `redis://${host}:${port}`
-    case 'mongodb':
-      return `mongodb://${host}:${port}`
-    default:
-      return undefined
-  }
-}
-
 function serviceHostForId(id?: string): string {
   return sandboxHost(id ?? '<id>')
 }
 
-// serviceConn derives the Connection block info for a service template.
-export function serviceConn(t: Template, id?: string, env?: Record<string, string>): ServiceConn {
+// serviceConn derives the Connection block info for a service template. No
+// catalogue template declares a connection scheme, so url is always
+// undefined until one does.
+export function serviceConn(t: Template, id?: string): ServiceConn {
   const port = t.default_port ?? t.port ?? t.ports?.[0] ?? 5432
   const credEnvNames = (t.env ?? []).map(e => e.name)
   const host = serviceHostForId(id)
-  return { host, port, credEnvNames, url: serviceUrlFor(t, host, port, env ?? {}) }
+  return { host, port, credEnvNames }
 }
 
 export interface CustomEnv {

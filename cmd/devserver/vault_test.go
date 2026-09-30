@@ -82,7 +82,7 @@ func TestResolveSecretRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := []byte(`{"template":"claude","env":["FOO=bar"],"secret_refs":["ANTHROPIC_API_KEY"]}`)
+	body := []byte(`{"template":"node","env":["FOO=bar"],"secret_refs":["ANTHROPIC_API_KEY"]}`)
 	out, err := resolveSecretRefs(body, vs, "u:alice")
 	if err != nil {
 		t.Fatal(err)

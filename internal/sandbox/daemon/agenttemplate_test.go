@@ -21,13 +21,6 @@ func TestAgentTemplateIDOnlyMatchesAgentKind(t *testing.T) {
 	}
 }
 
-// openclaw carries the "agent" tag but is kind=app; matching on tags would be wrong.
-func TestOpenclawIsNotAnAgentTemplate(t *testing.T) {
-	if got := agentTemplateID("openclaw"); got != "" {
-		t.Errorf("openclaw was treated as an agent template (%q) — the tag was matched, not the kind", got)
-	}
-}
-
 func TestUnknownTemplateIsNotAnAgent(t *testing.T) {
 	if got := agentTemplateID("no-such-template"); got != "" {
 		t.Errorf("unknown template gave %q, want empty", got)
