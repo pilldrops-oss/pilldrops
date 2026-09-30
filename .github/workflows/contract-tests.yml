@@ -53,12 +53,11 @@ jobs:
         run: python -m pytest tests/contract -m guard -v --tb=short
 
   parity:
-    if: vars.CONTRACT_ENABLED == 'true'
+    if: vars.CONTRACT_ENABLED == 'true' && github.event_name != 'workflow_call'
     name: Parity scorecard (informative)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     continue-on-error: true # open gaps are expected to fail until their WS lands
-    if: github.event_name != 'workflow_call'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -75,7 +74,9 @@ jobs:
         run: |
           python -m pytest tests/contract -m parity -v --tb=line \
             | tee parity-report.txt
-          echo '## Parity scorecard' >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          tail -30 parity-report.txt >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '## Parity scorecard'
+            echo '```'
+            tail -30 parity-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
