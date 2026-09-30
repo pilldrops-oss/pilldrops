@@ -9,16 +9,28 @@ import (
 // Another program holding [::1]:port would answer http://localhost:port in a
 // browser; the dev server must refuse to start rather than share the name.
 func TestListenLocalRefusesAPortTakenOnIPv6Loopback(t *testing.T) {
-	other, err := net.Listen("tcp", "[::1]:0")
-	if err != nil {
-		t.Skipf("no IPv6 loopback here: %v", err)
+	// The port is free on [::1] only by construction; on 127.0.0.1 some other
+	// process may hold it, which is a different refusal. Try another port then.
+	for range 20 {
+		other, err := net.Listen("tcp", "[::1]:0")
+		if err != nil {
+			t.Skipf("no IPv6 loopback here: %v", err)
+		}
+		_, port, _ := net.SplitHostPort(other.Addr().String())
+		lns, err := listenLocal(t.Context(), net.JoinHostPort("127.0.0.1", port))
+		_ = other.Close()
+		for _, l := range lns {
+			_ = l.Close()
+		}
+		if err != nil && strings.Contains(err.Error(), "listen tcp 127.0.0.1:"+port) {
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), "[::1]:"+port) {
+			t.Fatalf("listenLocal = %v, want a refusal naming [::1]:%s", err, port)
+		}
+		return
 	}
-	defer other.Close()
-	_, port, _ := net.SplitHostPort(other.Addr().String())
-
-	if _, err := listenLocal(t.Context(), net.JoinHostPort("127.0.0.1", port)); err == nil || !strings.Contains(err.Error(), "[::1]:"+port) {
-		t.Fatalf("listenLocal = %v, want a refusal naming [::1]:%s", err, port)
-	}
+	t.Skip("every [::1] port tried was taken on 127.0.0.1")
 }
 
 func TestListenLocalServesBothLoopbacks(t *testing.T) {
