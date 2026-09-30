@@ -9,10 +9,66 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/pilldrops-oss/pilldrops/internal/auth/sbtoken"
 	"github.com/pilldrops-oss/pilldrops/internal/httpx"
 )
+
+// envdTerminalPort is the envd web terminal the dashboard's Terminal tab opens
+// as a preview port; locally one envd serves every sandbox.
+const envdTerminalPort = "7681"
+
+// localPreview serves /preview/{id}/{port}/... on the local runtime. It only
+// ever reaches the sandbox's own app port or, for its owner, the terminal: an
+// unknown id or another port is not a way into arbitrary localhost services.
+func localPreview(mgr *DevManager, ownerID func(*http.Request) string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sb, ok := mgr.GetSandbox(chi.URLParam(r, "id"))
+		if !ok || sb.Port <= 0 {
+			http.Error(w, "Sandbox not found", http.StatusNotFound)
+			return
+		}
+		target := fmt.Sprintf("localhost:%d", sb.Port)
+		terminal := chi.URLParam(r, "port") == envdTerminalPort
+		if terminal {
+			// A shell, so only its owner.
+			if sb.UserID != ownerID(r) {
+				http.Error(w, "Sandbox not found", http.StatusNotFound)
+				return
+			}
+			target = "localhost:" + envdTerminalPort
+		}
+		rest := "/" + chi.URLParam(r, "*")
+		rp := &httputil.ReverseProxy{
+			Rewrite: func(pr *httputil.ProxyRequest) {
+				pr.Out.URL.Scheme, pr.Out.URL.Host = "http", target
+				pr.Out.URL.Path, pr.Out.URL.RawPath = rest, ""
+				// envd's websocket origin check compares Origin with Host.
+				pr.Out.Host = pr.In.Host
+				if terminal {
+					pr.Out.Header.Set(sbtoken.MetadataKey, mgr.envdToken)
+					q := pr.Out.URL.Query()
+					if q.Get("cwd") == "" {
+						q.Set("cwd", sb.WorkDir)
+					}
+					pr.Out.URL.RawQuery = q.Encode()
+				}
+			},
+			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
+				msg := fmt.Sprintf("Preview not available — start a web server in the terminal first.\n\nTry: python3 -m http.server %d", sb.Port)
+				if terminal {
+					msg = "Terminal not available — the local envd is not running."
+				}
+				http.Error(w, msg, http.StatusBadGateway)
+			},
+		}
+		rp.ServeHTTP(w, r)
+	})
+}
 
 // localPreviewClient never follows redirects; a 301 already proves the app answered.
 var localPreviewClient = &http.Client{

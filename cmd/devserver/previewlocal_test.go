@@ -2,10 +2,14 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func noProbe(t *testing.T) func() (int, error) {
@@ -92,4 +96,38 @@ func fmtSscanf(url string, port *int) (int, error) {
 	}
 	*port = n
 	return 1, nil
+}
+
+// The local preview reaches only a live sandbox's own app port, with the
+// request intact; the terminal port is its owner's alone.
+func TestLocalPreviewOnlyReachesTheSandboxApp(t *testing.T) {
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_, _ = fmt.Fprintf(w, "%s %s?%s %s", r.Method, r.URL.Path, r.URL.RawQuery, body)
+	}))
+	defer app.Close()
+	var port int
+	if _, err := fmtSscanf(app.URL, &port); err != nil {
+		t.Fatal(err)
+	}
+	mgr := &DevManager{sandboxes: map[string]*DevSandbox{"sb-1": {ID: "sb-1", UserID: "u:a", Port: port}}}
+	serve := func(owner, method, path, body string) *httptest.ResponseRecorder {
+		r := chi.NewRouter()
+		h := localPreview(mgr, func(*http.Request) string { return owner })
+		r.Handle("/preview/{id}/{port}/*", h)
+		r.Handle("/preview/{id}/{port}", h)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return w
+	}
+
+	if w := serve("u:a", "POST", "/preview/sb-1/8000/api/x?q=1", "payload"); w.Body.String() != "POST /api/x?q=1 payload" {
+		t.Errorf("app saw %q, want method, path, query and body intact", w.Body.String())
+	}
+	if w := serve("u:a", "GET", "/preview/nope/8080/health", ""); w.Code != http.StatusNotFound {
+		t.Errorf("unknown sandbox = %d, want 404 rather than a proxy to localhost:8080", w.Code)
+	}
+	if w := serve("u:b", "GET", "/preview/sb-1/7681/ws", ""); w.Code != http.StatusNotFound {
+		t.Errorf("another tenant's terminal = %d, want 404", w.Code)
+	}
 }

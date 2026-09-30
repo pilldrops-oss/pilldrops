@@ -2952,41 +2952,11 @@ func main() {
 			r.Handle("/preview/{id}/{port}", previewRP)
 		}
 	} else {
-		// Local mode: proxy to the sandbox's assigned localhost port.
-		r.HandleFunc("/preview/{id}/{port}/*", func(w http.ResponseWriter, r *http.Request) {
-			id := chi.URLParam(r, "id")
-			port := chi.URLParam(r, "port")
-			if sb, ok := mgr.GetSandbox(id); ok && sb.Port > 0 {
-				port = fmt.Sprintf("%d", sb.Port)
-			}
-			prefix := "/preview/" + id + "/" + chi.URLParam(r, "port")
-			target := "http://localhost:" + port + r.URL.Path[len(prefix):]
-			if target == "http://localhost:"+port {
-				target += "/"
-			}
-			// The request context, so a browser that navigated away cancels
-			// the upstream fetch.
-			preq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
-			if err != nil {
-				http.Error(w, "bad preview target", http.StatusBadRequest)
-				return
-			}
-			resp, err := http.DefaultClient.Do(preq) //nolint:bodyclose // closed by closeQuietly below
-			if err != nil {
-				http.Error(w, "Preview not available — start a web server in the terminal first.\n\nTry: python3 -m http.server "+port, http.StatusBadGateway)
-				return
-			}
-			defer closeQuietly(resp.Body, "dev preview proxy")
-			for k, v := range resp.Header {
-				for _, vv := range v {
-					w.Header().Add(k, vv)
-				}
-			}
-			w.WriteHeader(resp.StatusCode)
-			if _, err := io.Copy(w, resp.Body); err != nil {
-				log.Warn("dev_preview_proxy_copy_failed", zap.Error(err))
-			}
-		})
+		// Local mode: the app is on the sandbox's assigned localhost port, and
+		// the terminal is the envd web terminal every local sandbox shares.
+		local := localPreview(mgr, ownerID)
+		r.Handle("/preview/{id}/{port}/*", local)
+		r.Handle("/preview/{id}/{port}", local)
 	}
 
 	addr, warnPublic := safeBindAddr(listenAddr, requireAuth,
