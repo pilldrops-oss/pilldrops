@@ -62,12 +62,15 @@ async function bearerToken(): Promise<string> {
   return getKey()
 }
 
+// bearerHeader is the Authorization header for key; none at all for no key,
+// since an empty "Bearer " reads as a malformed credential to some servers.
+function bearerHeader(key: string): Record<string, string> {
+  return key ? { Authorization: `Bearer ${key}` } : {}
+}
+
 // No key (make dev's anonymous server) sends no Authorization header at all.
 async function authHeaders(): Promise<HeadersInit> {
-  const key = await bearerToken()
-  return key
-    ? { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }
-    : { 'Content-Type': 'application/json' }
+  return { ...bearerHeader(await bearerToken()), 'Content-Type': 'application/json' }
 }
 
 // ApiError carries a UI-safe message plus the status, server code, and method/path to branch on.
@@ -287,7 +290,7 @@ export const fsList = (id: string, path: string) =>
 export const fsRead = async (id: string, path: string): Promise<string> => {
   const key = await bearerToken()
   return fetch(`/v1/sandboxes/${id}/files?path=${encodeURIComponent(path)}`, {
-    headers: { Authorization: `Bearer ${key}` },
+    headers: bearerHeader(key),
   }).then(r => {
     if (!r.ok) throw new Error(`GET /v1/sandboxes/${id}/files → ${r.status}`)
     return r.text()
@@ -303,7 +306,7 @@ export const fsWrite = async (id: string, path: string, content: string | Blob):
   const r = await fetch(`/v1/sandboxes/${id}/files?path=${encodeURIComponent(path)}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${key}`,
+      ...bearerHeader(key),
       'Content-Type': typeof content === 'string' ? 'text/plain' : 'application/octet-stream',
     },
     body: content,
@@ -444,7 +447,7 @@ export async function invokeFunction(name: string, opts: InvokeOptions = {}): Pr
   let path = opts.path ?? ''
   if (path && !path.startsWith('/')) path = `/${path}`
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${await bearerToken()}`,
+    ...bearerHeader(await bearerToken()),
     ...(opts.headers ?? {}),
   }
   const res = await fetch(`/v1/functions/${name}/invoke${path}`, {
