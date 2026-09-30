@@ -1320,8 +1320,8 @@ func (m *DevManager) Exec(ctx context.Context, sandboxID, cmd, cwd string, timeo
 		return "", "", -1, false, fmt.Errorf("sandbox not found")
 	}
 
-	if cwd == "" {
-		cwd = sb.WorkDir
+	if !filepath.IsAbs(cwd) {
+		cwd = filepath.Join(sb.WorkDir, cwd)
 	}
 
 	stream, err := sb.client.Execute(ctx, &pb.ExecuteRequest{

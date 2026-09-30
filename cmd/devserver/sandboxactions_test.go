@@ -43,6 +43,8 @@ type fakeEnvdClient struct {
 	pb.EnvdServiceClient
 	stdout   string
 	exitCode int32
+	calls    int
+	last     *pb.ExecuteRequest
 }
 
 func (f *fakeEnvdClient) Health(ctx context.Context, in *pb.HealthRequest, opts ...grpc.CallOption) (*pb.HealthResponse, error) {
@@ -50,6 +52,8 @@ func (f *fakeEnvdClient) Health(ctx context.Context, in *pb.HealthRequest, opts 
 }
 
 func (f *fakeEnvdClient) Execute(ctx context.Context, in *pb.ExecuteRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[pb.ExecuteResponse], error) {
+	f.calls++
+	f.last = in
 	return &fakeExecStream{msgs: []*pb.ExecuteResponse{
 		{Type: pb.OutputType_STDOUT, Data: []byte(f.stdout)},
 		{Type: pb.OutputType_EXIT, ExitCode: f.exitCode},
@@ -140,5 +144,29 @@ func TestSandboxActions_CrossOwner404(t *testing.T) {
 	}
 	if w := do(t, rAlice, "GET", "/v1/sandboxes/sb-1", ""); w.Code != http.StatusOK {
 		t.Fatalf("alice info: got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func postAs(t *testing.T, r http.Handler, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+// A relative cwd is inside the workspace, not relative to wherever envd runs.
+func TestExecRelativeCwdResolvesInWorkspace(t *testing.T) {
+	envd := &fakeEnvdClient{}
+	mgr := &DevManager{sandboxes: map[string]*DevSandbox{"sb-1": {ID: "sb-1", UserID: "u:a", WorkDir: "/ws/sb-1", client: envd}}}
+	r := sandboxActionRouter(mgr, NewExecHistory(), NewUsageTracker(), "u:a")
+	for cwd, want := range map[string]string{"": "/ws/sb-1", "sub": "/ws/sb-1/sub", "/tmp": "/tmp"} {
+		if w := postAs(t, r, "/v1/sandboxes/sb-1/exec", `{"cmd":"pwd","cwd":"`+cwd+`"}`); w.Code != http.StatusOK {
+			t.Fatalf("cwd %q: %d %s", cwd, w.Code, w.Body.String())
+		}
+		if envd.last.Cwd != want {
+			t.Errorf("cwd %q reached envd as %q, want %q", cwd, envd.last.Cwd, want)
+		}
 	}
 }
