@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"google.golang.org/grpc"
@@ -168,5 +169,21 @@ func TestExecRelativeCwdResolvesInWorkspace(t *testing.T) {
 		if envd.last.Cwd != want {
 			t.Errorf("cwd %q reached envd as %q, want %q", cwd, envd.last.Cwd, want)
 		}
+	}
+}
+
+// Refresh extends a short lease and never cuts a long one.
+func TestRefreshNeverShortensTheLease(t *testing.T) {
+	long := time.Now().Add(time.Hour)
+	mgr := &DevManager{sandboxes: map[string]*DevSandbox{"sb-1": {ID: "sb-1", UserID: "u:a", ExpiresAt: long}}}
+	r := sandboxActionRouter(mgr, NewExecHistory(), NewUsageTracker(), "u:a")
+	postAs(t, r, "/v1/sandboxes/sb-1/refresh", "")
+	if got := mgr.sandboxes["sb-1"].ExpiresAt; !got.Equal(long) {
+		t.Fatalf("refresh moved an hour-long lease to %v", got)
+	}
+	mgr.sandboxes["sb-1"].ExpiresAt = time.Now().Add(time.Minute)
+	postAs(t, r, "/v1/sandboxes/sb-1/refresh", "")
+	if got := time.Until(mgr.sandboxes["sb-1"].ExpiresAt); got < 4*time.Minute {
+		t.Fatalf("refresh left %v on a one-minute lease, want about 5m", got)
 	}
 }

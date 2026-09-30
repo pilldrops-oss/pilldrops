@@ -1806,7 +1806,10 @@ func registerSandboxActionRoutes(r chi.Router, mgr *DevManager, ownerID func(*ht
 		if !ok {
 			return
 		}
-		sb.ExpiresAt = time.Now().Add(5 * time.Minute)
+		// Extends, never shortens: a sandbox created with an hour left keeps it.
+		if next := time.Now().Add(5 * time.Minute); next.After(sb.ExpiresAt) {
+			sb.ExpiresAt = next
+		}
 		w.Header().Set("Content-Type", "application/json")
 		writeJSON(w, map[string]interface{}{"sandbox_id": id, "expires_at": sb.ExpiresAt})
 	})
