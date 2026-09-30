@@ -1,69 +1,14 @@
 package store
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// openTemp returns a fresh SQLite store, or a truncated Postgres one when
-// SANDBOXD_TEST_POSTGRES_URL is set. Store tests share it, so no t.Parallel().
-func openTemp(t *testing.T) *Store {
-	t.Helper()
-	if dsn := os.Getenv("SANDBOXD_TEST_POSTGRES_URL"); dsn != "" {
-		s, err := Open(t.Context(), dsn)
-		if err != nil {
-			t.Fatalf("open postgres: %v", err)
-		}
-		truncateAll(t, s)
-		t.Cleanup(func() { s.Close() })
-		return s
-	}
-	s, err := Open(t.Context(), filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	return s
-}
-
-// truncateAll empties every table except schema_migrations. The list comes from
-// pg_tables so a new table cannot be forgotten and leak rows between tests.
-func truncateAll(t *testing.T, s *Store) {
-	t.Helper()
-	// Close the cursor before TRUNCATE rewrites the tables it read.
-	tables := func() []string {
-		rows, err := s.db.Query(
-			`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations'`)
-		if err != nil {
-			t.Fatalf("list tables: %v", err)
-		}
-		defer rows.Close()
-		var out []string
-		for rows.Next() {
-			var n string
-			if err := rows.Scan(&n); err != nil {
-				t.Fatalf("scan table name: %v", err)
-			}
-			out = append(out, pq(n))
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatalf("list tables: %v", err)
-		}
-		return out
-	}()
-	if len(tables) == 0 {
-		t.Fatal("no tables to truncate — the schema is empty, so every test would pass vacuously")
-	}
-	if _, err := s.db.Exec(
-		`TRUNCATE ` + strings.Join(tables, ", ") + ` RESTART IDENTITY CASCADE`); err != nil {
-		t.Fatalf("truncate: %v", err)
-	}
-}
-
-// pq quotes a SQL identifier.
-func pq(ident string) string { return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"` }
+// openTemp returns a fresh SQLite store, or a Postgres schema of its own when
+// SANDBOXD_TEST_POSTGRES_URL is set.
+func openTemp(t *testing.T) *Store { return OpenForTest(t) }
 
 func TestOpenCreatesSchema(t *testing.T) {
 	s := openTemp(t)

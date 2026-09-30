@@ -39,16 +39,12 @@ type publishFixture struct {
 // newPublishFixture builds one. SQLite by default; Postgres when SANDBOXD_TEST_POSTGRES_URL is set.
 func newPublishFixture(t *testing.T) *publishFixture {
 	t.Helper()
-	dsn := filepath.Join(t.TempDir(), "cp.db")
 	kind := "sqlite"
-	if pg := os.Getenv("SANDBOXD_TEST_POSTGRES_URL"); pg != "" {
-		dsn, kind = pg, "postgres"
+	if os.Getenv("SANDBOXD_TEST_POSTGRES_URL") != "" {
+		kind = "postgres"
 	}
-	st, err := store.Open(t.Context(), dsn)
-	if err != nil {
-		t.Fatalf("open %s store: %v", kind, err)
-	}
-	t.Cleanup(func() { st.Close() })
+	// Isolated per test: its own SQLite file or Postgres schema.
+	st := store.OpenForTest(t)
 
 	dir := filepath.Join(t.TempDir(), "artifacts")
 	blobs, err := artifact.Open(artifact.KindFS, artifact.Options{Root: dir})
