@@ -8,119 +8,19 @@ import (
 )
 
 func TestRootIsTheExceptionNotTheDefault(t *testing.T) {
-	if r := rootReason(false, nil, ""); r != "" {
+	if r := rootReason(false); r != "" {
 		t.Fatalf("a plain template is excluded from the drop with reason %q — the class this finding is about is the one that must NOT be excluded", r)
 	}
-	if u := dropUser(false, nil, false, ""); u != sandboxRunUser {
+	if u := dropUser(false); u != sandboxRunUser {
 		t.Fatalf("dropUser(plain) = %q, want %q", u, sandboxRunUser)
 	}
 }
 
-func TestDeviceTemplatesRunAsTheBuiltinsOwnUser(t *testing.T) {
-	// service=true is the real call shape: a device builtin is also a service,
-	// so this catches the device branch being ordered after the service branch.
-	if r := rootReason(true, []string{"/dev/kvm"}, androidRunUser); r != "" {
-		t.Fatalf("a device builtin that declares a run user is still excluded from the drop: %q", r)
-	}
-	if u := dropUser(true, []string{"/dev/kvm"}, false, androidRunUser); u != androidRunUser {
-		t.Errorf("dropUser(device) = %q, want %q — the identity the image itself declares", u, androidRunUser)
-	}
-	if androidRunUser == "" || androidRunUser == "0:0" || androidRunUser == "root" {
-		t.Errorf("androidRunUser = %q, which is root", androidRunUser)
-	}
-
-	// A device builtin with no declared identity falls back to root with a reason, not a guessed uid.
-	r := rootReason(false, []string{"/dev/kvm"}, "")
-	if r == "" {
-		t.Fatal("a device builtin with no declared run user was dropped to some uid anyway; the fallback is supposed to be explicit")
-	}
-	if !strings.Contains(r, "device") {
-		t.Errorf("rootReason for an undeclared device template = %q, want a reason naming the device passthrough", r)
-	}
-	if u := dropUser(false, []string{"/dev/kvm"}, false, ""); u != "" {
-		t.Errorf("dropUser(device, no declared user) = %q, want \"\"", u)
-	}
-
-	// With no devices, deviceUser must be ignored or a tenant could pick the uid by template name.
-	if u := dropUser(false, nil, false, androidRunUser); u != sandboxRunUser {
-		t.Errorf("dropUser(no devices, deviceUser=%q) = %q, want %q — a builtin's identity leaked to a "+
-			"request that gets no device", androidRunUser, u, sandboxRunUser)
-	}
-	if u := dropUser(true, nil, false, androidRunUser); u != "" {
-		t.Errorf("dropUser(service, no devices, deviceUser set) = %q, want \"\"", u)
-	}
-}
-
-func TestEveryDeviceBearingBuiltinDeclaresANonRootUser(t *testing.T) {
-	devicesSeen := 0
-	for name, bs := range builtinServices {
-		if len(bs.devices) == 0 {
-			continue
-		}
-		devicesSeen++
-		if bs.runUser == "" {
-			t.Errorf("builtin %q is granted %v but declares no runUser, so its container and its "+
-				"whole tenant surface run as uid 0 with the host device mapped in", name, bs.devices)
-		}
-		if userPart(bs.runUser) == "0" || bs.runUser == "root" {
-			t.Errorf("builtin %q declares runUser %q, which is root", name, bs.runUser)
-		}
-		if got := builtinRunUser(name); got != bs.runUser {
-			t.Errorf("builtinRunUser(%q) = %q, want %q — bootImage would apply the wrong identity", name, got, bs.runUser)
-		}
-	}
-	if devicesSeen == 0 {
-		t.Fatal("no device-bearing builtin found; this test is not looking at the map bootImage reads")
-	}
-}
-
-// --user without --group-add leaves the emulator unable to open /dev/kvm (0660
-// root:kvm), which presents as slowness rather than failure.
-func TestDeviceTemplatesGetAPinnedUserAndTheDeviceGroup(t *testing.T) {
-	body := sourceContaining(t, "func (r *Runtime) bootImage(")
-	fn := bootImageBody(t, body)
-
-	if !strings.Contains(fn, `base = append(base, "--user", runUser)`) {
-		t.Error("bootImage never passes --user on the docker run. A device builtin runs the IMAGE's own " +
-			"entrypoint, so there is no sh -c prologue to drop from and the container's identity is " +
-			"whatever the image (or a node-baked warm image) happens to declare.")
-	}
-	if !strings.Contains(fn, `"--group-add", gid`) {
-		t.Error("bootImage does not add the device's owning group; a non-root container cannot open a " +
-			"0660 root:kvm device and falls back to software emulation silently")
-	}
-	if !strings.Contains(fn, "deviceGroup(d)") {
-		t.Error("the group is not derived from the device itself; a hard-coded gid is wrong on any node " +
-			"whose kvm group is not that number")
-	}
-	// An empty runUser would emit `--user ` and fail the boot.
-	if !strings.Contains(fn, `if service && runUser != "" {`) {
-		t.Error("the --user is not gated on a non-empty runUser")
-	}
-}
-
-// --group-add resolves names against the container's /etc/group, where the host's "kvm" does not exist.
-func TestDeviceGroupIsNumericAndSkipsRoot(t *testing.T) {
-	if g := deviceGroup("/nonexistent/device/xyz"); g != "" {
-		t.Errorf("deviceGroup on a missing path = %q, want \"\"", g)
-	}
-	if g := deviceGroup("/dev/null"); g == "0" {
-		t.Error("deviceGroup returned gid 0; that adds the root group to the container")
-	}
-	if g := deviceGroup("/dev/null"); g != "" {
-		for _, c := range g {
-			if c < '0' || c > '9' {
-				t.Fatalf("deviceGroup = %q, which is not numeric; --group-add would resolve it inside the container and fail", g)
-			}
-		}
-	}
-}
-
 func TestServiceTemplatesStayRoot(t *testing.T) {
-	if rootReason(true, nil, "") == "" {
+	if rootReason(true) == "" {
 		t.Fatal("an image-backed service template was dropped to a non-root uid; its entrypoint cannot initialise and postgres/mysql first boot breaks")
 	}
-	if u := dropUser(true, nil, false, ""); u != "" {
+	if u := dropUser(true); u != "" {
 		t.Errorf("dropUser(service) = %q, want \"\" (root)", u)
 	}
 }
@@ -146,28 +46,16 @@ func TestServiceClassMatchesWhatBootImageBranchesOn(t *testing.T) {
 	}
 }
 
-// agentd chowns the workspace to `node`, so a second uid on the exec surface
-// could not touch the files the agent wrote.
-func TestAgentTemplatesKeepTheirOwnIdentity(t *testing.T) {
-	if u := dropUser(false, nil, true, ""); u != agentRunUser {
-		t.Errorf("dropUser(agent) = %q, want %q", u, agentRunUser)
-	}
-	if agentRunUser == sandboxRunUser {
-		t.Error("agentRunUser and sandboxRunUser are the same identity; the split this test guards no longer exists")
-	}
-}
-
 // TestEveryContainerEntryPointDropsPrivilege enumerates every function that
 // builds a docker exec, so a new one must either drop or be listed in
 // rootByDesign. Scanned per function because argv is assembled across statements.
 func TestEveryContainerEntryPointDropsPrivilege(t *testing.T) {
 	rootByDesign := map[string]string{
-		"DiskUsageMB":   "a platform storage meter; `du` of the workspace, no tenant input",
-		"LiveStats":     "the same du, on the metrics path",
-		"Signal":        "must outrank the dropped process it is signalling",
-		"OOMKillCount":  "reads the container's own cgroup memory.events counter",
-		"Procs":         "docker top; a platform read",
-		"injectHarness": "harness templates are device-bearing (mobile-test), i.e. an already-excluded class, and it explicitly passes -u 0",
+		"DiskUsageMB":  "a platform storage meter; `du` of the workspace, no tenant input",
+		"LiveStats":    "the same du, on the metrics path",
+		"Signal":       "must outrank the dropped process it is signalling",
+		"OOMKillCount": "reads the container's own cgroup memory.events counter",
+		"Procs":        "docker top; a platform read",
 	}
 	drops := []string{`"--user"`, "userArgs()", "execArgs(", "User: d.user", "User: i.runUser"}
 
@@ -275,8 +163,10 @@ func TestUserSplitHandlesBothForms(t *testing.T) {
 	if u, g := userPart(sandboxRunUser), groupPart(sandboxRunUser); u != sandboxRunUID || g != sandboxRunUID {
 		t.Errorf("split(%q) = (%q, %q), want (%q, %q)", sandboxRunUser, u, g, sandboxRunUID, sandboxRunUID)
 	}
-	if u, g := userPart(agentRunUser), groupPart(agentRunUser); u != agentRunUser || g != agentRunUser {
-		t.Errorf("split(%q) = (%q, %q), want both %q", agentRunUser, u, g, agentRunUser)
+	// The bare-name form, with no ":group" suffix.
+	const bareName = "node"
+	if u, g := userPart(bareName), groupPart(bareName); u != bareName || g != bareName {
+		t.Errorf("split(%q) = (%q, %q), want both %q", bareName, u, g, bareName)
 	}
 }
 

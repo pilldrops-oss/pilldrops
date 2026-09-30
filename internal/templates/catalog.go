@@ -50,7 +50,6 @@ type Template struct {
 	Kind         string        `json:"kind,omitempty"`
 	PrimaryInput *PrimaryInput `json:"primary_input,omitempty"`
 	Outcome      string        `json:"outcome,omitempty"`
-	Agent        *AgentMeta    `json:"agent,omitempty"`
 
 	// Image and Ports mark an image-backed service template booted from a
 	// published image with its own entrypoint. Platform-defined, so exempt from

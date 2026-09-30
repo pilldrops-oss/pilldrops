@@ -19,11 +19,11 @@ func TestBootImageAppliesResourceLimitsAndNoNewPrivileges(t *testing.T) {
 	}
 	// The last unconditional line before bootImage branches on service. The
 	// first `if !service` is too early: the limit block sits after it.
-	agentTokenIdx := strings.Index(body[fnStart:], "var agentToken, agentHash string")
-	if agentTokenIdx < 0 {
-		t.Fatal("the agentToken anchor has moved; this test no longer checks anything")
+	envdTokenIdx := strings.Index(body[fnStart:], "var envdToken string")
+	if envdTokenIdx < 0 {
+		t.Fatal("the envdToken anchor has moved; this test no longer checks anything")
 	}
-	unconditional := body[fnStart : fnStart+agentTokenIdx]
+	unconditional := body[fnStart : fnStart+envdTokenIdx]
 
 	for _, want := range []string{
 		`"--security-opt", "no-new-privileges"`,
@@ -86,11 +86,11 @@ func TestBootSpecResourceLimitFieldsDefaultToZero(t *testing.T) {
 func TestBootImageDisablesIPv6InTheSandbox(t *testing.T) {
 	body := sourceContaining(t, `func (r *Runtime) bootImage(`)
 	fnStart := strings.Index(body, "func (r *Runtime) bootImage(")
-	agentTokenIdx := strings.Index(body[fnStart:], "var agentToken, agentHash string")
-	if fnStart < 0 || agentTokenIdx < 0 {
-		t.Fatal("bootImage or its agentToken anchor has moved; this test no longer checks anything")
+	envdTokenIdx := strings.Index(body[fnStart:], "var envdToken string")
+	if fnStart < 0 || envdTokenIdx < 0 {
+		t.Fatal("bootImage or its envdToken anchor has moved; this test no longer checks anything")
 	}
-	unconditional := body[fnStart : fnStart+agentTokenIdx]
+	unconditional := body[fnStart : fnStart+envdTokenIdx]
 
 	if !strings.Contains(unconditional, `net.ipv6.conf.all.disable_ipv6=1`) {
 		t.Error("bootImage does not disable IPv6 in the container. Every egress rule on a " +

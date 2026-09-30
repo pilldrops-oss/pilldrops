@@ -10,7 +10,6 @@ import (
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
-	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
 
 // Post-launch config is applied per exec, so a change lands on the next
@@ -36,8 +35,7 @@ func (s *Server) handleConfigSet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "sandbox not found")
 		return
 	}
-	sb, ok := s.d.Get(id)
-	if !ok {
+	if _, ok := s.d.Get(id); !ok {
 		writeErr(w, http.StatusNotFound, "sandbox not found")
 		return
 	}
@@ -70,19 +68,9 @@ func (s *Server) handleConfigSet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Model and base URL map to per-agent env names from the manifest, so the
-	// UI never needs to know them.
 	env := body.Env
 	if env == nil {
 		env = map[string]string{}
-	}
-	if tmpl, ok := templates.Resolve(sb.Template); ok && tmpl.Agent != nil {
-		if body.Model != "" && tmpl.Agent.ModelEnv != "" {
-			env[tmpl.Agent.ModelEnv] = body.Model
-		}
-		if body.BaseURL != "" && tmpl.Agent.BaseURLEnv != "" {
-			env[tmpl.Agent.BaseURLEnv] = body.BaseURL
-		}
 	}
 
 	cfg, err := s.st.MergeSandboxConfig(r.Context(), id, orgID(r), env, body.Model, body.BaseURL)

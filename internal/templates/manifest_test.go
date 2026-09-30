@@ -26,36 +26,6 @@ func TestEveryBuiltinHasLaunchManifest(t *testing.T) {
 	}
 }
 
-func TestAgentTemplatesCarryAgentMeta(t *testing.T) {
-	for _, tpl := range Catalog() {
-		isAgent := tpl.Kind == KindAgent
-		hasMeta := tpl.Agent != nil
-		if isAgent != hasMeta {
-			t.Errorf("%s: kind=%q but Agent metadata present=%v", tpl.ID, tpl.Kind, hasMeta)
-			continue
-		}
-		if !isAgent {
-			continue
-		}
-		a := tpl.Agent
-		if a.CLIBin == "" || a.InstallCmd == "" || a.RunCmd == "" || a.ConfigFile == "" {
-			t.Errorf("%s: incomplete AgentMeta: %+v", tpl.ID, a)
-		}
-		if a.KeyEnv == "" && a.KeyNote == "" {
-			t.Errorf("%s: neither KeyEnv nor KeyNote set", tpl.ID)
-		}
-		switch a.ConfigFormat {
-		case "json", "toml", "yaml":
-		default:
-			t.Errorf("%s: ConfigFormat = %q, want json|toml|yaml", tpl.ID, a.ConfigFormat)
-		}
-		// Only JSON examples are validated, so an unverified example in another format must be omitted.
-		if a.ConfigFormat == "json" && !json.Valid([]byte(a.ConfigExample)) {
-			t.Errorf("%s: ConfigExample is not valid JSON", tpl.ID)
-		}
-	}
-}
-
 func TestManifestKindAssignments(t *testing.T) {
 	want := map[string]string{
 		"base":             KindShell,

@@ -15,8 +15,6 @@ import (
 const (
 	// TerminalPort is envd's web terminal.
 	TerminalPort = 7681
-	// AgentPort is agentd's HTTP API.
-	AgentPort = 6002
 	// DesktopPort is envd's noVNC viewer, bound only when PD_DESKTOP=1 asked
 	// for a screen. Reserved on every sandbox so the proxy can reach it without
 	// the template having declared it.
@@ -25,7 +23,7 @@ const (
 
 // IsPlatformPort reports whether a port belongs to the platform rather than to a user app.
 func IsPlatformPort(port int) bool {
-	return port == TerminalPort || port == AgentPort || port == DesktopPort
+	return port == TerminalPort || port == DesktopPort
 }
 
 // Sentinel errors the daemon and API translate to status codes.
@@ -170,9 +168,6 @@ type Template struct {
 	Image string
 	Ports []int    // extra ports to publish (e.g. 5432)
 	Env   []string // "NAME=VALUE" env for the container
-	// AgentID is set for kind=agent templates and tells the runtime to run
-	// agentd beside envd. The daemon decides; the runtime does not re-derive it.
-	AgentID string
 }
 
 // BootSpec is everything an engine needs to start one instance.
@@ -354,13 +349,6 @@ type Instance interface {
 // cgroup memory.events).
 type OOMReporter interface {
 	OOMKillCount(ctx context.Context) (int, error)
-}
-
-// AgentTargeter is an optional Instance capability: where agentd listens and
-// the token to authenticate with. The token is the same per-sandbox sbtoken
-// envd uses.
-type AgentTargeter interface {
-	AgentTarget() (addr string, token string, err error)
 }
 
 // TerminalAuthorizer is an optional Instance capability: the token envd's web

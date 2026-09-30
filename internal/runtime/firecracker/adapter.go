@@ -77,9 +77,6 @@ const (
 	fcHomeDir = "/root"
 )
 
-// agentdPort is where agentd listens inside the guest.
-const agentdPort = rt.AgentPort
-
 type fcRuntime struct {
 	be vmBackend
 	// netns mirrors vm.Config.NetNS; the isolation preflight differs per mode
@@ -412,7 +409,7 @@ type fcInstance struct {
 	// carry (SetEnv, streamed files, stdin/raw exec). nil in tests with a
 	// fake backend, which then take the buffered path.
 	envd *envd.Client
-	// token is the per-sandbox envd/agentd credential, empty when EnvdAuth is off.
+	// token is the per-sandbox envd credential, empty when EnvdAuth is off.
 	token string
 	// bootType is what the VM layer did: "snapshot" (golden restore) or "cold".
 	bootType string
@@ -586,14 +583,6 @@ func (i *fcInstance) ListenTarget(port int) (string, error) {
 		port = fcAppPort
 	}
 	return i.hostIP + ":" + strconv.Itoa(port), nil
-}
-
-// AgentTarget returns hostIP:agentdPort and the sandbox token.
-func (i *fcInstance) AgentTarget() (string, string, error) {
-	if i.hostIP == "" {
-		return "", "", errors.New("sandbox has no VM IP")
-	}
-	return i.hostIP + ":" + strconv.Itoa(agentdPort), i.token, nil
 }
 
 // TerminalTarget returns hostIP:fcTerminalPort.

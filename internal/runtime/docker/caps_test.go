@@ -60,9 +60,6 @@ func TestBootImageDropsAllCapabilities(t *testing.T) {
 			}
 		}
 	}
-	if strings.Contains(fn, "if len(devices) == 0 {") {
-		t.Error("the device carve-out is back: those templates would return to Docker's default 14 capabilities")
-	}
 }
 
 func TestDeviceTemplatesGetTheSameCapabilitySetAsEverythingElse(t *testing.T) {

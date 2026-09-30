@@ -64,8 +64,7 @@ func (r *Runtime) RestoreCheckpoint(ctx context.Context, inst rt.Instance, src r
 	if i, ok := inst.(*dockerInstance); ok {
 		_, _, _, _ = dockerOut(ctx, "rm", "-f", i.cid)
 	}
-	spec, devices := resolveBuiltin(spec)
-	return r.bootImage(ctx, spec, tag, devices)
+	return r.bootImage(ctx, spec, tag)
 }
 
 var _ rt.Checkpointer = (*Runtime)(nil)
@@ -117,8 +116,7 @@ func (r *Runtime) BootFromSnapshot(ctx context.Context, src rt.SnapshotRef, spec
 	if src.Name == "" {
 		return nil, "", fmt.Errorf("boot from snapshot: no image tag")
 	}
-	spec, devices := resolveBuiltin(spec)
-	inst, err := r.bootImage(ctx, spec, src.Name, devices)
+	inst, err := r.bootImage(ctx, spec, src.Name)
 	if err != nil {
 		return nil, "", err
 	}

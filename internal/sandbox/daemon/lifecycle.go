@@ -240,13 +240,11 @@ func (d *Daemon) ResumeTimed(ctx context.Context, id string) (took time.Duration
 		}
 	}
 
-	// AgentID must be derived here as on the boot path, or a resumed agent
-	// sandbox comes back with no supervisor.
 	restoreStart := d.clock.Now()
 	restoreCtx, restoreSpan := observability.StartInternal(ctx, "runtime.Restore", attribute.String("sandbox_id", id))
 	inst, err := d.cfg.Runtime.Restore(restoreCtx, snap, rt.BootSpec{
 		SandboxID: id,
-		Template:  rt.Template{Name: template, AgentID: agentTemplateID(template)},
+		Template:  rt.Template{Name: template},
 		VCPU:      vcpu, MemMiB: memMiB, StorageMB: storageMB,
 	})
 	observability.End(restoreSpan, err)

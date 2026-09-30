@@ -141,34 +141,6 @@ func (d *Daemon) SetEnv(ctx context.Context, id string, env map[string]string) e
 	return es.SetEnv(ctx, env)
 }
 
-// AgentEndpoint reports where the sandbox's agentd listens and its token.
-// Returns rt.ErrUnsupported when the runtime has no agent surface. Does not
-// touch LastActiveAt, so lookups do not keep an idle machine awake.
-func (d *Daemon) AgentEndpoint(id string) (addr string, token string, err error) {
-	ctx, cancel := wakeCtx()
-	defer cancel()
-	if err := d.ensureRunning(ctx, id); err != nil {
-		return "", "", err
-	}
-	d.mu.Lock()
-	sb, ok := d.boxes[id]
-	if !ok {
-		d.mu.Unlock()
-		return "", "", rt.ErrNotFound
-	}
-	state, inst := sb.State, sb.inst
-	d.mu.Unlock()
-
-	if state == StatePaused {
-		return "", "", rt.ErrPaused
-	}
-	t, ok := inst.(rt.AgentTargeter)
-	if !ok {
-		return "", "", rt.ErrUnsupported
-	}
-	return t.AgentTarget()
-}
-
 // Exec runs a command in a sandbox, waking it if paused.
 func (d *Daemon) Exec(ctx context.Context, id string, s rt.ExecSpec) (rt.ExecResult, error) {
 	if err := d.ensureRunning(ctx, id); err != nil {

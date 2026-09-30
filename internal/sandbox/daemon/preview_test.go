@@ -240,8 +240,8 @@ func TestPreviewSinglePortRejectsOtherPort(t *testing.T) {
 	}
 }
 
-// The terminal and agent ports are the platform's, not the customer's app, so
-// the single-port check must exempt them.
+// The terminal port is the platform's, not the customer's app, so the
+// single-port check must exempt it.
 func TestPlatformPortsAreReachableAlongsideADeclaredApp(t *testing.T) {
 	d, _ := newTestDaemon(t)
 	ctx := context.Background()
@@ -254,7 +254,7 @@ func TestPlatformPortsAreReachableAlongsideADeclaredApp(t *testing.T) {
 		t.Fatalf("start server: %v", err)
 	}
 
-	for _, port := range []int{rt.TerminalPort, rt.AgentPort} {
+	for _, port := range []int{rt.TerminalPort} {
 		if _, err := d.PreviewTarget(ctx, sb.ID, port, "default"); errors.Is(err, rt.ErrNoAppOnPort) {
 			t.Errorf("port %d refused as 'no app listening' — that is the platform's own "+
 				"terminal/agent, so the tab is unreachable for every workstation that "+

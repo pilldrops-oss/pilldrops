@@ -2,10 +2,7 @@ package docker
 
 import (
 	_ "embed"
-	"fmt"
 	"strings"
-
-	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
 
 // desktopLayerFile is the ONE copy of the screen stack. Embedded for the Docker
@@ -80,15 +77,6 @@ var desktopLayerFile string
 // window; Xvfb's RANDR extension and x11vnc -xrandr are the other two thirds.
 var DesktopLayer = "\n" + desktopLayerFile
 
-// agentDockerfile renders an agent template's image from its manifest so the
-// base image and install command have a single source.
-func agentDockerfile(m templates.AgentMeta) string {
-	return "FROM " + m.BaseImage + `
-RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN ` + m.InstallCmd + `
-WORKDIR /workspace`
-}
-
 // enrichedDockerfiles bakes each template's advertised tooling onto its base
 // image, built once per node. Keyed by canonical template id.
 var enrichedDockerfiles = map[string]string{
@@ -149,55 +137,13 @@ ENV DISPLAY=:0
 WORKDIR /workspace`,
 }
 
-// handWrittenDockerfileIDs snapshots the keys before init adds the agent
-// entries; package vars initialize before init runs.
-var handWrittenDockerfileIDs = func() map[string]struct{} {
-	ids := make(map[string]struct{}, len(enrichedDockerfiles))
-	for id := range enrichedDockerfiles {
-		ids[id] = struct{}{}
-	}
-	return ids
-}()
-
-// agentIDCollision reports why a manifest agent id would shadow a hand-written
-// Dockerfile or a non-agent template id, or nil if it would not.
-func agentIDCollision(id string) error {
-	if _, exists := handWrittenDockerfileIDs[id]; exists {
-		return fmt.Errorf("enrichedDockerfiles: agent id %q collides with an existing hand-written entry in internal/runtime/docker/docker.go — rename the agent id in internal/templates/manifest.go, or remove the hand-written %q entry", id, id)
-	}
-	if img, exists := nonAgentBaseImages[id]; exists {
-		return fmt.Errorf("nonAgentBaseImages: agent id %q collides with an existing non-agent template id in internal/runtime/docker/docker.go that resolves to %q — rename the agent id in internal/templates/manifest.go, or remove the %q entry from nonAgentBaseImages", id, img, id)
-	}
-	return nil
-}
-
-// A collision would silently corrupt enrichedDockerfiles for the whole
-// process, so it panics at import time.
-func init() {
-	for id, m := range templates.AgentMetaByID() {
-		if err := agentIDCollision(id); err != nil {
-			panic(err.Error())
-		}
-		enrichedDockerfiles[id] = agentDockerfile(m)
-	}
-}
-
 // canonicalTemplate maps a template name or alias to the id keying enrichedDockerfiles.
 func canonicalTemplate(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "code-interpreter", "python-3.11", "python-data-science", "code-interpreter-v1",
-		"research", "deep-research", "web-scraper", "scraper":
+	case "code-interpreter", "python-3.11", "python-data-science", "code-interpreter-v1":
 		return "code-interpreter"
-	case "webhook-inbox", "webhook-tester":
-		return "node"
 	case "playwright", "playwright-test", "e2e":
 		return "playwright"
-	case "android", "android-emulator", "android-14":
-		return "android"
-	case "android-headless", "android-ci", "android-appium":
-		return "android-headless"
-	case "mobile-test", "android-test", "mobile-e2e":
-		return "mobile-test"
 	default:
 		return strings.ToLower(strings.TrimSpace(name))
 	}

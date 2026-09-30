@@ -8,7 +8,7 @@ import (
 
 func TestPlatformPortsAreDistinct(t *testing.T) {
 	seen := map[int]string{}
-	for name, p := range map[string]int{"TerminalPort": TerminalPort, "AgentPort": AgentPort, "DesktopPort": DesktopPort} {
+	for name, p := range map[string]int{"TerminalPort": TerminalPort, "DesktopPort": DesktopPort} {
 		if other, dup := seen[p]; dup {
 			t.Fatalf("%s and %s are both %d; one service would shadow the other", name, other, p)
 		}
@@ -17,7 +17,7 @@ func TestPlatformPortsAreDistinct(t *testing.T) {
 }
 
 func TestIsPlatformPort(t *testing.T) {
-	for _, p := range []int{TerminalPort, AgentPort, DesktopPort} {
+	for _, p := range []int{TerminalPort, DesktopPort} {
 		if !IsPlatformPort(p) {
 			t.Errorf("IsPlatformPort(%d) = false for a platform port", p)
 		}
@@ -29,7 +29,7 @@ func TestIsPlatformPort(t *testing.T) {
 				"shadowed by the platform", p)
 		}
 	}
-	for _, p := range []int{0, -1, TerminalPort - 1, TerminalPort + 1, AgentPort - 1, AgentPort + 1,
+	for _, p := range []int{0, -1, TerminalPort - 1, TerminalPort + 1,
 		DesktopPort - 1, DesktopPort + 1} {
 		if IsPlatformPort(p) {
 			t.Errorf("IsPlatformPort(%d) = true, want false", p)

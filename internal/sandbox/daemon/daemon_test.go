@@ -592,64 +592,6 @@ func TestRestoreReplaysPersistedEnv(t *testing.T) {
 	}
 }
 
-// Resume must carry AgentID in the BootSpec, or a resumed agent sandbox comes back with no supervisor.
-func TestResumeKeepsTheAgentSurface(t *testing.T) {
-	t.Skip("agent templates removed from the catalog; no template sets AgentID until Task 7 revisits agentTemplateID")
-	d, fake := newTestDaemon(t)
-	ctx := context.Background()
-
-	sb, err := d.Create(ctx, CreateSpec{Template: "claude"})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	booted, ok := fake.LastBootSpec()
-	if !ok {
-		t.Fatal("no boot spec recorded")
-	}
-	if booted.Template.AgentID == "" {
-		t.Fatal("the CREATE path did not set AgentID for an agent template — this test cannot " +
-			"tell whether resume preserves it")
-	}
-	want := booted.Template.AgentID
-
-	if err := d.Pause(ctx, sb.ID); err != nil {
-		t.Fatalf("pause: %v", err)
-	}
-	if err := d.Resume(ctx, sb.ID); err != nil {
-		t.Fatalf("resume: %v", err)
-	}
-
-	restored, ok := fake.LastBootSpec()
-	if !ok {
-		t.Fatal("no spec recorded for the restore")
-	}
-	if restored.Template.AgentID != want {
-		t.Errorf("resume rebuilt the sandbox with AgentID=%q, want %q — the agent supervisor "+
-			"is not mounted, so every agent endpoint 501s for the rest of this sandbox's life",
-			restored.Template.AgentID, want)
-	}
-}
-
-func TestResumeOfANonAgentTemplateStaysNonAgent(t *testing.T) {
-	d, fake := newTestDaemon(t)
-	ctx := context.Background()
-
-	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11"})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if err := d.Pause(ctx, sb.ID); err != nil {
-		t.Fatalf("pause: %v", err)
-	}
-	if err := d.Resume(ctx, sb.ID); err != nil {
-		t.Fatalf("resume: %v", err)
-	}
-	restored, _ := fake.LastBootSpec()
-	if restored.Template.AgentID != "" {
-		t.Errorf("a python sandbox resumed with AgentID=%q", restored.Template.AgentID)
-	}
-}
-
 // captureHandler renders each record as "message key=value ..." so tests can
 // assert on attributes, not just the message.
 type captureHandler struct{ fn func(string) }

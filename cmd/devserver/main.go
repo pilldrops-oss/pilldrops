@@ -1217,7 +1217,7 @@ func NewDevManager(envdBin string, log *zap.Logger) *DevManager {
 		maxActive:     50,
 		poolSize:      2,
 		maxConcurrent: 10,
-		templates:     []string{"base", "docker", "code-interpreter", "browser", "desktop", "playwright", "node", "go", "rust"},
+		templates:     []string{"base", "docker", "code-interpreter", "python-3.11", "browser", "desktop", "playwright", "node", "go", "rust"},
 		log:           log,
 	}
 	m.nextPort.Store(7000)
@@ -2310,18 +2310,15 @@ func main() {
 			if rest != "" {
 				id = strings.SplitN(rest, "/", 2)[0]
 			}
-			// On create, expand agent args and resolve secret_refs; remember
-			// the first port for a preview URL in the response.
+			// On create, resolve secret_refs; remember the first port for a
+			// preview URL in the response.
 			previewPort := 0
 			if r.Method == "POST" && id == "" {
 				if raw, err := io.ReadAll(r.Body); err == nil {
 					closeQuietly(r.Body, "sandboxes create")
-					// Agent args (task/access_mode) expand to the same
-					// files/setup/start the dashboard composes.
-					enriched := expandAgentCreate(raw)
 					// secret_refs resolve from the caller's vault and are
 					// stripped; nodes never see the vault.
-					resolved, rerr := resolveSecretRefs(enriched, vault, owner)
+					resolved, rerr := resolveSecretRefs(raw, vault, owner)
 					if rerr != nil {
 						http.Error(w, fmt.Sprintf(`{"error":%q}`, rerr.Error()), http.StatusBadRequest)
 						return

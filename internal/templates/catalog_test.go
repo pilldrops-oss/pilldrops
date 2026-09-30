@@ -70,8 +70,8 @@ func TestResolveCanonicalAndAliases(t *testing.T) {
 // Every id the portal picker advertises must Resolve on the node or create 400s.
 func TestPortalListedTemplatesAreCreatable(t *testing.T) {
 	portalIDs := []string{
-		"base", "python-3.11", "node-20", "code-interpreter-v1",
-		"desktop", "go-1.22", "rust-1.77",
+		"base", "docker", "code-interpreter", "python-3.11",
+		"browser", "desktop", "playwright", "node", "go", "rust",
 	}
 	for _, id := range portalIDs {
 		if _, ok := Resolve(id); !ok {

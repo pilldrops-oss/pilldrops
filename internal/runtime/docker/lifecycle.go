@@ -12,12 +12,9 @@ import (
 // Restore boots the sandbox from its committed snapshot image, falling back to
 // the template base image if the snapshot is missing.
 func (r *Runtime) Restore(ctx context.Context, snap rt.SnapshotRef, spec rt.BootSpec) (rt.Instance, error) {
-	spec, devices := resolveBuiltin(spec)
 	img := spec.Template.Image
 	if img == "" {
 		img = imageFor(spec.Template.Name)
-	} else if warm := r.builtinWarmImage(ctx, spec.Template.Name); warm != "" {
-		img = warm
 	}
 	if !snap.IsZero() {
 		if data, err := os.ReadFile(snap.Path); err == nil {
@@ -30,7 +27,7 @@ func (r *Runtime) Restore(ctx context.Context, snap rt.SnapshotRef, spec rt.Boot
 			}
 		}
 	}
-	return r.bootImage(ctx, spec, img, devices)
+	return r.bootImage(ctx, spec, img)
 }
 
 // Adopt reattaches to a still-running container from a previous daemon process,
@@ -48,16 +45,7 @@ func (r *Runtime) Adopt(ctx context.Context, sandboxID string) (rt.Instance, boo
 	if i := strings.IndexByte(cid, '\n'); i >= 0 {
 		cid = cid[:i]
 	}
-	// Builtin services preview on their own primary port, recovered from the image.
 	primary := appPort
-	if imgOut, _, _, _ := dockerOut(ctx, "inspect", "-f", "{{.Config.Image}}", cid); imgOut != "" {
-		img := strings.TrimSpace(imgOut)
-		for _, bs := range builtinServices {
-			if (bs.image == img || (bs.warmTag != "" && bs.warmTag == img)) && len(bs.ports) > 0 {
-				primary = bs.ports[0]
-			}
-		}
-	}
 	host, _ := mappedPort(ctx, cid, primary)
 	termHost, _ := mappedPort(ctx, cid, terminalPort)
 	cmdOut, _, _, _ := dockerOut(ctx, "inspect", "-f", "{{join .Config.Cmd \" \"}}", cid)

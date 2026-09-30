@@ -41,14 +41,11 @@ type dockerInstance struct {
 	cid      string
 	host     string
 	termHost string
-	// agentHost is empty for non-agent templates. The tokens are the node's
-	// credentials; only their hashes entered the container.
-	agentHost  string
-	agentToken string
-	envdToken  string
-	vcpu       int
-	memMiB     int
-	service    bool // image-backed service (no /workspace) → don't force -w on exec
+	// envdToken is the node's credential; only its hash entered the container.
+	envdToken string
+	vcpu      int
+	memMiB    int
+	service   bool // image-backed service (no /workspace) → don't force -w on exec
 	// runUser is the identity every tenant-reachable operation runs as; ""
 	// means uid 0 (see rootReason).
 	runUser string
@@ -334,15 +331,8 @@ func (i *dockerInstance) OOMKillCount(ctx context.Context) (int, error) {
 
 // ListenTarget resolves a container port to its published host address.
 func (i *dockerInstance) ListenTarget(port int) (string, error) {
-	switch port {
-	case rt.TerminalPort:
-		if i.termHost != "" {
-			return i.termHost, nil
-		}
-	case rt.AgentPort:
-		if i.agentHost != "" {
-			return i.agentHost, nil
-		}
+	if port == rt.TerminalPort && i.termHost != "" {
+		return i.termHost, nil
 	}
 	if i.host == "" {
 		return "", nil
@@ -385,15 +375,6 @@ func (i *dockerInstance) EnvdProtocol() int { return envdproto.Protocol }
 // when envd runs unauthenticated.
 func (i *dockerInstance) TerminalToken() (string, error) {
 	return i.envdToken, nil
-}
-
-// AgentTarget returns the agent supervisor's published address and token, or
-// ErrUnsupported when the sandbox runs no agentd.
-func (i *dockerInstance) AgentTarget() (string, string, error) {
-	if i.agentHost == "" {
-		return "", "", rt.ErrUnsupported
-	}
-	return i.agentHost, i.agentToken, nil
 }
 
 // StartServer launches the app command detached inside the container with PORT
