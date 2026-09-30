@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func reachFixture(t *testing.T) (s *Server, st *store.Store, port int,
 	t.Setenv("FORWARD_INGRESS", "1")
 	t.Setenv("FORWARD_PUBLIC_HOST", "fwd.example.net")
 
-	opened := 0
+	var opened atomic.Int32
 	node := fakeTunnelNode(t, &opened)
 
 	st, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "reach.db"))

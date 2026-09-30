@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ import (
 
 // fakeTunnelNode answers the node's /tcp/ route the way internal/httpapi does:
 // hijack, 101, then echo. Records how many tunnels were opened.
-func fakeTunnelNode(t *testing.T, opened *int) *httptest.Server {
+func fakeTunnelNode(t *testing.T, opened *atomic.Int32) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/sandboxes/{id}/tcp/{port}", func(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +38,7 @@ func fakeTunnelNode(t *testing.T, opened *int) *httptest.Server {
 		if err != nil {
 			return
 		}
-		*opened++
+		opened.Add(1) // the handler runs on the server's goroutine; the test reads it
 		_, _ = io.WriteString(conn, "HTTP/1.1 101 Switching Protocols\r\n\r\n")
 		defer conn.Close()
 		_, _ = io.Copy(conn, conn)
@@ -54,7 +55,7 @@ func TestForwardIngressBindsRelaysAndUnbinds(t *testing.T) {
 	t.Setenv("FORWARD_INGRESS", "1")
 	t.Setenv("FORWARD_PUBLIC_HOST", "fwd.example.net")
 
-	opened := 0
+	var opened atomic.Int32
 	node := fakeTunnelNode(t, &opened)
 
 	st, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ingress.db"))
@@ -118,8 +119,8 @@ func TestForwardIngressBindsRelaysAndUnbinds(t *testing.T) {
 		t.Fatal("bytes through the public port came back altered")
 	}
 	_ = conn.Close()
-	if opened != 1 {
-		t.Fatalf("the node saw %d tunnels, want 1", opened)
+	if n := opened.Load(); n != 1 {
+		t.Fatalf("the node saw %d tunnels, want 1", n)
 	}
 
 	// Removing the row unbinds the port, and an open stream on it is closed.
