@@ -49,6 +49,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/auth/previewtoken"
 	"github.com/pilldrops-oss/pilldrops/internal/auth/sbtoken"
 	"github.com/pilldrops-oss/pilldrops/internal/httpapi"
+	"github.com/pilldrops-oss/pilldrops/internal/httpx"
 	"github.com/pilldrops-oss/pilldrops/internal/mcp"
 
 	// Aliased to keep "store" free as a local name.
@@ -115,6 +116,28 @@ func closeQuietly(c io.Closer, what string) {
 // this hop carries the master key, and signs it on to the node; a client's own
 // X-Key-Id is never relayed, exactly as its X-Org-Override is not.
 const keyIDHeader = "X-Key-Id"
+
+// portalStreamClient has no overall timeout: http.Client.Timeout also bounds
+// reading the body, which would sever an open event stream. Redirects are
+// relayed, not followed, so a 303's Set-Cookie (the share-code claim) survives.
+var portalStreamClient = newPortalStreamClient()
+
+// portalBufferedClient serves proxyToOrchestrator's request/response exchanges;
+// unlike the stream client it carries an overall timeout.
+var portalBufferedClient = &http.Client{
+	Timeout:   60 * time.Second,
+	Transport: httpx.NewTransport(),
+}
+
+func newPortalStreamClient() *http.Client {
+	return &http.Client{
+		// A literal &http.Transport{} has no dial timeout and only 2 idle conns per host.
+		Transport: httpx.NewTransport(),
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
 
 // proxyToOrchestrator forwards the request to the orchestrator with the
 // server's API key and returns the buffered response. owner is the
@@ -2280,13 +2303,6 @@ func main() {
 				streamToOrchestrator(w, r, orchURL, orchKey, ownerID(r))
 				return
 			}
-			// The agent API is streamed for every method: it has SSE endpoints,
-			// its claim flow's output is a Set-Cookie the buffered helper drops,
-			// and reconnecting streams need Last-Event-ID relayed.
-			if isAgentPath(r.URL.Path) {
-				serveAgentProxy(w, r, orchURL, orchKey, ownerID(r))
-				return
-			}
 			owner := ownerID(r)
 			r.Header.Set("X-Org-Override", owner)
 			rest := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/v1/sandboxes"), "/")
@@ -2819,10 +2835,6 @@ func main() {
 		// Deploying needs the fleet; the local GET stub below lists none.
 		r.Post("/v1/functions", fleetPassthrough)
 
-		// One subtree registration covering every method, including the PATCH
-		// budget cap. See agentroutes.go.
-		registerAgentRoutes(r, proxyMode)
-
 		// Long-lived server on an existing sandbox; explicit route so the proxy engages.
 		r.Post("/v1/sandboxes/{id}/start", func(w http.ResponseWriter, r *http.Request) {
 			fleetProxy(w, r, func(w http.ResponseWriter) {
@@ -3034,7 +3046,7 @@ func main() {
 		// falls through to the site router.
 		Handler: hostPreview(portalSandboxDomain, previewRP, r, storeSlugLookup(projectStore)),
 		// No WriteTimeout: it would cap every SSE stream (log feed, streaming
-		// exec, agent events). IdleTimeout and per-handler contexts bound the rest.
+		// exec). IdleTimeout and per-handler contexts bound the rest.
 		IdleTimeout: 60 * time.Second,
 		// Bounds slow-header clients before any auth runs.
 		ReadHeaderTimeout: 10 * time.Second,
