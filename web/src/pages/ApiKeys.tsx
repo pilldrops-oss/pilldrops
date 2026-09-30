@@ -205,6 +205,7 @@ function KeyRow({ apiKey, onRevoke }: { apiKey: ApiKey; onRevoke: (k: ApiKey) =>
         <button
           className="iconbtn"
           title="Revoke key"
+          aria-label={`Revoke key ${apiKey.name}`}
           onClick={() => onRevoke(apiKey)}
           style={{ color: '#dc2626' }}
         >
