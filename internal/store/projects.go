@@ -123,10 +123,20 @@ func (s *Store) RecordRun(ctx context.Context, r Run) error {
 	return err
 }
 
-// EndRun closes a run with its finish time.
-func (s *Store) EndRun(ctx context.Context, id string, endedAt int64) error {
-	_, err := s.exec(ctx, `UPDATE project_runs SET ended_at = ? WHERE id = ?`, endedAt, id)
-	return err
+// EndRun closes a run of the project with its finish time. found is false when
+// the org's project has no such run, so a run id alone can never close
+// another org's run.
+func (s *Store) EndRun(ctx context.Context, orgID, projectID, id string, endedAt int64) (found bool, err error) {
+	if orgID == "" {
+		orgID = "default"
+	}
+	res, err := s.exec(ctx, `UPDATE project_runs SET ended_at = ? WHERE id = ? AND project_id = ? AND org_id = ?`,
+		endedAt, id, projectID, orgID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // ListRuns returns a project's runs, newest first.

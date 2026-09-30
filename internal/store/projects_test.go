@@ -24,8 +24,8 @@ func TestProjectOutlivesItsSandboxes(t *testing.T) {
 		t.Fatalf("RecordRun: %v", err)
 	}
 
-	if err := st.EndRun(t.Context(), "run-1", now+900); err != nil {
-		t.Fatalf("EndRun: %v", err)
+	if found, err := st.EndRun(t.Context(), "acme", "pr-1", "run-1", now+900); err != nil || !found {
+		t.Fatalf("EndRun = %v, %v", found, err)
 	}
 
 	got, err := st.GetProject(t.Context(), "acme", "pr-1")
@@ -123,7 +123,7 @@ func TestRunsAccumulate(t *testing.T) {
 	now := time.Now().Unix()
 	_ = st.SaveProject(t.Context(), Project{ID: "pr-1", OrgID: "acme", Name: "x", CreatedAt: now})
 	_ = st.RecordRun(t.Context(), Run{ID: "run-1", ProjectID: "pr-1", OrgID: "acme", PlanSnapshot: `{"v":1}`, StartedAt: now - 60})
-	_ = st.EndRun(t.Context(), "run-1", now-30)
+	_, _ = st.EndRun(t.Context(), "acme", "pr-1", "run-1", now-30)
 	_ = st.RecordRun(t.Context(), Run{ID: "run-2", ProjectID: "pr-1", OrgID: "acme", PlanSnapshot: `{"v":2}`, StartedAt: now})
 
 	runs, _ := st.ListRuns(t.Context(), "acme", "pr-1", 10)
@@ -149,5 +149,23 @@ func TestSaveProjectIsIdempotent(t *testing.T) {
 	list, _ := st.ListProjects(t.Context(), "acme", 10)
 	if len(list) != 1 || list[0].Name != "renamed" {
 		t.Fatalf("not upserted: %+v", list)
+	}
+}
+
+// A run id alone must not close another project's or org's run.
+func TestEndRunIsScopedToItsProject(t *testing.T) {
+	st := openTemp(t)
+	now := time.Now().Unix()
+	_ = st.SaveProject(t.Context(), Project{ID: "pr-a", OrgID: "acme", Name: "a", CreatedAt: now})
+	_ = st.RecordRun(t.Context(), Run{ID: "run-a", ProjectID: "pr-a", OrgID: "acme", StartedAt: now})
+
+	for _, c := range []struct{ org, project string }{{"acme", "pr-other"}, {"globex", "pr-a"}} {
+		if found, err := st.EndRun(t.Context(), c.org, c.project, "run-a", now+1); err != nil || found {
+			t.Fatalf("EndRun(%s, %s) = %v, %v; want not found", c.org, c.project, found, err)
+		}
+	}
+	runs, _ := st.ListRuns(t.Context(), "acme", "pr-a", 10)
+	if len(runs) != 1 || runs[0].EndedAt != 0 {
+		t.Fatalf("run ended through another scope: %+v", runs)
 	}
 }

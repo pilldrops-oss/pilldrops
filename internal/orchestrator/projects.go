@@ -239,11 +239,17 @@ func (s *Server) handleRunEnd(w http.ResponseWriter, r *http.Request) {
 	if st == nil {
 		return
 	}
-	if p := s.project(w, r, st); p == nil {
+	p := s.project(w, r, st)
+	if p == nil {
 		return
 	}
-	if err := st.EndRun(r.Context(), r.PathValue("runID"), time.Now().Unix()); err != nil {
+	found, err := st.EndRun(r.Context(), p.OrgID, p.ID, r.PathValue("runID"), time.Now().Unix())
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, "run not found")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

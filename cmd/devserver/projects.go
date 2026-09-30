@@ -224,8 +224,13 @@ func registerProjectRoutes(r chi.Router, st *store.Store, ownerID func(*http.Req
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return
 		}
-		if err := st.EndRun(r.Context(), chi.URLParam(r, "runID"), time.Now().Unix()); err != nil {
+		found, err := st.EndRun(r.Context(), p.OrgID, p.ID, chi.URLParam(r, "runID"), time.Now().Unix())
+		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			http.Error(w, `{"error":"run not found"}`, http.StatusNotFound)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
