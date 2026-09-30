@@ -55,6 +55,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/proxy"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	pdstore "github.com/pilldrops-oss/pilldrops/internal/store"
+	"github.com/pilldrops-oss/pilldrops/internal/templates"
 	"github.com/pilldrops-oss/pilldrops/internal/webui"
 	pb "github.com/pilldrops-oss/pilldrops/proto/envdpb"
 )
@@ -1381,6 +1382,13 @@ func (m *DevManager) Destroy(_ context.Context, sandboxID string) {
 	m.log.Info("sandbox_destroyed", zap.String("id", sandboxID))
 }
 
+// serveCatalog answers /v1/templates and /v1/templates/public with the same
+// catalog nodes serve.
+func serveCatalog(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	writeJSON(w, templates.Catalog())
+}
+
 // errPathEscapesRoot lets handlers answer 400 for a confinement escape and
 // 404 for a missing file.
 var errPathEscapesRoot = errors.New("path escapes sandbox root")
@@ -1564,7 +1572,7 @@ func registerFilesystemRoutes(r chi.Router, mgr *DevManager, ownerID func(*http.
 			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), 400)
 			return
 		}
-		var result []map[string]interface{}
+		result := []map[string]interface{}{}
 		for _, e := range entries {
 			info, ierr := e.Info()
 			if ierr != nil {
@@ -1579,7 +1587,8 @@ func registerFilesystemRoutes(r chi.Router, mgr *DevManager, ownerID func(*http.
 			result = append(result, entry)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		writeJSON(w, result)
+		// The fleet shape; the dashboard and SDKs read "entries".
+		writeJSON(w, map[string]interface{}{"entries": result})
 	})
 	r.Post("/v1/sandboxes/{id}/filesystem/mkdir", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -2360,8 +2369,8 @@ func main() {
 	for _, p := range webui.PublicPages {
 		r.Handle("/"+p, uiMux)
 	}
-	r.Handle("/robots.txt", uiMux)
-	r.Handle("/sitemap.xml", uiMux)
+	// The signed-out catalog fallback, as the orchestrator serves it.
+	r.Get("/v1/templates/public", serveCatalog)
 	r.Handle("/og.png", uiMux)
 	// A prefix, unlike the enumerated pages, so a new image in web/public
 	// does not 404 on the portal.
@@ -2859,10 +2868,14 @@ func main() {
 			})
 		})
 
+		// The fleet shape; the dashboard and SDKs read "sandboxes".
 		r.Get("/v1/sandboxes", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			writeJSON(w, mgr.List(ownerID(r)))
+			writeJSON(w, map[string]interface{}{"sandboxes": mgr.List(ownerID(r))})
 		})
+
+		// The catalog every launch path in the dashboard starts from.
+		r.Get("/v1/templates", serveCatalog)
 
 		registerFilesRoutes(r, mgr, ownerID)
 
@@ -2897,7 +2910,7 @@ func main() {
 			fleetProxy(w, r, func(w http.ResponseWriter) { writeBytes(w, []byte(`{"history":[]}`)) })
 		})
 		r.Get("/v1/history/{id}", func(w http.ResponseWriter, r *http.Request) {
-			fleetProxy(w, r, func(w http.ResponseWriter) { writeBytes(w, []byte(`{"error":"not found"}`)) })
+			fleetProxy(w, r, func(w http.ResponseWriter) { http.Error(w, `{"error":"not found"}`, http.StatusNotFound) })
 		})
 
 		// Stubs so the SPA's Functions page and host widget work on the local backend.

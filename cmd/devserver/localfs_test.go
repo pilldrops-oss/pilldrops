@@ -225,3 +225,13 @@ func TestLocalFS_SymlinksCannotEscape(t *testing.T) {
 		t.Errorf("a link to a file inside the workspace = %d, want 200", got)
 	}
 }
+
+// The listing uses the fleet's shape, and an empty directory is [] not null.
+func TestLocalFS_ListShape(t *testing.T) {
+	mgr, _ := newTestDevManager(t, "sb-1", "u:a")
+	w := httptest.NewRecorder()
+	localFSRouter(mgr, "u:a").ServeHTTP(w, httptest.NewRequest("GET", "/v1/sandboxes/sb-1/filesystem/list?path=/", nil))
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"entries":[]}` {
+		t.Fatalf("empty listing = %d %s, want {\"entries\":[]}", w.Code, w.Body.String())
+	}
+}
