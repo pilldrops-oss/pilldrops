@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useToast } from '../components/Toast'
+import { errText } from '../lib/errText'
 import { listImages, patchImage } from '../api'
 import type { ImageInfo } from '../types'
 
@@ -26,6 +28,7 @@ function Toggle({ on, label, busy, onClick }: { on: boolean; label: string; busy
 }
 
 function ImageCard({ img, onPatched }: { img: ImageInfo; onPatched: (updated: ImageInfo) => void }) {
+  const toast = useToast()
   const [busy, setBusy] = useState('')
 
   async function toggle(field: 'published' | 'featured') {
@@ -34,7 +37,7 @@ function ImageCard({ img, onPatched }: { img: ImageInfo; onPatched: (updated: Im
       const updated = await patchImage(img.id, { [field]: !img[field] })
       onPatched(updated)
     } catch (e) {
-      alert((e as Error).message)
+      toast.error(errText(e))
     } finally {
       setBusy('')
     }

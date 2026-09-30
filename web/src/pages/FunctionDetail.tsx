@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmModal'
 import { useParams, useNavigate } from 'react-router-dom'
 import { previewUrl,
   getFunction, getFunctionLogs, getFunctionCode, getFunctionMetrics,
@@ -314,6 +316,8 @@ function CodeTab({ fn, onSaved }: { fn: FunctionInfo; onSaved: () => void }) {
 }
 
 function SettingsTab({ fn, onSaved }: { fn: FunctionInfo; onSaved: () => void }) {
+  const toast = useToast()
+  const confirm = useConfirm()
   const navigate = useNavigate()
   const [template, setTemplate] = useState(fn.template)
   const [port, setPort] = useState(String(fn.port))
@@ -381,7 +385,11 @@ function SettingsTab({ fn, onSaved }: { fn: FunctionInfo; onSaved: () => void })
           <p className="hint">Removes the function, its code, and any running sandbox. Cannot be undone.</p>
         </div>
         <button className="btn danger"
-          onClick={() => { if (confirm(`Delete function "${fn.name}"? This cannot be undone.`)) deleteFunction(fn.name).then(() => navigate('/functions')).catch(e => alert(`Delete failed: ${errText(e)}`)) }}>
+          onClick={async () => {
+            if (await confirm({ title: 'Delete function?', body: `Delete function "${fn.name}"? This cannot be undone.`, confirmLabel: 'Delete', danger: true })) {
+              deleteFunction(fn.name).then(() => navigate('/functions')).catch(e => toast.error(`Delete failed: ${errText(e)}`))
+            }
+          }}>
           Delete
         </button>
       </div>

@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmModal'
 import { useNavigate } from 'react-router-dom'
 import { usePoll } from '../hooks/useApi'
 import { listFunctions, registerFunction, deleteFunction } from '../api'
@@ -161,6 +163,8 @@ function DeployPanel({ onDeployed, onCancel }: { onDeployed: () => void; onCance
 }
 
 export default function Functions() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const navigate = useNavigate()
   const { data, refetch } = usePoll<{ functions: FunctionInfo[] }>(listFunctions, 3000)
   const [open, setOpen] = useState(false)
@@ -232,7 +236,11 @@ export default function Functions() {
                   <div className="port" style={{ fontFamily: 'var(--mono)' }}>:{fn.port}</div>
                   <div className="rowact" onClick={e => e.stopPropagation()}>
                     <button className="iconbtn" title="Delete function" aria-label="Delete function"
-                      onClick={() => { if (confirm(`Delete function "${fn.name}"?`)) deleteFunction(fn.name).then(refetch).catch(e => alert(`Delete failed: ${errText(e)}`)) }}>
+                      onClick={async () => {
+                        if (await confirm({ title: 'Delete function?', body: `Delete function "${fn.name}"?`, confirmLabel: 'Delete', danger: true })) {
+                          deleteFunction(fn.name).then(refetch).catch(e => toast.error(`Delete failed: ${errText(e)}`))
+                        }
+                      }}>
                       ✕
                     </button>
                   </div>

@@ -3,6 +3,8 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { getChannels, getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, createChatLink, setSandboxSlug, slugUrl, setSandboxVisibility } from '../api'
 import UnsafeEmbedNotice from '../components/UnsafeEmbedNotice'
 import { useConfirm } from '../components/ConfirmModal'
+import { useToast } from '../components/Toast'
+import { errText } from '../lib/errText'
 import { cpuReading, memReading, diskReading } from '../lib/liveMetrics'
 import FileBrowser from '../components/FileBrowser'
 import { ModelTab, KeysTab, IntegrationsTab, ChannelsTab } from '../components/WorkstationTabs'
@@ -646,6 +648,7 @@ export default function SandboxDetail() {
   const openUrl = usePreviewLink(sandbox?.id, sandbox?.public_port || 8000)
 
   const confirmDialog = useConfirm()
+  const toast = useToast()
   const doAction = useCallback(async (fn: () => Promise<unknown>, confirmMsg?: string) => {
     if (confirmMsg && !(await confirmDialog({
       title: 'Destroy sandbox?',
@@ -658,10 +661,10 @@ export default function SandboxDetail() {
       await fn()
       await loadSandbox()
     } catch (e) {
-      alert((e as Error).message)
+      toast.error(errText(e))
     }
     setBusy(false)
-  }, [loadSandbox, confirmDialog])
+  }, [loadSandbox, confirmDialog, toast])
 
   const isPrivate = sandbox?.visibility === 'private'
 
@@ -680,9 +683,9 @@ export default function SandboxDetail() {
     }))) return
     await doAction(async () => {
       const res = await setSandboxVisibility(id, isPrivate ? 'org' : 'private')
-      if (res.wipe_skipped) alert(`Shared, but the agent logins were NOT removed: ${res.wipe_skipped}`)
+      if (res.wipe_skipped) toast.error(`Shared, but the agent logins were NOT removed: ${res.wipe_skipped}`)
     })
-  }, [id, isPrivate, doAction, confirmDialog])
+  }, [id, isPrivate, doAction, confirmDialog, toast])
 
   const [anyChannelUsable, setAnyChannelUsable] = useState(false)
   useEffect(() => {

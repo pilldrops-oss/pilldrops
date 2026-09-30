@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useToast } from '../components/Toast'
+import { errText } from '../lib/errText'
 import { usePoll } from '../hooks/useApi'
 import { listNodes, getClusterStats, cordonNode, uncordonNode, drainNode, removeNode } from '../api'
 import type { NodeInfo, ClusterStats } from '../types'
@@ -51,6 +53,7 @@ interface NodeCardProps {
 }
 
 function NodeCard({ n, onAction }: NodeCardProps) {
+  const toast = useToast()
   const [busy, setBusy] = useState('')
   const c = n.capacity
   const memUsed = c.mem_total_mb - c.mem_available_mb
@@ -62,7 +65,7 @@ function NodeCard({ n, onAction }: NodeCardProps) {
 
   async function run(action: string, fn: () => Promise<unknown>) {
     setBusy(action)
-    try { await fn() } catch (e) { alert((e as Error).message) }
+    try { await fn() } catch (e) { toast.error(errText(e)) }
     finally { setBusy(''); onAction() }
   }
 
