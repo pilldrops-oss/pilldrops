@@ -213,3 +213,14 @@ func TestSignalIsValidatedBeforeTheShell(t *testing.T) {
 		}
 	}
 }
+
+// Listing is per owner: another tenant's sandboxes are not even visible.
+func TestListIsScopedToTheOwner(t *testing.T) {
+	mgr := &DevManager{sandboxes: map[string]*DevSandbox{
+		"sb-a": {ID: "sb-a", UserID: "u:a"}, "sb-b": {ID: "sb-b", UserID: "u:b"},
+	}}
+	rows := mgr.List("u:a")
+	if len(rows) != 1 || rows[0]["id"] != "sb-a" {
+		t.Fatalf("List(u:a) = %v, want only sb-a", rows)
+	}
+}

@@ -1969,11 +1969,15 @@ func (m *DevManager) StartProcess(sandboxID, command string, requestedPort int) 
 	return cmd.Process.Pid, actualPort, nil
 }
 
-func (m *DevManager) List() []map[string]interface{} {
+// List returns owner's sandboxes; every other tenant's are invisible.
+func (m *DevManager) List(owner string) []map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]map[string]interface{}, 0, len(m.sandboxes))
 	for _, sb := range m.sandboxes {
+		if sb.UserID != owner {
+			continue
+		}
 		status, code := sb.statusSnapshot()
 		out = append(out, map[string]interface{}{
 			"id": sb.ID, "template": sb.Template, "user_id": sb.UserID,
@@ -2529,7 +2533,7 @@ func main() {
 				writeJSON(w, rows)
 				return
 			}
-			writeJSON(w, mgr.List())
+			writeJSON(w, mgr.List(ownerID(r)))
 		})
 
 		r.Delete("/dashboard/api/sandboxes/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -2549,6 +2553,11 @@ func main() {
 				return
 			}
 			if sb, ok := mgr.GetSandbox(id); ok {
+				// Same rule as DELETE /v1/sandboxes/{id}: someone else's is a 404.
+				if sb.UserID != ownerID(r) {
+					http.Error(w, `{"error":"sandbox not found"}`, http.StatusNotFound)
+					return
+				}
 				dur := time.Since(sb.CreatedAt).Seconds()
 				usage.RecordDestroy(dur, 2, 512)
 			}
@@ -2850,9 +2859,9 @@ func main() {
 			})
 		})
 
-		r.Get("/v1/sandboxes", func(w http.ResponseWriter, _ *http.Request) {
+		r.Get("/v1/sandboxes", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			writeJSON(w, mgr.List())
+			writeJSON(w, mgr.List(ownerID(r)))
 		})
 
 		registerFilesRoutes(r, mgr, ownerID)
@@ -2924,7 +2933,7 @@ func main() {
 		mgr.mu.RLock()
 		sb, ok := mgr.sandboxes[id]
 		mgr.mu.RUnlock()
-		if !ok {
+		if !ok || sb.UserID != ownerID(r) {
 			http.Error(w, "Sandbox not found", http.StatusNotFound)
 			return
 		}
