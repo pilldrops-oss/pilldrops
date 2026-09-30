@@ -146,7 +146,9 @@ jobs:
         with:
           go-version: '1.25'
       - name: Run tests
-        run: go test -race -coverprofile=coverage.out ./...
+        # 30m, not the 10m default: internal/httpapi opens a migrated store per
+        # test, which under -race on a two-core runner takes past ten minutes.
+        run: go test -race -timeout 30m -coverprofile=coverage.out ./...
       # A package whose test files are all excluded by a build constraint prints
       # "[no test files]" and the suite above still says ok. internal/vm — the
       # VM lifecycle, jailer wiring, overlay sizing and the per-sandbox storage
