@@ -187,3 +187,14 @@ func TestRefreshNeverShortensTheLease(t *testing.T) {
 		t.Fatalf("refresh left %v on a one-minute lease, want about 5m", got)
 	}
 }
+
+// The local runtime cannot pause, so it must not claim it did.
+func TestPauseAndResumeSayTheyNeedTheFleet(t *testing.T) {
+	mgr := &DevManager{sandboxes: map[string]*DevSandbox{"sb-1": {ID: "sb-1", UserID: "u:a"}}}
+	r := sandboxActionRouter(mgr, NewExecHistory(), NewUsageTracker(), "u:a")
+	for _, a := range []string{"pause", "resume"} {
+		if w := postAs(t, r, "/v1/sandboxes/sb-1/"+a, ""); w.Code != http.StatusNotImplemented {
+			t.Errorf("%s = %d, want 501: %s", a, w.Code, w.Body.String())
+		}
+	}
+}

@@ -1768,22 +1768,16 @@ func registerSandboxActionRoutes(r chi.Router, mgr *DevManager, ownerID func(*ht
 		})
 	})
 
-	r.Post("/v1/sandboxes/{id}/pause", func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		if _, ok := ownedSandbox(w, r, mgr, ownerID); !ok {
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		writeJSON(w, map[string]interface{}{"status": "paused", "sandbox_id": id})
-	})
-	r.Post("/v1/sandboxes/{id}/resume", func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		if _, ok := ownedSandbox(w, r, mgr, ownerID); !ok {
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		writeJSON(w, map[string]interface{}{"status": "running", "sandbox_id": id})
-	})
+	// The local runtime cannot pause: answering "paused" while the processes
+	// keep running told every client something false.
+	for _, action := range []string{"pause", "resume"} {
+		r.Post("/v1/sandboxes/{id}/"+action, func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := ownedSandbox(w, r, mgr, ownerID); !ok {
+				return
+			}
+			http.Error(w, `{"error":"`+action+` requires fleet mode: the local runtime runs sandboxes as plain processes"}`, http.StatusNotImplemented)
+		})
+	}
 	r.Post("/v1/sandboxes/{id}/timeout", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		var body struct {
