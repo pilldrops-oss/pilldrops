@@ -2652,7 +2652,26 @@ func main() {
 				// Env is create-time environment, "NAME=VALUE", same shape as the fleet API.
 				Env []string `json:"env"`
 			}
-			decodeJSONBody(r, &body)
+			raw, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
+				return
+			}
+			if len(bytes.TrimSpace(raw)) > 0 && !json.Valid(raw) {
+				http.Error(w, `{"error":"request body is not valid JSON"}`, http.StatusBadRequest)
+				return
+			}
+			// secret_refs and auto-inject vault entries become env, as on the fleet.
+			if raw, err = resolveSecretRefs(raw, vault, ownerID(r)); err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+				return
+			}
+			if len(raw) > 0 {
+				if err := json.Unmarshal(raw, &body); err != nil {
+					http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+					return
+				}
+			}
 			if body.Template == "" {
 				body.Template = "python-3.11"
 			}

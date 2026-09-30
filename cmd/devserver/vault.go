@@ -110,7 +110,8 @@ func vaultKey(owner, name string) string { return owner + "\x00" + name }
 // the struct so a persist can never leak plaintext.
 func (vs *VaultStore) Put(owner, name, value string, secret, autoInject bool) (*VaultSecret, error) {
 	if owner == "" || owner == "anon" {
-		return nil, fmt.Errorf("sign in to store secrets")
+		// Anonymous callers share one identity, so nothing stored would be theirs alone.
+		return nil, fmt.Errorf("sign in to store secrets: open /dashboard/login and paste an API key (make dev prints one at start)")
 	}
 	if err := sandbox.ValidEnvName(name); err != nil {
 		return nil, err
