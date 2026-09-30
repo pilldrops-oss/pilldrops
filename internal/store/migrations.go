@@ -1421,7 +1421,7 @@ var migrations = []migration{
 			       ('cron_jobs','enabled')) AS t(tbl, col)
 			   LOOP
 			     IF EXISTS (SELECT 1 FROM information_schema.columns
-			                 WHERE table_schema = 'public' AND table_name = r.tbl
+			                 WHERE table_schema = current_schema() AND table_name = r.tbl
 			                   AND column_name = r.col AND data_type <> 'boolean') THEN
 			       EXECUTE format('ALTER TABLE %I ALTER COLUMN %I DROP DEFAULT', r.tbl, r.col);
 			       EXECUTE format('ALTER TABLE %I ALTER COLUMN %I TYPE BOOLEAN USING %I <> 0', r.tbl, r.col, r.col);
