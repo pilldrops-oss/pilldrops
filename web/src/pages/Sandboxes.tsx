@@ -385,21 +385,23 @@ export default function Sandboxes() {
               <span className="meta">{state === 'stale' ? 'reconnecting…' : 'auto · 3s'}</span>
             </div>
           </div>
-          <div className="rowh">
-            <div>Sandbox</div>
-            <div>Template</div>
-            <div>Status</div>
-            <div>Port</div>
-            <div>Age</div>
-            <div />
+          <div className="sb-table-scroll">
+            <div className="rowh">
+              <div>Sandbox</div>
+              <div>Template</div>
+              <div>Status</div>
+              <div>Port</div>
+              <div>Age</div>
+              <div />
+            </div>
+            {filtered.length === 0 ? (
+              <div className="empty">No {filter === 'all' ? '' : `${filter} `}sandboxes match this filter.</div>
+            ) : (
+              filtered.map(row => (
+                <SandboxRowItem key={row.id} row={row} template={tpls.find(t => t.id === row.template)} onDone={handleRefetch} />
+              ))
+            )}
           </div>
-          {filtered.length === 0 ? (
-            <div className="empty">No {filter === 'all' ? '' : `${filter} `}sandboxes match this filter.</div>
-          ) : (
-            filtered.map(row => (
-              <SandboxRowItem key={row.id} row={row} template={tpls.find(t => t.id === row.template)} onDone={handleRefetch} />
-            ))
-          )}
         </div>
       <div className="two">
         <div className="panel chartwrap">
