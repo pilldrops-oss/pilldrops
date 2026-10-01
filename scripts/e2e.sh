@@ -99,7 +99,6 @@ ck "readiness answers once the store is up"       200 "$(code $O/readyz)"
 
 sec "Store-backed routes exist on a real boot (the async-store bug)"
 ck "/v1/projects is mounted"     200 "$(code $O/v1/projects     -H "Authorization: Bearer $FLEET_KEY")"
-ck "/v1/threads is mounted"      200 "$(code $O/v1/threads      -H "Authorization: Bearer $FLEET_KEY")"
 ck "/v1/secrets (vault) is mounted" 200 "$(code $O/v1/secrets   -H "Authorization: Bearer $FLEET_KEY")"
 ck "/v1/launch-stats is mounted" 200 "$(code "$O/v1/launch-stats?templates=base" -H "Authorization: Bearer $FLEET_KEY")"
 ck "/v1/ai/configure is mounted (400, not 404)" 400 \
@@ -112,17 +111,6 @@ ckc "cacheable"                      "max-age=300" "$(curl -s -D- -o /dev/null $
 ck "env VALUES redacted"             "clean" "$(python3 -c "
 import json;d=json.load(open('$WORK/pub.json'))
 print('LEAK' if [1 for t in d for e in (t.get('env') or []) if e.get('value')] else 'clean')" 2>/dev/null)"
-sec "Threads — 404'd through the control plane before the migration"
-TID=$(curl -s -X POST "$O/v1/threads" -H "Authorization: Bearer $FLEET_KEY" \
-      -H 'Content-Type: application/json' -d '{}' | jq_ ";print(json.load(sys.stdin).get('id',''))")
-ckc "empty POST starts a conversation"  "th-" "$TID"
-ck  "untitled default"  "New conversation" "$(curl -s $O/v1/threads/$TID -H "Authorization: Bearer $FLEET_KEY" | jq_ ";print(json.load(sys.stdin).get('title',''))")"
-curl -s -o /dev/null -X PATCH "$O/v1/threads/$TID" -H "Authorization: Bearer $FLEET_KEY" \
-     -H 'Content-Type: application/json' -d '{"turns":"[1,2,3]"}'
-ck  "PATCH turns does not clear the title" "New conversation" \
-    "$(curl -s $O/v1/threads/$TID -H "Authorization: Bearer $FLEET_KEY" | jq_ ";print(json.load(sys.stdin).get('title',''))")"
-ck  "DELETE really deletes"   204 "$(code -X DELETE $O/v1/threads/$TID -H "Authorization: Bearer $FLEET_KEY")"
-ck  "and is then absent"      404 "$(code $O/v1/threads/$TID -H "Authorization: Bearer $FLEET_KEY")"
 
 sec "Launch stats — the server withholds a median it cannot justify"
 for i in 1 2 3 4; do

@@ -343,7 +343,6 @@ func (s *Server) Routes() http.Handler {
 	s.registerPreviewSourceRoutes(mux)
 	s.registerOrgEgressRoutes(mux)
 	s.registerForwardRoutes(mux)
-	s.registerThreadRoutes(mux)
 	s.registerPublicTemplateRoutes(mux)
 	s.registerLaunchStatsRoutes(mux)
 	// Artifact publish lives here because a node's database role has only SELECT on template_builds and artifacts.

@@ -33,8 +33,8 @@ func TestNodeResourcesAreReachableThroughTheControlPlane(t *testing.T) {
 	srv := httptest.NewServer(s.Routes())
 	defer srv.Close()
 
-	// /v1/projects and /v1/threads are absent on purpose: the control plane
-	// answers them from the shared store instead of forwarding.
+	// /v1/projects is absent on purpose: the control plane answers it from
+	// the shared store instead of forwarding.
 	for _, path := range []string{
 		"/v1/keys", "/v1/templates", "/v1/cron", "/v1/functions",
 		"/v1/integrations", "/v1/host",
@@ -136,7 +136,7 @@ func TestControlPlaneOwnedRoutesDoNotReachANode(t *testing.T) {
 	srv := httptest.NewServer(s.Routes())
 	defer srv.Close()
 
-	for _, path := range []string{"/v1/projects", "/v1/threads"} {
+	for _, path := range []string{"/v1/projects"} {
 		reached = false
 		req, _ := http.NewRequest("GET", srv.URL+path, nil)
 		req.Header.Set("Authorization", "Bearer fleet-key")
