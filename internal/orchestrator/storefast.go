@@ -55,6 +55,9 @@ type storeSandboxJSON struct {
 	VCPU         int       `json:"vcpu,omitempty"`
 	MemMiB       int       `json:"mem_mib,omitempty"`
 	StorageMB    int       `json:"storage_mb,omitempty"`
+	// Node is for the operator's cluster view; tenants never see node ids,
+	// the same line /v1/nodes draws.
+	Node string `json:"node,omitempty"`
 }
 
 // listFromStore serves GET /v1/sandboxes from the store; false means nothing was written.
@@ -75,6 +78,7 @@ func (s *Server) listFromStore(w http.ResponseWriter, r *http.Request) bool {
 	// not a member's, so it does not by itself open other members' machines.
 	keyID, keyRole := callerKey(r.Context())
 	operator := keyRole == "operator"
+	fleetView := operator || (isOperator(r) && keyID == "")
 	out := make([]storeSandboxJSON, 0, len(rows))
 	for _, rec := range rows {
 		if !sandbox.Visible(rec.ID, rec.Visibility, rec.CreatedBy, keyID, operator) {
@@ -90,6 +94,9 @@ func (s *Server) listFromStore(w http.ResponseWriter, r *http.Request) bool {
 			LastActiveAt: time.Unix(rec.UpdatedAt, 0).UTC(),
 			PublicPort:   rec.PublicPort, VCPU: rec.VCPU, MemMiB: rec.MemMiB, StorageMB: rec.StorageMB,
 		})
+		if fleetView {
+			out[len(out)-1].Node = rec.NodeID
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sandboxes": out})
 	return true
