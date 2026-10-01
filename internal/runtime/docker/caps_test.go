@@ -62,7 +62,7 @@ func TestBootImageDropsAllCapabilities(t *testing.T) {
 	}
 }
 
-func TestDeviceTemplatesGetTheSameCapabilitySetAsEverythingElse(t *testing.T) {
+func TestBootImageHasOneCapabilityPolicy(t *testing.T) {
 	fn := sourceContaining(t, "func (r *Runtime) bootImage(")
 	const marker = "func (r *Runtime) bootImage("
 	i := strings.Index(fn, marker)

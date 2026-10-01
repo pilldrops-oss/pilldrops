@@ -5,9 +5,9 @@
 // Env:
 //
 //	PORT                  listen port (default 9090)
-//	ORCHESTRATOR_ROLE     "edge" serves only sandbox traffic (previews, agent
-//	                      origin, customer domains) from the shared Redis; it
-//	                      runs no API, dashboard, reconciler or background job.
+//	ORCHESTRATOR_ROLE     "edge" serves only sandbox traffic (previews, customer
+//	                      domains) from the shared Redis; it runs no API,
+//	                      dashboard, reconciler or background job.
 //	                      Unset: the full control plane
 //	ORCHESTRATOR_API_KEY  bearer required on client /v1 requests + the admin SPA's
 //	                      session key (optional; unset = open)

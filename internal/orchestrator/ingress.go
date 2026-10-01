@@ -45,7 +45,7 @@ func (s *Server) appPreviewOrigin(domain string, next http.Handler) http.Handler
 			id, port, ok = s.slugTarget(r, host, domain)
 		}
 		if !ok {
-			// Could still be the agent origin; the next handler decides.
+			// Not a known sandbox host; the next handler decides (custom domain or dashboard).
 			next.ServeHTTP(w, r)
 			return
 		}

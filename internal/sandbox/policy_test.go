@@ -156,30 +156,9 @@ func TestTemplateAliasResolvesToTheCanonicalID(t *testing.T) {
 	}
 }
 
-// A caller-set variable wins: the last -e flag wins at the runtime.
-func TestAgentModeInjectionRespectsAnExplicitEnv(t *testing.T) {
-	got, _ := Resolve(Spec{Template: "t", AgentMode: "guided"},
-		TemplateDefaults{ID: "t"}, proPlan, Fleet{}, nil)
-	if !envHasKey(got.Env, AgentModeEnv) {
-		t.Errorf("agent mode not injected: %v", got.Env)
-	}
-
-	got, _ = Resolve(Spec{Template: "t", AgentMode: "guided", Env: []string{AgentModeEnv + "=autonomous"}},
-		TemplateDefaults{ID: "t"}, proPlan, Fleet{}, nil)
-	count := 0
-	for _, e := range got.Env {
-		if len(e) > len(AgentModeEnv) && e[:len(AgentModeEnv)] == AgentModeEnv {
-			count++
-		}
-	}
-	if count != 1 || got.Env[0] != AgentModeEnv+"=autonomous" {
-		t.Errorf("caller's own value must win, got %v", got.Env)
-	}
-}
-
 func TestResolveDoesNotMutateTheCallerEnv(t *testing.T) {
 	env := []string{"A=1"}
-	_, _ = Resolve(Spec{Template: "t", AgentMode: "guided", Env: env},
+	_, _ = Resolve(Spec{Template: "t", Env: env},
 		TemplateDefaults{ID: "t"}, proPlan, Fleet{}, nil)
 	if len(env) != 1 || env[0] != "A=1" {
 		t.Errorf("caller's env was mutated: %v", env)
@@ -223,13 +202,5 @@ func TestValidate(t *testing.T) {
 	// An image-backed create skips the catalogue check.
 	if _, err := (Spec{Template: "nope", Image: "postgres:16"}).Validate(known, nameOK, repoOK); err != nil {
 		t.Errorf("image-backed create rejected: %v", err)
-	}
-	if _, err := (Spec{Template: "python-3.11", AgentMode: "yolo"}).Validate(known, nameOK, repoOK); err == nil {
-		t.Error("an invalid agent_mode must be refused, not silently dropped")
-	}
-	for _, m := range []string{"", "supervised", "guided", "autonomous"} {
-		if _, err := (Spec{Template: "python-3.11", AgentMode: m}).Validate(known, nameOK, repoOK); err != nil {
-			t.Errorf("agent_mode %q rejected: %v", m, err)
-		}
 	}
 }

@@ -241,3 +241,18 @@ func TestCreateImageBackedRespectsExplicitMemory(t *testing.T) {
 		t.Fatalf("explicit mem_mib = %d, want 512", int(mem))
 	}
 }
+
+// Same ruling as cron's TestCronRefusesAgentMode: this server runs no agents.
+func TestCreateRefusesAgentMode(t *testing.T) {
+	srv, key := newTestServer(t)
+	for _, mode := range []string{"supervised", "guided", "autonomous"} {
+		code, out := do(t, "POST", srv.URL+"/v1/sandboxes", key,
+			`{"template":"base","agent_mode":"`+mode+`"}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("agent_mode %q = %d %v, want 400", mode, code, out)
+		}
+		if msg, _ := out["error"].(string); !strings.Contains(msg, "agent_mode is not supported") {
+			t.Errorf("agent_mode %q error = %q", mode, msg)
+		}
+	}
+}

@@ -129,7 +129,7 @@ fi
 # marker comment goes with it.
 cp --remove-destination internal/templatebuild/assets/init "${TMPDIR}/rootfs/sbin/init"
 
-sed -i.bak -e '/__AGENTD__/d' -e 's| # __INTREE_ONLY__||' "${TMPDIR}/rootfs/sbin/init"
+sed -i.bak -e 's| # __INTREE_ONLY__||' "${TMPDIR}/rootfs/sbin/init"
 rm -f "${TMPDIR}/rootfs/sbin/init.bak"
 chmod +x "${TMPDIR}/rootfs/sbin/init"
 

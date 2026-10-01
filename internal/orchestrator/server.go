@@ -380,7 +380,7 @@ func (s *Server) Routes() http.Handler {
 }
 
 // EdgeRoutes is the sandbox data path alone: previews in path and host form,
-// the agent origin and customer domains, plus health. Run it as its own
+// plus customer domains and health. Run it as its own
 // replicas (ORCHESTRATOR_ROLE=edge) so preview traffic scales, and survives,
 // apart from the API. It reads the same Redis routes and node table; it
 // schedules nothing and serves no API or dashboard.

@@ -119,7 +119,7 @@ linters:
       # it has no deadline to inherit and nothing to cancel it with, and
       # ListenConfig buys nothing here. Scoped to the specific files rather than
       # disabled globally, so a genuine request-path Dial still gets flagged.
-      - path: (internal/extras/agent/agentd/(server|gatesock)\.go|internal/runtime/process/process\.go|internal/envd/vsock_other\.go|cmd/envd/(main|terminal)\.go)
+      - path: (internal/runtime/process/process\.go|internal/envd/vsock_other\.go|cmd/envd/(main|terminal)\.go)
         linters:
           - noctx
       # Developer tooling, not a served path: a benchmark driver. A short-lived

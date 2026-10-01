@@ -86,7 +86,6 @@ var relayClientHeaders = []string{
 	"Idempotency-Key",
 	"Accept",
 	"Range",
-	"X-Agent-Token",
 	observability.HeaderRequestID,
 }
 
@@ -111,8 +110,8 @@ func (s *Server) forwardStream(ctx context.Context, node *cluster.Node, method, 
 }
 
 // forwardStreamRelaying is forwardStream with an explicit header allowlist.
-// The list is a security boundary: the agent origin relays X-Forwarded-Host and
-// X-Agent-Token, which the shared API host must never let a caller assert.
+// The list is a security boundary: the agent origin relays X-Forwarded-Host,
+// which the shared API host must never let a caller assert.
 func (s *Server) forwardStreamRelaying(ctx context.Context, node *cluster.Node, method, path string, body io.Reader, ctype string, client http.Header, relay []string, org ...string) (*http.Response, error) {
 	base, hop, err := s.nodeHop(node, hopStream)
 	if err != nil {

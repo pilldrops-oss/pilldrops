@@ -2,8 +2,8 @@ package httpapi
 
 import "net/http"
 
-// Core build: the optional feature areas register nothing. A build tag rather
-// than a config flag, so the feature packages are not linked in at all.
+// The agent and integrations surfaces are not part of this build: these
+// routes register nothing, so the feature packages need not be linked in.
 
 func (s *Server) registerAgentRoutes(func(string, http.Handler)) {}
 

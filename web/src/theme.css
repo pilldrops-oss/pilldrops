@@ -4174,34 +4174,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
    segment keeps the right. */
 .build-toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding-bottom: 10px; }
 
-/* ── Conversations menu (R2-8) ─────────────────────────────────────────── */
-.threads-menu { position: relative; }
-.threads-pop {
-  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0;
-  width: min(340px, calc(100vw - 32px));
-  background: var(--bg2, var(--bg)); border: 1px solid var(--line);
-  border-radius: 10px; padding: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
-  display: flex; flex-direction: column; gap: 8px;
-}
-.threads-search { width: 100%; }
-.threads-list { display: flex; flex-direction: column; gap: 2px; max-height: 300px; overflow-y: auto; }
-.threads-row { display: flex; align-items: center; gap: 4px; border-radius: 8px; }
-.threads-row:hover { background: var(--hover, rgba(128,128,128,.08)); }
-/* The one on screen is marked by an accent edge, not tint alone. */
-.threads-on { box-shadow: inset 2px 0 0 var(--accent, currentColor); }
-.threads-open {
-  flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px;
-  background: none; border: 0; padding: 7px 8px; cursor: pointer;
-  color: inherit; font: inherit; text-align: left;
-}
-.threads-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.threads-age { color: var(--sub); font-size: 11.5px; white-space: nowrap; }
-.threads-act {
-  background: none; border: 0; cursor: pointer; color: var(--sub);
-  padding: 6px; border-radius: 6px; font-size: 13px; line-height: 1;
-}
-.threads-act:hover { color: inherit; background: var(--hover, rgba(128,128,128,.12)); }
-.threads-new { width: 100%; }
 .build-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .build-seg button {
   border: 0; background: transparent; padding: 4px 11px;
@@ -4930,115 +4902,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
   .file-editor-list { flex: 0 0 auto; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); padding: 0; }
   .file-item { width: auto; white-space: nowrap; }
 }
-/* ── Agent approvals (Guided mode) ──────────────────────────────────────────────
-   The visual design here carries a safety meaning, so it is not decoration.
-
-   Three deliberate choices:
-
-   - The queue is bordered in amber and sits above the transcript. An agent blocked
-     waiting for a person is the most urgent thing on the screen, and anything not
-     answered in time is REFUSED — a card that scrolls out of view causes a refusal.
-   - Under a minute left, the card turns red. The deadline is the part a reviewer is
-     most likely to misread: without it, "I'll look after this meeting" feels like a
-     pause and is actually a decision.
-   - Refuse is NOT styled as the destructive action. Refusing an agent is the safe
-     outcome; painting it red teaches people that allowing is the normal answer, which
-     is the approval-fatigue failure (R4) built into the CSS.
-
-   Note: the rest of .agent-* has no styles yet — the panel predates this and its
-   styling is outstanding §11 work. This block covers only the approvals surface. */
-.agent-approvals {
-  border: 1px solid var(--amber);
-  border-left-width: 3px;
-  border-radius: 4px;
-  background: var(--slatesoft, transparent);
-  padding: 12px 14px;
-  margin: 12px 0 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.agent-approvals-head { display: flex; flex-direction: column; gap: 2px; }
-.agent-approvals-head strong { color: var(--ink); }
-
-.agent-approval {
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: var(--surface);
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.agent-approval-urgent { border-color: var(--red, #c0392b); }
-.agent-approval-urgent .agent-approval-clock { color: var(--red, #c0392b); font-weight: 600; }
-
-.agent-approval-what { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.agent-approval-tool {
-  font-weight: 600;
-  color: var(--ink);
-  background: var(--hover);
-  border-radius: 3px;
-  padding: 1px 6px;
-}
-/* The target can be a long command or path. It wraps rather than truncating: the
-   reviewer is judging exactly this string, and an ellipsis could hide the part that
-   matters — `rm -rf /work` at the end of something innocuous. */
-.agent-approval-target {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12.5px;
-  color: var(--sub);
-  overflow-wrap: anywhere;
-}
-.agent-approval-clock { font-size: 12px; color: var(--amber); }
-.agent-approval-toggle { align-self: flex-start; font-size: 12px; }
-.agent-approval-payload {
-  margin: 0;
-  max-height: 240px;
-  overflow: auto;
-  background: var(--hover);
-  border-radius: 3px;
-  padding: 8px 10px;
-  font-size: 12px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.agent-approval-caveat { font-size: 11.5px; margin: 4px 0 0; }
-.agent-approval-note { font-size: 11.5px; margin: 2px 0 0; }
-
-.agent-approval-actions { display: flex; flex-direction: column; gap: 8px; }
-.agent-approval-remember {
-  border: 0;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.agent-approval-remember legend {
-  font-size: 11.5px;
-  color: var(--dim);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0;
-}
-.agent-approval-remember label {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 12.5px;
-  color: var(--sub);
-}
-.agent-approval-remember code { font-size: 12px; color: var(--ink); }
-.agent-approval-buttons { display: flex; gap: 8px; }
-
-/* The autonomy picker. Above the composer, because the posture is chosen before the
-   task is written — and a mode selected after typing reads as an afterthought. */
-.agent-mode { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
-.agent-mode label { font-size: 12px; color: var(--dim); }
-.agent-mode select { max-width: 380px; }
-.agent-mode-note { font-size: 11.5px; margin: 2px 0 0; }
-
 /* ── Shared workstation utilities ────────────────────────────────────────────
    These class names were already in use across the agent panel and approval
    cards with no rules behind them, so every "muted" note rendered at full
@@ -5068,54 +4931,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 
-/* ── Connect card (§11.6) ─────────────────────────────────────────────────── */
-.agent-connect h4 { margin: 18px 0 8px; font-size: 12.5px; color: var(--dim); font-weight: 600; }
-.agent-connect-token {
-  border: 1px solid var(--amber); border-radius: 8px;
-  padding: 12px 14px; margin-top: 12px;
-}
-.agent-connect-exp { margin: 8px 0 0; }
-.agent-copy-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
-.agent-copy-label { font-size: 11.5px; color: var(--dim); min-width: 130px; }
-.agent-copy-value {
-  flex: 1; min-width: 200px; font-family: var(--mono); font-size: 12px;
-  overflow-x: auto; white-space: nowrap; color: var(--ink);
-}
-.agent-copy-block { margin: 10px 0; }
-.agent-copy-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.agent-copy-block pre {
-  margin: 6px 0 0; padding: 11px 13px; border: 1px solid var(--line);
-  border-radius: 7px; background: var(--bg2);
-  /* Scrolls inside its own box: a snippet must never make the page scroll
-     sideways, because the reader then loses the tab strip. */
-  overflow-x: auto; font-size: 12px; line-height: 1.5;
-}
-.agent-connect-channels { list-style: none; padding: 0; margin: 8px 0 0; }
-.agent-connect-channels li { padding: 5px 0; font-size: 12.5px; }
-
-/* ── Isolation card (§11.11) ───────────────────────────────────────────────── */
-.agent-isolation-list { list-style: none; padding: 0; margin: 12px 0 0; }
-.agent-isolation-list > li {
-  display: flex; gap: 11px; align-items: flex-start;
-  padding: 10px 0; border-top: 1px solid var(--line);
-}
-.agent-isolation-list > li:first-child { border-top: 0; }
-.agent-isolation-mark { font-size: 14px; line-height: 1.4; width: 16px; flex: none; }
-.agent-isolation-yes .agent-isolation-mark { color: var(--green); }
-.agent-isolation-no .agent-isolation-mark { color: var(--slate); }
-/* Unknown is its own colour, not a dimmed ✗. Collapsing "we could not measure
-   this" into "no" is a claim we have not earned, in the direction that reads as
-   a product defect rather than as missing information. */
-.agent-isolation-unknown .agent-isolation-mark { color: var(--amber); }
-.agent-isolation-label { display: block; font-size: 13px; color: var(--ink); }
-.agent-isolation-detail { display: block; margin-top: 3px; font-size: 12px; color: var(--sub); line-height: 1.5; }
-.agent-isolation-skeleton { display: flex; gap: 11px; padding: 10px 0; }
-.agent-isolation-skeleton span {
-  height: 11px; border-radius: 4px; background: var(--line);
-  animation: ws-skel 1.4s ease-in-out infinite;
-}
-.agent-isolation-skeleton span:first-child { width: 16px; }
-.agent-isolation-skeleton span:last-child { flex: 1; max-width: 320px; }
 @keyframes ws-skel { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.85; } }
 
 /* ── Sub-tab strip (§11.2) ───────────────────────────────────────────────────
@@ -5127,70 +4942,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
 }
 .tab-bar-sub .tab-item { font-size: 12.5px; padding-top: 7px; padding-bottom: 7px; }
 
-/* ── Timeline (§11.2) ───────────────────────────────────────────────────────── */
-.agent-timeline { list-style: none; padding: 0; margin: 12px 0 0; }
-.agent-timeline-row { border-top: 1px solid var(--line); padding: 9px 0; }
-.agent-timeline-row:first-child { border-top: 0; }
-.agent-timeline-head {
-  display: flex; align-items: baseline; gap: 10px; width: 100%;
-  background: none; border: 0; padding: 0; cursor: pointer; text-align: left;
-  color: var(--ink); font-size: 13px;
-}
-.agent-timeline-when { font-size: 11.5px; color: var(--dim); flex: none; min-width: 108px; }
-/* One line, clipped. A multi-line prompt would make each row a different height and
-   destroy the scannability that is the entire reason to have a timeline. */
-.agent-timeline-req {
-  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.agent-timeline-meta {
-  display: flex; gap: 12px; flex-wrap: wrap; margin: 4px 0 0 118px;
-  font-size: 11.5px; color: var(--sub);
-}
-.agent-timeline-body { margin: 8px 0 2px 118px; }
-.agent-timeline-body pre {
-  margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px;
-  background: var(--bg2); font-size: 12px; line-height: 1.5;
-  overflow-x: auto; white-space: pre-wrap;
-}
-.agent-chip {
-  flex: none; font-size: 11px; padding: 2px 8px; border-radius: 999px;
-  border: 1px solid var(--line2); color: var(--sub);
-}
-.agent-chip-done { color: var(--green); border-color: var(--green); }
-.agent-chip-failed { color: var(--slate); border-color: var(--slate); }
-.agent-chip-awaiting_approval { color: var(--amber); border-color: var(--amber); }
-.agent-timeline-skeleton { display: flex; gap: 11px; padding: 10px 0; }
-.agent-timeline-skeleton span {
-  height: 11px; border-radius: 4px; background: var(--line);
-  animation: ws-skel 1.4s ease-in-out infinite;
-}
-.agent-timeline-skeleton span:first-child { width: 104px; }
-.agent-timeline-skeleton span:last-child { flex: 1; max-width: 380px; }
-
-/* Per-turn usage chips (§11.3). Quiet: they are context on what just happened, not a
-   headline, and a row of loud badges under every answer would compete with the answer. */
-.agent-usage { display: flex; gap: 7px; flex-wrap: wrap; margin: 8px 0 0; }
-
-/* ── Autonomy ladder (§11.10) ────────────────────────────────────────────────
-   Radios rather than a segmented control: the options carry a sentence each, and
-   a segmented control forces those into tooltips — which on a touch screen means
-   they do not exist. The user is choosing what the machine may do unsupervised;
-   that decision earns full sentences. */
-.agent-ladder { border: 0; padding: 0; margin: 0; }
-.agent-ladder legend { padding: 0; font-size: 12.5px; color: var(--dim); }
-.agent-rung {
-  display: flex; gap: 9px; align-items: flex-start;
-  padding: 9px 0; cursor: pointer;
-}
-.agent-rung input { margin-top: 3px; flex: none; }
-.agent-rung-label { display: block; font-size: 13px; color: var(--ink); }
-.agent-rung-detail { display: block; margin-top: 2px; font-size: 12px; color: var(--sub); line-height: 1.5; }
-/* An unavailable rung stays legible. Fading it to near-invisible hides the very
-   sentence that explains why it cannot be chosen. */
-.agent-rung-off { cursor: default; }
-.agent-rung-off .agent-rung-label { color: var(--sub); }
-.agent-ladder-note { margin: 4px 0 0; }
-
 /* Auto-open countdown (§11.7). Visible and cancellable — a page that navigates on
    its own without saying so reads as a loss of control even when it is right. */
 .dp-autoopen {
@@ -5199,96 +4950,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
   border: 1px solid var(--green); border-radius: 8px; background: var(--greensoft);
 }
 
-/* Agent panel skeleton (§11.9). Shaped like what replaces it — header, transcript,
-   composer — so the panel does not visibly reflow when the data lands. */
-.agent-skeleton { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
-.agent-skeleton span { border-radius: 6px; background: var(--line); animation: ws-skel 1.4s ease-in-out infinite; }
-.agent-skeleton-head { height: 15px; width: 40%; max-width: 260px; }
-.agent-skeleton-body { height: 120px; }
-.agent-skeleton-input { height: 38px; }
-
-/* ── Agent panel (§11.3) ─────────────────────────────────────────────────────
-   These class names were referenced by AgentPanel from the day it was written and
-   never defined, so the whole tab rendered as raw HTML — the header's spans ran
-   into each other ("Claude Codeidlev2.1.197live") and the composer was a bare
-   textarea. Written against main's tokens (--ink/--sub/--dim/--surface/--line),
-   because the earlier block used --fg/--card/--red, which this theme does not
-   define and which therefore resolved to nothing. */
-.agent-panel { display: flex; flex-direction: column; gap: 14px; }
-
-/* Header: name · state · version · transport, separated by real space rather than
-   by luck. */
-.agent-header {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding-bottom: 12px; border-bottom: 1px solid var(--line);
-}
-.agent-header b, .agent-header strong { font-size: 14px; color: var(--ink); }
-.agent-dot {
-  width: 8px; height: 8px; border-radius: 50%; flex: none;
-  background: var(--dim);
-}
-/* State is carried by colour AND by the adjacent text, never by colour alone. */
-.agent-idle { background: var(--green); }
-.agent-running, .agent-starting { background: var(--amber); }
-.agent-degraded, .agent-stopped { background: var(--slate); }
-.agent-live { font-size: 11.5px; color: var(--dim); font-family: var(--mono); }
-.agent-memory-note { font-size: 12px; color: var(--amber); line-height: 1.5; }
-.agent-spend { font-size: 12px; color: var(--sub); }
-
-/* Transcript. Turns are visually separated because a wall of text with no seams
-   makes it impossible to see where one answer ended and the next began. */
-.agent-transcript { display: flex; flex-direction: column; gap: 14px; }
-.agent-turn { border-left: 2px solid var(--line); padding-left: 12px; }
-.agent-turn-meta { margin-top: 4px; font-size: 11.5px; color: var(--dim); }
-.agent-msg { font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
-/* The user's own words sit in a tinted block: on a long transcript, "what did I
-   ask?" is the question people scroll back for. */
-.agent-msg-user {
-  background: var(--bg2); border-radius: 8px; padding: 9px 12px; color: var(--ink);
-}
-.agent-msg-agent { color: var(--ink); }
-/* Reasoning is quieter than the answer — it is context, not the result. */
-.agent-thinking {
-  font-size: 12.5px; color: var(--sub); font-style: italic;
-  border-left: 2px solid var(--line2); padding-left: 10px; margin: 6px 0;
-  white-space: pre-wrap;
-}
-.agent-truncated { margin: 8px 0 0; }
-
-/* Tool timeline */
-.agent-tools { display: flex; flex-direction: column; gap: 5px; margin: 8px 0; }
-.agent-tool {
-  display: flex; align-items: baseline; gap: 8px;
-  font-size: 12px; font-family: var(--mono); color: var(--sub);
-}
-.agent-tool-name { color: var(--ink); }
-.agent-tool-detail {
-  color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.agent-tool-error { color: var(--slate); }
-.agent-tool-running .agent-tool-name { color: var(--amber); }
-.agent-tool-done .agent-tool-name { color: var(--green); }
-.agent-tool-failed .agent-tool-name { color: var(--slate); }
-
-/* Composer */
-.agent-composer { display: flex; flex-direction: column; gap: 8px; }
-.agent-composer textarea {
-  width: 100%; min-height: 76px; resize: vertical;
-  padding: 10px 12px; border: 1px solid var(--line2); border-radius: 8px;
-  background: var(--surface); color: var(--ink);
-  font: inherit; font-size: 13px; line-height: 1.5;
-}
-.agent-composer textarea:focus { outline: none; border-color: var(--green); }
-.agent-composer-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-
-/* Queue */
-.agent-queue { display: flex; flex-direction: column; gap: 6px; }
-.agent-queue li {
-  display: flex; align-items: center; gap: 9px;
-  padding: 7px 0; border-top: 1px solid var(--line); font-size: 12.5px;
-}
-.agent-queue li:first-child { border-top: 0; }
-
 /* A destructive action reads as one before it is clicked, not after. */
 .ws-danger {
   padding: 7px 13px; border: 1px solid var(--slate); border-radius: 7px;
@@ -5296,25 +4957,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
 }
 .ws-danger:hover:not(:disabled) { background: var(--slate); color: var(--primfg); }
 .ws-danger:disabled { opacity: 0.55; cursor: default; }
-
-/* Connect card: language picker and optional sections (§11.6).
-   The card used to render four snippets, an MCP config and a share link at once —
-   six code blocks before the reader knew which one was theirs. One at a time, and
-   everything optional collapsed, because "why is this so complex" was the first
-   reaction it got. */
-.agent-lang { display: flex; gap: 6px; margin: 10px 0 4px; }
-.agent-lang .ws-btn-sm.on {
-  color: var(--ink); border-color: var(--ink); background: var(--bg2);
-}
-.agent-more { margin-top: 14px; }
-.agent-more > summary {
-  cursor: pointer; font-size: 12.5px; color: var(--sub);
-  padding: 6px 0; list-style: none;
-}
-.agent-more > summary::marker, .agent-more > summary::-webkit-details-marker { display: none; }
-.agent-more > summary::before { content: '▸ '; color: var(--dim); }
-.agent-more[open] > summary::before { content: '▾ '; }
-.agent-more > summary:hover { color: var(--ink); }
 
 /* ── Sandbox terminal (native xterm, not an iframe) ─────────────────────────
    The Terminal tab renders its own xterm over a WebSocket, so unlike the

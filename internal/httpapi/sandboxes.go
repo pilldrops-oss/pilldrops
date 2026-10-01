@@ -166,12 +166,9 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if body.Template == "" {
 		body.Template = s.templates[0]
 	}
-	switch body.AgentMode {
-	case "", "supervised", "guided", "autonomous":
-	default:
-		// Refuse rather than ignore: dropping it could widen the posture.
-		writeErr(w, http.StatusBadRequest,
-			"agent_mode must be \"supervised\", \"guided\" or \"autonomous\"")
+	// agent_mode belongs to agent workstations, which this server does not run.
+	if strings.TrimSpace(body.AgentMode) != "" {
+		writeErr(w, http.StatusBadRequest, "agent_mode is not supported by this server")
 		return
 	}
 	// Caller-supplied names are checked before the platform appends its own.
@@ -181,10 +178,6 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
-	}
-	// Last `docker -e` wins, so never append over the caller's own value.
-	if body.AgentMode != "" && !envHasKey(body.Env, "PILLDROPS_AGENT_MODE") {
-		body.Env = append(body.Env, "PILLDROPS_AGENT_MODE="+body.AgentMode)
 	}
 	// Choosing an id is moving a sandbox: the control plane's call alone.
 	if body.ID != "" && roleOf(r) != "operator" {
