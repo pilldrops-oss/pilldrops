@@ -297,7 +297,7 @@ var destroyLogCaptureTimeout = 5 * time.Second
 // sandbox on opMu. Every guest-facing step is deadline-bounded or killable from
 // the host, so no guest state can make DELETE hang.
 func (d *Daemon) Destroy(ctx context.Context, id string) (err error) {
-	return d.destroy(ctx, id, false)
+	return d.destroy(ctx, id, false, "destroyed")
 }
 
 // Evict stops and forgets a sandbox that now runs on another node under the
@@ -305,10 +305,11 @@ func (d *Daemon) Destroy(ctx context.Context, id string) (err error) {
 // agent tokens) belongs to the moved copy, so only this node's instance, its
 // local files and its final usage are dealt with.
 func (d *Daemon) Evict(ctx context.Context, id string) error {
-	return d.destroy(ctx, id, true)
+	return d.destroy(ctx, id, true, "")
 }
 
-func (d *Daemon) destroy(ctx context.Context, id string, evict bool) (err error) {
+// exitState names how the sandbox ended, in its history row and its last event.
+func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState string) (err error) {
 	ctx, span := observability.StartInternal(ctx, "daemon.Destroy", attribute.String("sandbox_id", id))
 	defer func() { observability.End(span, err) }()
 
@@ -390,7 +391,7 @@ func (d *Daemon) destroy(ctx context.Context, id string, evict bool) (err error)
 	if d.cfg.Store != nil {
 		now := d.clock.Now()
 		if err := d.cfg.Store.RecordHistory(ctx, SandboxHistory{
-			ID: id, OrgID: orgID, Template: template, Node: d.cfg.NodeID, ExitState: "destroyed",
+			ID: id, OrgID: orgID, Template: template, Node: d.cfg.NodeID, ExitState: exitState,
 			CreatedAt: createdAt.Unix(), DestroyedAt: now.Unix(),
 			DurationSecs: int64(now.Sub(createdAt).Seconds()),
 			VCPU:         vcpu, MemMiB: memMiB,
@@ -410,7 +411,7 @@ func (d *Daemon) destroy(ctx context.Context, id string, evict bool) (err error)
 	d.liveStats.forget(id)
 	d.diskSample.forget(id)
 	d.revokeAgentTokens(ctx, id)
-	d.recordEvent(ctx, orgID, id, "destroyed", template)
+	d.recordEvent(ctx, orgID, id, exitState, template)
 	d.log().Info("sandbox destroyed", "sandbox_id", id, "org_id", orgID)
 	return nil
 }

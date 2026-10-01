@@ -323,6 +323,12 @@ type Liveness interface {
 	Alive() bool
 }
 
+// OOMKilledReporter is an optional Liveness companion: whether an instance
+// that Alive reports dead was killed for exceeding its memory limit.
+type OOMKilledReporter interface {
+	OOMKilled() bool
+}
+
 // Instance is one running sandbox's compute. It is nil while paused/stopped.
 type Instance interface {
 	ID() string

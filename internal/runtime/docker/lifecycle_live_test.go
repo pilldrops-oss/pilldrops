@@ -128,3 +128,35 @@ func TestLiveSignalKillsAListedProcess(t *testing.T) {
 		t.Errorf("pid %d is still there after SIGKILL: %s", pid, res.Stdout)
 	}
 }
+
+// A container that dies underneath its sandbox must read as dead, or the
+// sandbox lists as running until its TTL.
+func TestLiveAliveSeesAContainerThatDied(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Skipf("docker runtime unavailable: %v", err)
+	}
+	ctx := t.Context()
+	inst, err := r.Boot(ctx, rt.BootSpec{
+		SandboxID: "sb-live-dead-" + time.Now().Format("150405"),
+		Template:  rt.Template{Name: "base", Image: "alpine:3"},
+		VCPU:      1, MemMiB: 256,
+	})
+	if err != nil {
+		t.Skipf("boot failed (image or daemon unavailable): %v", err)
+	}
+	t.Cleanup(func() { _ = inst.Stop(t.Context()) })
+	lv := inst.(rt.Liveness)
+	if !lv.Alive() {
+		t.Fatal("a running container reads as dead")
+	}
+	if _, _, code, err := dockerOut(ctx, "kill", inst.(*dockerInstance).cid); err != nil || code != 0 {
+		t.Fatalf("docker kill: %v %d", err, code)
+	}
+	if lv.Alive() {
+		t.Error("a killed container reads as alive")
+	}
+	if inst.(rt.OOMKilledReporter).OOMKilled() {
+		t.Error("a plain kill reads as an OOM kill")
+	}
+}

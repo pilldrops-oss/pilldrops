@@ -379,9 +379,19 @@ type containerJSON struct {
 	ID     string `json:"Id"`
 	SizeRw int64  `json:"SizeRw"`
 	State  struct {
-		Running  bool `json:"Running"`
-		ExitCode int  `json:"ExitCode"`
+		Running   bool `json:"Running"`
+		OOMKilled bool `json:"OOMKilled"`
+		ExitCode  int  `json:"ExitCode"`
 	} `json:"State"`
+}
+
+// State reports whether the container still runs and whether it was OOM-killed.
+func (e *engine) State(ctx context.Context, cid string) (running, oomKilled bool, err error) {
+	var c containerJSON
+	if err := e.get(ctx, "/containers/"+cid+"/json", &c); err != nil {
+		return false, false, err
+	}
+	return c.State.Running, c.State.OOMKilled, nil
 }
 
 // InspectSize returns the container's writable-layer size in bytes. Expensive:

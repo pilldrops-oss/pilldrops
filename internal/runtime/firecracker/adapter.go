@@ -456,6 +456,12 @@ func (i *fcInstance) ID() string { return i.sandboxID }
 // Alive reports whether this VM's VMM process is still running.
 func (i *fcInstance) Alive() bool { return i.be.Alive(i.vmID) }
 
+// OOMKilled implements rt.OOMKilledReporter: the host cgroup killed the VMM.
+func (i *fcInstance) OOMKilled() bool {
+	o, ok := i.be.(interface{ OOMKilled(string) bool })
+	return ok && o.OOMKilled(i.vmID)
+}
+
 func (i *fcInstance) Exec(ctx context.Context, s rt.ExecSpec) (rt.ExecResult, error) {
 	to := s.Timeout
 	if to == 0 {

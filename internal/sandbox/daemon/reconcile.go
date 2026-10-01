@@ -74,6 +74,8 @@ func (d *Daemon) Start() {
 				start := d.clock.Now()
 				d.scanOOMKills(scanCtx)
 				d.scanServerCrashes(scanCtx)
+				// A dead VMM's netns, chroot and overlay leak until it is reaped.
+				d.scanExits(scanCtx)
 				d.metrics.ScanDuration.Observe(d.clock.Now().Sub(start))
 				scanCancel()
 			case <-ctx.Done():
@@ -136,14 +138,6 @@ func (d *Daemon) reconcileOnce(ctx context.Context) {
 			d.log().Info("abandoning sandbox", "sandbox_id", id, "idle", now.Sub(sb.LastActiveAt).Round(time.Hour).String())
 			toStop = append(toStop, id)
 			continue
-		}
-		// Reap a sandbox whose VMM died, or its netns, chroot and overlay leak
-		// until an explicit delete. Only runtimes exposing Liveness are checked.
-		if sb.State == StateRunning {
-			if lv, ok := sb.inst.(rt.Liveness); ok && !lv.Alive() {
-				toStop = append(toStop, id)
-				continue
-			}
 		}
 		// Two timers off the same LastActiveAt clock, both with the per-sandbox
 		// override shape (0 = daemon default; <0 = never). The hibernate one is

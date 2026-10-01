@@ -68,6 +68,40 @@ func (d *Daemon) scanOOMKills(ctx context.Context) {
 	})
 }
 
+// scanExits reaps a running sandbox whose VMM or container died underneath it,
+// and says why: the event and the history's exit state are "oom" when the
+// runtime saw a memory kill, else "exited". Probed here, off the reconcile
+// lock, because a container's liveness is an Engine API round trip.
+func (d *Daemon) scanExits(ctx context.Context) {
+	type target struct {
+		id string
+		lv rt.Liveness
+	}
+	var targets []target
+	d.mu.RLock()
+	for _, sb := range d.boxes {
+		if lv, ok := sb.inst.(rt.Liveness); ok && sb.State == StateRunning {
+			targets = append(targets, target{sb.ID, lv})
+		}
+	}
+	d.mu.RUnlock()
+
+	forEachTarget(ctx, len(targets), scanConcurrency, func(i int) {
+		t := targets[i]
+		if t.lv.Alive() {
+			return
+		}
+		reason := "exited"
+		if r, ok := t.lv.(rt.OOMKilledReporter); ok && r.OOMKilled() {
+			reason = "oom"
+		}
+		d.log().Warn("sandbox instance died underneath it", "sandbox_id", t.id, "reason", reason)
+		if err := d.destroy(ctx, t.id, false, reason); err != nil {
+			d.log().Warn("reaping a dead sandbox failed", "sandbox_id", t.id, "error", err)
+		}
+	})
+}
+
 // scanConcurrency bounds how many sandboxes a scanner probes at once.
 const scanConcurrency = 16
 

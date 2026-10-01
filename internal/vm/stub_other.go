@@ -90,6 +90,7 @@ func (m *Manager) ExecDetached(context.Context, string, string, string, time.Dur
 func (m *Manager) Destroy(context.Context, string) error                   { return ErrUnsupported }
 func (m *Manager) DeliverIdentity(string, runtime.Identity) error          { return ErrUnsupported }
 func (m *Manager) Alive(string) bool                                       { return true }
+func (m *Manager) OOMKilled(string) bool                                   { return false }
 func (m *Manager) RecordOwner(string, string) error                        { return nil }
 func (m *Manager) AdoptOwned(string) (*Sandbox, bool)                      { return nil, false }
 func (m *Manager) KillUnadopted()                                          {}

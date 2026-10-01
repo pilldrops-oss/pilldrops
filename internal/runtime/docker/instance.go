@@ -57,6 +57,8 @@ type dockerInstance struct {
 	// mapping is fixed for the container's life, so one lookup per port suffices.
 	portsMu sync.Mutex
 	ports   map[int]string
+	// oomKilled is what the inspect that found the container dead said.
+	oomKilled atomic.Bool
 }
 
 func (i *dockerInstance) ID() string { return i.id }
@@ -275,6 +277,36 @@ func (i *dockerInstance) FS() rt.FileSystem {
 // inside the container (Signal, or the tenant's own shell) cannot address.
 const procList = `for d in /proc/[0-9]*; do p=${d#/proc/}; [ "$p" = $$ ] && continue; ` +
 	`{ read -r c < "$d/comm"; } 2>/dev/null && echo "$p $c"; done`
+
+// Alive implements rt.Liveness. An inspect that fails for any reason but a
+// missing container answers alive: reaping on a dockerd hiccup would destroy
+// every sandbox on the node.
+func (i *dockerInstance) Alive() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var running, oom bool
+	var err error
+	if i.eng != nil {
+		running, oom, err = i.eng.State(ctx, i.cid)
+	} else {
+		var out, se string
+		var code int
+		out, se, code, err = dockerOut(ctx, "inspect", "-f", "{{.State.Running}} {{.State.OOMKilled}}", i.cid)
+		if err == nil && code != 0 {
+			err = errors.New(se)
+		}
+		f := strings.Fields(out)
+		running, oom = len(f) == 2 && f[0] == "true", len(f) == 2 && f[1] == "true"
+	}
+	if err != nil {
+		return !strings.Contains(err.Error(), "No such") // engine: "container", CLI: "object"
+	}
+	i.oomKilled.Store(oom)
+	return running
+}
+
+// OOMKilled implements rt.OOMKilledReporter.
+func (i *dockerInstance) OOMKilled() bool { return i.oomKilled.Load() }
 
 func (i *dockerInstance) Procs() ([]rt.Proc, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
