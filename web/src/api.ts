@@ -436,11 +436,16 @@ export async function invokeFunction(name: string, opts: InvokeOptions = {}): Pr
 }
 
 export const listSecrets = () => request<VaultSecret[]>('GET', '/v1/secrets', undefined)
-// auto_inject is always sent: the server resets it on every put, so a rotation must restate it.
-export const putSecret = (name: string, value: string, autoInject = false) =>
-  request<VaultSecret>('POST', '/v1/secrets', { name, value, auto_inject: autoInject })
+// auto_inject is omitted to keep the current setting on a rotation; the server
+// only resets it to false for a brand-new secret, or when this is passed explicitly.
+export const putSecret = (name: string, value: string, autoInject?: boolean) =>
+  request<VaultSecret>('POST', '/v1/secrets', autoInject === undefined ? { name, value } : { name, value, auto_inject: autoInject })
 export const deleteSecret = (name: string) =>
   request<void>('DELETE', `/v1/secrets/${encodeURIComponent(name)}`, undefined)
+
+// setSecretAutoInject flips a secret's auto-inject flag without touching its value.
+export const setSecretAutoInject = (name: string, autoInject: boolean) =>
+  request<{ name: string; auto_inject: boolean }>('PATCH', `/v1/secrets/${encodeURIComponent(name)}`, { auto_inject: autoInject })
 
 export const getCapabilities = () =>
   request<Capabilities>('GET', '/v1/capabilities', undefined)
