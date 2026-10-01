@@ -16,7 +16,7 @@ import { listRecents } from '../lib/launchMemory'
 import { TemplateIcon } from '../components/templateIcons'
 import { kindOf } from '../lib/launchKinds'
 import { HistoryPanel } from './History'
-import { matchesSandboxQuery, sortSandboxRows, SANDBOX_SORT_LABELS, type SandboxSort } from '../lib/sandboxListSearch'
+import { matchesSandboxQuery, showNodeColumn, sortSandboxRows, SANDBOX_SORT_LABELS, type SandboxSort } from '../lib/sandboxListSearch'
 
 const CREDIT_ACTION = { label: 'Add credits', to: 'usage' } as const
 function actionFor(e: unknown) {
@@ -312,6 +312,9 @@ export default function Sandboxes() {
     }),
     sort,
   )
+  // The API includes `node` only for operator callers, so this is naturally
+  // absent for a tenant's own list and present on an operator's.
+  const hasNode = showNodeColumn(sandboxes ?? [])
 
   const maxActive = stats?.max_active ?? 50
   const activeCount = sandboxes ? total : (stats?.active_count ?? running)
@@ -408,11 +411,12 @@ export default function Sandboxes() {
             </div>
           </div>
           <div className="sb-table-scroll">
-            <div className="rowh">
+            <div className={`rowh${hasNode ? ' has-node' : ''}`}>
               <div>Sandbox</div>
               <div>Template</div>
               <div>Status</div>
               <div>Port</div>
+              {hasNode && <div>Node</div>}
               <div>Age</div>
               <div />
             </div>
@@ -420,7 +424,7 @@ export default function Sandboxes() {
               <div className="empty">No {filter === 'all' ? '' : `${filter} `}sandboxes match this filter.</div>
             ) : (
               filtered.map(row => (
-                <SandboxRowItem key={row.id} row={row} template={tpls.find(t => t.id === row.template)} onDone={handleRefetch} />
+                <SandboxRowItem key={row.id} row={row} template={tpls.find(t => t.id === row.template)} onDone={handleRefetch} showNode={hasNode} />
               ))
             )}
           </div>
@@ -681,7 +685,7 @@ export function InlineRename({ id, name, onRenamed }: InlineRenameProps) {
 }
 
 // Exported for the row-label test. template is the row's catalog entry, when known.
-export function SandboxRowItem({ row, template, onDone }: { row: SandboxRow; template?: Template; onDone: () => void }) {
+export function SandboxRowItem({ row, template, onDone, showNode }: { row: SandboxRow; template?: Template; onDone: () => void; showNode?: boolean }) {
   // A GUI template's preview is its desktop; everything else previews an app.
   const isDesktop = !!template && kindOf(template) === 'gui'
   // Only an explicit false greys it: a node too old to report the field omits
@@ -718,7 +722,7 @@ export function SandboxRowItem({ row, template, onDone }: { row: SandboxRow; tem
 
   return (
     <div
-      className={`row${isRunning ? '' : ' paused'}`}
+      className={`row${isRunning ? '' : ' paused'}${showNode ? ' has-node' : ''}`}
       onClick={handleRowClick}
       style={{ cursor: 'pointer', ...(isCrashed ? { borderLeft: '3px solid #DC2626', background: 'rgba(220,38,38,0.04)' } : {}) }}
     >
@@ -738,6 +742,11 @@ export function SandboxRowItem({ row, template, onDone }: { row: SandboxRow; tem
       <div className={`port${isRunning ? '' : ' off'}`}>
         {isRunning ? `:${row.public_port || 8000}` : '—'}
       </div>
+      {showNode && (
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 12.5, color: 'var(--sub)' }}>
+          {row.node || '—'}
+        </div>
+      )}
       <div className="age">{formatAge(row.created_at)}</div>
       <div className="rowact" onClick={e => e.stopPropagation()}>
         {isRunning && (

@@ -1,10 +1,24 @@
 import { describe, it, expect } from 'vitest'
-import { matchesSandboxQuery, sortSandboxRows } from '../../src/lib/sandboxListSearch'
+import { matchesSandboxQuery, showNodeColumn, sortSandboxRows } from '../../src/lib/sandboxListSearch'
 import type { SandboxRow } from '../../src/types'
 
 const row = (over: Partial<SandboxRow>): SandboxRow => ({
   id: 'sb1', template: 'node', status: 'running', boot_type: '', boot_ms: 0,
   created_at: '2026-01-01T00:00:00Z', expires_at: '', ...over,
+})
+
+describe('showNodeColumn', () => {
+  it('is false for a tenant list, which never carries node', () => {
+    expect(showNodeColumn([row({}), row({ id: 'sb2' })])).toBe(false)
+  })
+
+  it('is true once any row carries node, an operator-only field', () => {
+    expect(showNodeColumn([row({}), row({ id: 'sb2', node: 'node-4' })])).toBe(true)
+  })
+
+  it('is false for an empty list', () => {
+    expect(showNodeColumn([])).toBe(false)
+  })
 })
 
 describe('matchesSandboxQuery', () => {

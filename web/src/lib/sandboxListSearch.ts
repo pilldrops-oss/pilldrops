@@ -8,6 +8,12 @@ export const SANDBOX_SORT_LABELS: Record<SandboxSort, string> = {
   oldest: 'Oldest first',
 }
 
+// showNodeColumn is true once any row carries `node`: the API includes it
+// only for operator callers, so a tenant's list never triggers it.
+export function showNodeColumn(rows: SandboxRow[]): boolean {
+  return rows.some(r => r.node !== undefined)
+}
+
 export function matchesSandboxQuery(row: SandboxRow, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return true

@@ -1,6 +1,7 @@
 import { usePoll } from '../hooks/useApi'
 import { listSandboxes } from '../api'
 import type { SandboxRow } from '../types'
+import { showNodeColumn } from '../lib/sandboxListSearch'
 
 function formatAge(createdAt: string): string {
   const diff = Math.max(0, Date.now() - new Date(createdAt).getTime()) / 1000
@@ -19,6 +20,8 @@ export default function ClusterSandboxes() {
   const { data } = usePoll<{ sandboxes: SandboxRow[] }>(listSandboxes, 3000, [])
   const rows = data?.sandboxes ?? []
   const running = rows.filter(r => r.status === 'running').length
+  const hasNode = showNodeColumn(rows)
+  const cols = hasNode ? '1.7fr 0.9fr 1fr 1fr 0.65fr' : '1.7fr 0.9fr 1fr 0.65fr'
 
   return (
     <div className="wrap">
@@ -32,11 +35,11 @@ export default function ClusterSandboxes() {
       </div>
 
       <div className="panel">
-        <div className="rowh" style={{ gridTemplateColumns: '1.7fr 0.9fr 1fr 1fr 0.65fr' }}>
+        <div className="rowh" style={{ gridTemplateColumns: cols }}>
           <div>Sandbox</div>
           <div>Status</div>
           <div>Template</div>
-          <div>Node</div>
+          {hasNode && <div>Node</div>}
           <div>Age</div>
         </div>
 
@@ -49,7 +52,7 @@ export default function ClusterSandboxes() {
               <div
                 key={row.id}
                 className={`row${isRunning ? '' : ' paused'}`}
-                style={{ gridTemplateColumns: '1.7fr 0.9fr 1fr 1fr 0.65fr', cursor: 'default' }}
+                style={{ gridTemplateColumns: cols, cursor: 'default' }}
               >
                 <div className="sb">
                   <div className="nm">
@@ -66,9 +69,11 @@ export default function ClusterSandboxes() {
                 <div>
                   <span className="chip">{row.template}</span>
                 </div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 12.5, color: 'var(--sub)' }}>
-                  {row.node || '—'}
-                </div>
+                {hasNode && (
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 12.5, color: 'var(--sub)' }}>
+                    {row.node || '—'}
+                  </div>
+                )}
                 <div className="age">{formatAge(row.created_at)}</div>
               </div>
             )
