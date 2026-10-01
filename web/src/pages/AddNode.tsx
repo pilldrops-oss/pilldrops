@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { mintJoinToken, listNodes } from '../api'
 import type { JoinToken, NodeInfo } from '../types'
+import { orchestratorUrlFrom } from '../lib/joinCommand'
 
 function generateLabel(busy: boolean, hasResult: boolean): string {
   if (busy) return 'Generating…'
@@ -84,6 +85,8 @@ export default function AddNode() {
     ? Math.max(0, Math.round((result.expires_at * 1000 - Date.now()) / 60000))
     : 0
 
+  const orchUrl = result ? orchestratorUrlFrom(result.bootstrap_cmd) : null
+
   function joinStatus() {
     if (joined) {
       return (
@@ -144,6 +147,13 @@ export default function AddNode() {
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
               Run this on the new host
             </div>
+            {orchUrl && (
+              <div className="est-hint" style={{ marginBottom: 8 }}>
+                Orchestrator URL: <code>{orchUrl}</code> — the address your browser used just now.
+                If the new host reaches this orchestrator a different way (tunnel, reverse proxy,
+                private network), edit <code>ORCHESTRATOR_URL</code> in the command below before running it.
+              </div>
+            )}
             <div className="callout success">
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                 <div className="deploy-log" style={{ flex: 1, wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>
