@@ -16,6 +16,7 @@ import { listRecents } from '../lib/launchMemory'
 import { TemplateIcon } from '../components/templateIcons'
 import { kindOf } from '../lib/launchKinds'
 import { HistoryPanel } from './History'
+import { matchesSandboxQuery, sortSandboxRows, SANDBOX_SORT_LABELS, type SandboxSort } from '../lib/sandboxListSearch'
 
 const CREDIT_ACTION = { label: 'Add credits', to: 'usage' } as const
 function actionFor(e: unknown) {
@@ -239,6 +240,8 @@ export default function Sandboxes() {
     if (tabParam === 'past' || tabParam === 'active') setTab(tabParam)
   }, [tabParam])
   const [filter, setFilter] = useState<FilterType>('all')
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<SandboxSort>('recent')
   const [range, setRange] = useState<RangeType>('5m')
   const navigate = useNavigate()
   const [sparkHistory, setSparkHistory] = useState<number[]>([])
@@ -301,14 +304,14 @@ export default function Sandboxes() {
   const vcpuH = usage?.vcpu_hours ?? 0
   const ramH = usage?.ram_gb_hours ?? 0
 
-  const filtered = (sandboxes ?? []).filter(s => {
-    if (filter === 'running') return s.status === 'running'
-    if (filter === 'paused') return s.status !== 'running'
-    return true
-  })
-  const rank = (s: SandboxRow) => (s.status === 'running' ? 0 : 1)
-  const createdMs = (s: SandboxRow) => Date.parse(s.created_at) || 0
-  filtered.sort((a, b) => rank(a) - rank(b) || createdMs(b) - createdMs(a))
+  const filtered = sortSandboxRows(
+    (sandboxes ?? []).filter(s => {
+      if (filter === 'running' && s.status !== 'running') return false
+      if (filter === 'paused' && s.status === 'running') return false
+      return matchesSandboxQuery(s, query)
+    }),
+    sort,
+  )
 
   const maxActive = stats?.max_active ?? 50
   const activeCount = sandboxes ? total : (stats?.active_count ?? running)
@@ -369,6 +372,25 @@ export default function Sandboxes() {
           <div className="ph">
             <h2>Active</h2>
             <div className="rgt">
+              <input
+                className="inp mono"
+                style={{ width: 150 }}
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="Search…"
+                aria-label="Search sandboxes"
+              />
+              <select
+                className="sel"
+                style={{ width: 130 }}
+                value={sort}
+                onChange={e => setSort(e.target.value as SandboxSort)}
+                aria-label="Sort sandboxes"
+              >
+                {(Object.keys(SANDBOX_SORT_LABELS) as SandboxSort[]).map(k => (
+                  <option key={k} value={k}>{SANDBOX_SORT_LABELS[k]}</option>
+                ))}
+              </select>
               <div className="filter">
                 {(['all', 'running', 'paused'] as FilterType[]).map(f => (
                   <button
