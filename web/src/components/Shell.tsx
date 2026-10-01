@@ -288,6 +288,9 @@ function TopBar({ onToggle, onDeploy, onOpenNav, onNew }: TopBarProps) {
             ＋ New
           </button>
         )}
+        <form method="post" action="/dashboard/logout">
+          <button className="btn" type="submit">Sign out</button>
+        </form>
       </div>
     </div>
   )

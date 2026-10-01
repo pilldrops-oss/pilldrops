@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -271,6 +272,13 @@ func (s *Server) SetStore(st *store.Store) {
 	}
 	if s.ui != nil && st != nil {
 		s.ui.SetAdminStore(store.AccountsOf(st))
+		s.ui.SetKeyCheck(func(ctx context.Context, key string) (bool, error) {
+			_, err := st.ValidateKey(ctx, key)
+			if errors.Is(err, store.ErrInvalidKey) {
+				return false, nil
+			}
+			return err == nil, err
+		})
 	}
 }
 

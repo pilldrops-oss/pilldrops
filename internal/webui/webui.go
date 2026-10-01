@@ -5,6 +5,7 @@ package webui
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"embed"
 	"fmt"
@@ -97,6 +98,8 @@ type Server struct {
 	extra   map[string][]byte // public pages by slug
 	// admins is nil when there is no shared store; the console then uses the API-key form.
 	admins AdminStore
+	// keyCheck lets the account console also sign a customer in with an API key; nil refuses keys.
+	keyCheck func(ctx context.Context, key string) (bool, error)
 	// pagesDir overrides embedded pages at request time. See PagesDirEnv.
 	pagesDir    string
 	analytics   string       // script tag injected into public pages, "" when unset
@@ -324,6 +327,10 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /dashboard/login", s.serveLogin)
 	mux.HandleFunc("POST /dashboard/login", func(w http.ResponseWriter, r *http.Request) {
 		if s.admins != nil {
+			if r.PostFormValue("key") != "" {
+				s.handleConsoleKeyLogin(w, r)
+				return
+			}
 			s.handleConsoleLogin(w, r)
 			return
 		}
@@ -395,10 +402,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		mustWrite(w, loginHTML("Invalid key. Try again."))
 		return
 	}
+	keySession(w, r, s.sessionKey)
+}
+
+// keySession sets the key itself as the session cookie, which the /v1 layers
+// read as that key, and lands on the dashboard.
+func keySession(w http.ResponseWriter, r *http.Request, key string) {
 	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookie,
-		Value:    s.sessionKey,
+		Value:    key,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   secure,

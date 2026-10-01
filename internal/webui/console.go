@@ -5,6 +5,7 @@ import (
 	"html"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/auth/adminauth"
@@ -21,6 +22,12 @@ type AdminStore interface {
 
 // SetAdminStore switches the console from the API-key form to account sign-in.
 func (s *Server) SetAdminStore(a AdminStore) { s.admins = a }
+
+// SetKeyCheck lets the console sign a customer in with an API key. check
+// reports whether key is live; an error means it could not tell.
+func (s *Server) SetKeyCheck(check func(ctx context.Context, key string) (bool, error)) {
+	s.keyCheck = check
+}
 
 // firstRun reports whether the fleet has never been claimed. A store error
 // counts as claimed, so a database blip never presents an open setup form.
@@ -125,6 +132,29 @@ func (s *Server) handleConsoleLogin(w http.ResponseWriter, r *http.Request) {
 	s.startSession(w, r, email)
 }
 
+// handleConsoleKeyLogin signs in with a customer API key. Only keys the check
+// knows are accepted, so the deployment's master key still opens no console.
+func (s *Server) handleConsoleKeyLogin(w http.ResponseWriter, r *http.Request) {
+	if !s.logins.allow(clientIP(r), time.Now()) {
+		s.consoleError(w, http.StatusTooManyRequests, signinHTML, "Too many attempts. Try again shortly.")
+		return
+	}
+	key := strings.TrimSpace(r.PostFormValue("key"))
+	ok := false
+	if s.keyCheck != nil {
+		var err error
+		if ok, err = s.keyCheck(r.Context(), key); err != nil {
+			s.consoleError(w, http.StatusServiceUnavailable, signinHTML, "Cannot verify credentials right now. Try again shortly.")
+			return
+		}
+	}
+	if !ok {
+		s.consoleError(w, http.StatusUnauthorized, signinHTML, "Invalid API key.")
+		return
+	}
+	keySession(w, r, key)
+}
+
 // startSession issues the signed session cookie and lands on the dashboard.
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, email string) {
 	tok := adminauth.MintSession([]byte(s.sessionKey), email, time.Now())
@@ -211,6 +241,7 @@ const consoleCSS = `:root{` +
 	`button:focus-visible{outline:2px solid var(--primbg);outline-offset:2px}` +
 	`.err{color:var(--danger);background:var(--dangersoft);border:1px solid var(--danger);` +
 	`border-radius:6px;padding:9px 12px;font-size:13px;margin:0 0 14px;line-height:1.45}` +
+	`form+form{margin-top:14px}` +
 	`.hint{color:var(--dim);font-size:12px;margin:14px 0 0;line-height:1.5}` +
 	`@media (prefers-reduced-motion:reduce){*{transition:none!important}}`
 
@@ -270,5 +301,10 @@ func signinHTML(errMsg string) []byte {
 		`<label for="password">Password</label>`+
 		`<input id="password" type="password" name="password" autocomplete="current-password" required>`+
 		`<button type="submit">Sign in</button>`+
+		`</form>`+
+		`<form method="post" action="/dashboard/login">`+
+		`<label for="key">Or sign in with an API key</label>`+
+		`<input id="key" type="password" name="key" autocomplete="off" required>`+
+		`<button type="submit">Sign in with key</button>`+
 		`</form>`)
 }

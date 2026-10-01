@@ -308,3 +308,47 @@ func TestEveryAuthFormSharesTheShell(t *testing.T) {
 		}
 	}
 }
+
+func TestConsoleSignsInWithACustomerKey(t *testing.T) {
+	s, mux := consoleServer(t, newFakeAdmins())
+	s.SetKeyCheck(func(_ context.Context, key string) (bool, error) {
+		if key == "outage" {
+			return false, context.DeadlineExceeded
+		}
+		return key == "pd_customer", nil
+	})
+
+	rr := post(mux, "/dashboard/login", url.Values{"key": {"pd_customer"}})
+	if rr.Code != http.StatusFound {
+		t.Fatalf("valid key = %d, want 302 (body %q)", rr.Code, rr.Body.String())
+	}
+	var got *http.Cookie
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == SessionCookie {
+			got = c
+		}
+	}
+	// The /v1 layer reads a raw key in this cookie as that key.
+	if got == nil || got.Value != "pd_customer" || !got.HttpOnly || got.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("session cookie = %+v, want the key, HttpOnly, SameSite=Strict", got)
+	}
+
+	if rr := post(mux, "/dashboard/login", url.Values{"key": {"pd_revoked"}}); rr.Code != http.StatusUnauthorized {
+		t.Errorf("unknown key = %d, want 401", rr.Code)
+	}
+	if rr := post(mux, "/dashboard/login", url.Values{"key": {"session-signing-key"}}); rr.Code != http.StatusUnauthorized {
+		t.Errorf("the master key = %d, want 401: it is not a customer key", rr.Code)
+	}
+	if rr := post(mux, "/dashboard/login", url.Values{"key": {"outage"}}); rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("store error = %d, want 503", rr.Code)
+	}
+}
+
+func TestSignInOffersBothEmailAndKey(t *testing.T) {
+	body := string(signinHTML(""))
+	for _, want := range []string{`name="email"`, `name="password"`, `name="key"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("sign-in page lacks %s", want)
+		}
+	}
+}
