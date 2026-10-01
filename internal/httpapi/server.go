@@ -224,10 +224,10 @@ func (s *Server) Register(mux *http.ServeMux) {
 	route("GET /health", http.HandlerFunc(s.handleHealth))
 	route("GET /livez", http.HandlerFunc(s.handleHealth))
 	route("GET /readyz", http.HandlerFunc(s.handleReady))
-	route("GET /metrics", s.auth(s.handleMetrics))
+	route("GET /metrics", s.authAdmin(s.handleMetrics))
 	route("GET /openapi.json", http.HandlerFunc(s.handleOpenAPI))
-	route("GET /v1/host", s.auth(s.handleHost))
-	route("GET /v1/nodes", s.auth(s.handleNodes))
+	route("GET /v1/host", s.authAdmin(s.handleHost))
+	route("GET /v1/nodes", s.authAdmin(s.handleNodes))
 	route("GET /v1/capabilities", s.auth(s.handleCapabilities))
 
 	route("POST /v1/sandboxes", s.auth(s.handleCreate))

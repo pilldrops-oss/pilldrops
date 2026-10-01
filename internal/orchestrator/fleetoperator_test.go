@@ -76,6 +76,7 @@ func TestFleetReadsNeedTheOperatorKey(t *testing.T) {
 		"/v1/admin/feedback",
 		"/v1/admin/funnel",
 		"/v1/images/export",
+		"/v1/host",
 	}
 	get := func(path, key string) int {
 		req := httptest.NewRequest("GET", path, nil)
@@ -92,5 +93,26 @@ func TestFleetReadsNeedTheOperatorKey(t *testing.T) {
 		if code := get(p, "fleet-key"); code != http.StatusOK {
 			t.Errorf("GET %s with the operator key = %d, want 200", p, code)
 		}
+	}
+}
+
+// TestCurationNeedsTheOperatorKey pins the gate on PATCH /v1/images/{id}: a
+// tenant must not unpublish or rename an image every other org launches from.
+func TestCurationNeedsTheOperatorKey(t *testing.T) {
+	s, _ := domainServer(t)
+	tenant := orgKey(t, s, "u:tenant")
+	patch := func(key string) int {
+		req := httptest.NewRequest("PATCH", "/v1/images/python-3.11", strings.NewReader(`{"published":false}`))
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.RemoteAddr = "203.0.113.9:1234"
+		w := httptest.NewRecorder()
+		s.Routes().ServeHTTP(w, req)
+		return w.Code
+	}
+	if code := patch(tenant); code != http.StatusForbidden {
+		t.Errorf("PATCH /v1/images/{id} with a tenant key = %d, want 403", code)
+	}
+	if code := patch("fleet-key"); code == http.StatusForbidden {
+		t.Errorf("PATCH /v1/images/{id} with the operator key = 403; the guard refuses everyone")
 	}
 }

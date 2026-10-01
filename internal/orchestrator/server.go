@@ -282,6 +282,8 @@ func (s *Server) Routes() http.Handler {
 	// Behind auth: the scrape names every node.
 	mux.HandleFunc("GET /metrics", s.authOperator(s.handleMetrics))
 	mux.HandleFunc("GET /v1/nodes", s.authOperator(s.handleNodes))
+	// The node answers this from its own capacity and every org's sandbox counts.
+	mux.HandleFunc("GET /v1/host", s.authOperator(s.handleNodeResourceProxy))
 	// Mounted explicitly, or the /v1/ catch-all would return one node's answer as the fleet's.
 	mux.HandleFunc("GET /v1/capabilities", s.auth(s.handleCapabilities))
 	mux.HandleFunc("GET /v1/whoami", s.auth(s.handleWhoami))
