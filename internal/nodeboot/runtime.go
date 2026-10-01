@@ -52,10 +52,7 @@ func SelectRuntime(ctx context.Context, dataDir string, logger *zap.Logger) (rt.
 		templates.SetDir(snapDir)
 		// Per-template defaults; a request may override, with VM_MEMORY_MB and
 		// VM_VCPUS as the final fallback.
-		tmplRes := map[string]rt.Resources{}
-		for _, t := range templates.Catalog() {
-			tmplRes[t.ID] = rt.Resources{VCPUs: t.CPU, MemoryMB: t.MemoryMB, StorageMB: t.StorageMB}
-		}
+		tmplRes := templateResources(templates.Catalog())
 		envdAuth := Env("ENVD_AUTH", "1") == "1"
 		fc, ferr := firecracker.New(ctx, firecracker.Config{
 			SnapshotDir:    snapDir,
@@ -113,4 +110,22 @@ func unisolated(dataDir, why string) (rt.Runtime, bool) {
 	slog.Warn("using the process runtime: NO isolation, dev only",
 		"component", "runtime", "reason", why)
 	return r, false
+}
+
+// templateResources keys each template's defaults by its id and its aliases.
+// A create resolves an alias to its entry's sizes, and a golden restores only
+// when those match the VM's defaults for the id it boots: unkeyed, the default
+// python-3.11 (an alias with its own image) never restored and always cold-booted.
+func templateResources(catalog []templates.Template) map[string]rt.Resources {
+	out := map[string]rt.Resources{}
+	for _, t := range catalog {
+		res := rt.Resources{VCPUs: t.CPU, MemoryMB: t.MemoryMB, StorageMB: t.StorageMB}
+		for _, a := range t.Aliases {
+			if _, set := out[a]; !set {
+				out[a] = res
+			}
+		}
+		out[t.ID] = res
+	}
+	return out
 }
