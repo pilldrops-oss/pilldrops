@@ -89,10 +89,17 @@ func (s *Server) handleCronCreate(w http.ResponseWriter, r *http.Request) {
 //
 //	GET /v1/cron
 func (s *Server) handleCronList(w http.ResponseWriter, r *http.Request) {
-	jobs, err := s.st.ListCronJobs(r.Context(), orgID(r))
+	all, err := s.st.ListCronJobs(r.Context(), orgID(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not list jobs")
 		return
+	}
+	// A job's command is its sandbox's business: another member's private one is not listed.
+	jobs := make([]store.CronJob, 0, len(all))
+	for _, j := range all {
+		if s.mayActOnJobSandbox(r, j.SandboxID) {
+			jobs = append(jobs, j)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 }
@@ -180,10 +187,13 @@ func (s *Server) handleCronRunNow(w http.ResponseWriter, r *http.Request) {
 // delete and toggle, not only the one hosting the sandbox.
 func (s *Server) ownsCronJob(r *http.Request, id string) bool {
 	job, ok := s.st.CronJobByID(r.Context(), orgID(r), id)
-	if !ok {
-		return false
-	}
-	row, found, err := s.st.GetActiveSandboxRow(r.Context(), job.SandboxID)
+	return ok && s.mayActOnJobSandbox(r, job.SandboxID)
+}
+
+// mayActOnJobSandbox is the sandbox visibility rule for a job's sandbox.
+// ponytail: one row read per job; a list is one org's jobs, batch it if that grows.
+func (s *Server) mayActOnJobSandbox(r *http.Request, sandboxID string) bool {
+	row, found, err := s.st.GetActiveSandboxRow(r.Context(), sandboxID)
 	if err != nil {
 		return false
 	}

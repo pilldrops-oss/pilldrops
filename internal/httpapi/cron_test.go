@@ -197,3 +197,34 @@ func TestCronJobOnAPrivateSandboxIsTheCreators(t *testing.T) {
 		t.Errorf("creator delete = %d, want 200", code)
 	}
 }
+
+// The list carries each job's command, so it follows the same rule.
+func TestCronListHidesJobsOnAnotherMembersPrivateSandbox(t *testing.T) {
+	srv, st, _ := newTestServerWithStore(t)
+	k1, k2, kop := twoMembersAndAnOperator(t, st)
+	_, priv := do(t, "POST", srv.URL+"/v1/sandboxes", k1, `{"template":"base","visibility":"private"}`)
+	_, shared := do(t, "POST", srv.URL+"/v1/sandboxes", k1, `{"template":"base"}`)
+	for _, sb := range []string{str(priv, "id"), str(shared, "id")} {
+		if code, out := do(t, "POST", srv.URL+"/v1/cron", k1,
+			`{"sandbox_id":"`+sb+`","schedule":"0 9 * * *","command":"echo secret-`+sb+`"}`); code != http.StatusCreated {
+			t.Fatalf("cron create = %d (%v)", code, out)
+		}
+	}
+	listed := func(key string) int {
+		code, out := do(t, "GET", srv.URL+"/v1/cron", key, "")
+		if code != http.StatusOK {
+			t.Fatalf("list = %d (%v)", code, out)
+		}
+		jobs, _ := out["jobs"].([]any)
+		return len(jobs)
+	}
+	if n := listed(k2); n != 1 {
+		t.Errorf("another member sees %d jobs, want 1: the private sandbox's job leaked", n)
+	}
+	if n := listed(k1); n != 2 {
+		t.Errorf("the creator sees %d jobs, want 2", n)
+	}
+	if n := listed(kop); n != 2 {
+		t.Errorf("an operator sees %d jobs, want 2", n)
+	}
+}
