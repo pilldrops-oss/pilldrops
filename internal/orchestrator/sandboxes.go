@@ -345,7 +345,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			rb = s.rewriteURL(r, rb, prev, to, viewer, node.ID)
 			if req.Public {
 				fields := map[string]any{"public": true, "public_preview": true}
-				if port := mainPort(req); rt.IsPlatformPort(port) {
+				if port, ok := platformPortIn(req); ok {
 					fields["warning"] = fmt.Sprintf("public: true does not share this sandbox's preview: port %d is a "+
 						"terminal or desktop port, which gives shell access, so it always needs an access token "+
 						"from the owner. Mint one with GET /v1/sandboxes/%s/preview-token?port=%d", port, created.ID, port)
@@ -359,18 +359,20 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(rb) //nolint:errcheck // best-effort: status/headers are already committed, nothing left to do on a write failure
 }
 
-// mainPort is the port the create's preview link points at, as the node picks it.
-func mainPort(req sandbox.Spec) int {
-	if req.Port > 0 {
-		return req.Port
-	}
-	if req.Start != "" {
-		return 8000 // the node's default for a deployed app
-	}
+// platformPortIn returns the first terminal or desktop port the create would
+// preview, its app port or a requested ports entry: public: true never
+// shares those, so the caller is warned rather than handed a link that 403s.
+func platformPortIn(req sandbox.Spec) (int, bool) {
+	var tmpl sandbox.TemplateDefaults
 	if t, ok := templates.Resolve(req.Template); ok {
-		return t.Port
+		tmpl.Port = t.Port
 	}
-	return 0
+	for _, p := range append([]int{sandbox.AppPort(req, tmpl)}, req.Ports...) {
+		if rt.IsPlatformPort(p) {
+			return p, true
+		}
+	}
+	return 0, false
 }
 
 // maxCreateTries bounds how many nodes one create is offered to when each

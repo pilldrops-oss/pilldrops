@@ -264,6 +264,10 @@ func TestPublicDesktopCreateWarnsTheLinkStaysGated(t *testing.T) {
 		`{"template":"base","port":7681,"public":true}`:                true,
 		`{"template":"base","port":3000,"public":true}`:                false,
 		`{"template":"desktop","start":"python app.py","public":true}`: false,
+		// A requested terminal or desktop port is just as gated.
+		`{"template":"base","ports":[7681],"public":true}`:      true,
+		`{"template":"base","ports":[3000,6080],"public":true}`: true,
+		`{"template":"base","ports":[3000],"public":true}`:      false,
 	}
 	for body, wantWarning := range cases {
 		w := doCreate(t, s, body)
