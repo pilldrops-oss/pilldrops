@@ -6,6 +6,14 @@ describe('breadcrumb labels', () => {
     expect(labelFor('vault', false)).toBe('Vault')
   })
 
+  it('labels Domains as Domains', () => {
+    expect(labelFor('domains', false)).toBe('Domains')
+  })
+
+  it('labels Domains as Domains', () => {
+    expect(labelFor('domains', false)).toBe('Domains')
+  })
+
   it('gives every customer route its own label', () => {
     for (const route of CUSTOMER_ROUTES) {
       const label = labelFor(route, false)
@@ -20,8 +28,8 @@ describe('breadcrumb labels', () => {
   })
 
   it('does not reuse one label for unrelated routes', () => {
-    // Deliberate aliases: a detail page belongs to its list, and /build redirects to the index.
-    const aliases = new Set(['sandbox', 'fn', 'build'])
+    // Deliberate aliases: a detail page belongs to its list, and the index redirects to /sandboxes.
+    const aliases = new Set(['', 'sandbox', 'fn'])
     const seen = new Map<string, string>()
     for (const route of CUSTOMER_ROUTES) {
       if (aliases.has(route)) continue
@@ -32,8 +40,8 @@ describe('breadcrumb labels', () => {
   })
 
   it('falls back rather than rendering an empty breadcrumb for an unknown route', () => {
-    // The customer index is Build, so that is the least-wrong fallback.
-    expect(labelFor('not-a-route', false)).toBe('Build')
+    // The customer index redirects to Sandboxes, so that is the least-wrong fallback.
+    expect(labelFor('not-a-route', false)).toBe('Sandboxes')
     expect(labelFor('not-a-route', true)).toBe('Overview')
   })
 })

@@ -2,7 +2,7 @@
 // make a missing label a compile error instead of a wrong breadcrumb.
 
 export const CUSTOMER_ROUTES = [
-  '', 'build', 'projects', 'sandboxes', 'deploy', 'templates', 'vault', 'usage', 'keys', 'docs', 'sandbox', 'functions', 'fn',
+  '', 'projects', 'sandboxes', 'deploy', 'templates', 'vault', 'domains', 'usage', 'keys', 'docs', 'sandbox', 'functions', 'fn',
 ] as const
 
 export const ADMIN_ROUTES = [
@@ -14,13 +14,13 @@ export type CustomerRoute = (typeof CUSTOMER_ROUTES)[number]
 export type AdminRoute = (typeof ADMIN_ROUTES)[number]
 
 const CUSTOMER_LABELS: Record<CustomerRoute, string> = {
-  '': 'Build',
-  build: 'Build',
+  '': 'Sandboxes',
   projects: 'Projects',
   sandboxes: 'Sandboxes',
   deploy: 'Catalog',
   templates: 'Templates',
   vault: 'Vault',
+  domains: 'Domains',
   usage: 'Usage',
   keys: 'API Keys',
   docs: 'Docs',
