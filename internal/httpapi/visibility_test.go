@@ -114,6 +114,7 @@ func TestPrivateSandboxIsInvisibleToOtherMembers(t *testing.T) {
 		// someone who may not see that it exists.
 		{"GET", "/v1/sandboxes/" + id + "/ports", ""},
 		{"GET", "/v1/sandboxes/" + id + "/preview-status", ""},
+		{"GET", "/v1/sandboxes/" + id + "/deploy", ""},
 		{"DELETE", "/v1/sandboxes/" + id, ""},
 	} {
 		if code, _ := do(t, probe.method, srv.URL+probe.path, k2, probe.body); code != http.StatusNotFound {
@@ -124,7 +125,7 @@ func TestPrivateSandboxIsInvisibleToOtherMembers(t *testing.T) {
 	// stuck off, so the creator must still get an answer. Not asserted as 200 —
 	// what the fake runtime reports about ports is not this test's question,
 	// only that the ownership rule let the request through.
-	for _, path := range []string{"/v1/sandboxes/" + id + "/ports", "/v1/sandboxes/" + id + "/preview-status"} {
+	for _, path := range []string{"/v1/sandboxes/" + id + "/ports", "/v1/sandboxes/" + id + "/preview-status", "/v1/sandboxes/" + id + "/deploy"} {
 		if code, _ := do(t, "GET", srv.URL+path, k1, ""); code == http.StatusNotFound {
 			t.Errorf("the creator GET %s = 404: the guard refuses its owner too", path)
 		}

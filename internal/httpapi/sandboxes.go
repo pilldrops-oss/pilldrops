@@ -676,8 +676,7 @@ func (s *Server) runDeploy(
 // handleDeployStatus reports a background deploy; an unknown id is "unknown", not "done".
 func (s *Server) handleDeployStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	sb, ok := s.d.Get(id)
-	if !ok || sb.OrgID != orgID(r) {
+	if !s.owns(r, id) {
 		writeErr(w, http.StatusNotFound, "sandbox not found")
 		return
 	}
