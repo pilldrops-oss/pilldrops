@@ -709,6 +709,8 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		"url":               s.appURL(r, sb.ID, previewPort, sb.OrgID),
 		"terminal_url":      s.appURL(r, sb.ID, rt.TerminalPort, sb.OrgID),
 		"has_desktop":       s.hasDesktop(sb),
+		"boot_type":         sb.BootType,
+		"boot_ms":           sb.BootMs,
 	}
 	if s.hasDesktop(sb) {
 		resp["desktop_url"] = s.appURL(r, sb.ID, rt.DesktopPort, sb.OrgID)
