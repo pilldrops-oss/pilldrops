@@ -313,7 +313,13 @@ func TestVerifyEgressScriptMutations(t *testing.T) {
 			name:     "sandboxd-net missing",
 			mutate:   func(c map[string]string) { delete(c, "sandboxd-net") },
 			mode:     "--docker",
-			wantFail: true, wantMsg: "cannot read the sandboxd-net subnet",
+			wantFail: true, wantMsg: "cannot read an IPv4 subnet for sandboxd-net",
+		},
+		{
+			// A dual-stack network lists both subnets; the IPv4 rules key on the IPv4 one.
+			name:   "healthy docker on a dual-stack sandboxd-net",
+			mutate: func(c map[string]string) { c["sandboxd-net"] = "fd00:1::/64\n172.18.0.0/16\n" },
+			mode:   "--docker",
 		},
 		{
 			name:     "10/8 DROP present but below the allowlist ACCEPT",

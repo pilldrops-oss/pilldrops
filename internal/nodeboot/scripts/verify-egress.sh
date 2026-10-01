@@ -81,8 +81,10 @@ case "$mode" in
     du="$(iptables -S DOCKER-USER)"
     # The sandboxd-net subnet is allocated by dockerd from its address pools,
     # which an operator may move to 10/8 or 192.168/16, so it is read, not guessed.
-    sb_net=$(docker network inspect sandboxd-net -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null) || sb_net=""
-    [ -n "$sb_net" ] || fail "cannot read the sandboxd-net subnet from docker — the network is missing or docker is down (run setup-docker-egress.sh)"
+    # First IPv4 subnet: a dual-stack network lists an IPv6 one too, and these rules are IPv4.
+    sb_net=$(docker network inspect sandboxd-net -f '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' 2>/dev/null \
+      | grep -m1 -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$') || sb_net=""
+    [ -n "$sb_net" ] || fail "cannot read an IPv4 subnet for sandboxd-net from docker — the network is missing, has no IPv4 subnet, or docker is down (run setup-docker-egress.sh)"
     sb_re="-s ${sb_net//./\\.}"
     # The DNS/HTTP/HTTPS allowlist setup-host.sh gives Firecracker VMs. Without
     # its closing DROP a sandbox reaches every port on every public address,

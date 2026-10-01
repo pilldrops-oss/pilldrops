@@ -16,8 +16,11 @@ iptables -N DOCKER-USER 2>/dev/null || true  # no-op if dockerd already created 
 # on its subnet instead of skipping them.
 docker network inspect sandboxd-net >/dev/null 2>&1 || \
   docker network create -o com.docker.network.bridge.enable_icc=false sandboxd-net >/dev/null
-SB_NET="$(docker network inspect sandboxd-net -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')"
-[ -n "$SB_NET" ] || { echo "FAIL: cannot read the sandboxd-net subnet" >&2; exit 1; }
+# One subnet per line, first IPv4 one: a dual-stack network lists an IPv6
+# subnet too, and the rules below are IPv4 only.
+SB_NET="$(docker network inspect sandboxd-net -f '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' \
+  | grep -m1 -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$')" || SB_NET=""
+[ -n "$SB_NET" ] || { echo "FAIL: cannot read an IPv4 subnet for sandboxd-net (docker network inspect sandboxd-net)" >&2; exit 1; }
 
 # Delete then insert, so a re-run restores the order below rather than
 # stacking new rules above old ones. -I prepends: the last call ends on top.
