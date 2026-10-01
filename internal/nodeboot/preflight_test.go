@@ -258,6 +258,12 @@ const healthyDockerUser = `-N DOCKER-USER
 -A DOCKER-USER -d 172.17.0.1/32 -j DROP
 -A DOCKER-USER -d 172.16.0.0/12 -j DROP
 -A DOCKER-USER -d 100.64.0.0/10 -j DROP
+-A DOCKER-USER -s 172.18.0.0/16 -d 192.168.0.0/16 -j DROP
+-A DOCKER-USER -s 172.18.0.0/16 -p udp -m udp --dport 53 -j RETURN
+-A DOCKER-USER -s 172.18.0.0/16 -p tcp -m tcp --dport 53 -j RETURN
+-A DOCKER-USER -s 172.18.0.0/16 -p tcp -m tcp --dport 80 -j RETURN
+-A DOCKER-USER -s 172.18.0.0/16 -p tcp -m tcp --dport 443 -j RETURN
+-A DOCKER-USER -s 172.18.0.0/16 -j DROP
 `
 
 func healthyChains() map[string]string {
@@ -319,6 +325,30 @@ func TestVerifyEgressScriptMutations(t *testing.T) {
 					strings.TrimPrefix(c["FORWARD"], "-P FORWARD ACCEPT\n")
 			},
 			mode: "--docker", wantFail: true, wantMsg: "bypass every DOCKER-USER DROP",
+		},
+		{
+			// A docker sandbox reached the orchestrator, Postgres and MinIO on a
+			// peer host through this node's address, which their firewall trusts.
+			name: "docker sandbox port allowlist missing",
+			mutate: func(c map[string]string) {
+				c["DOCKER-USER"] = strings.Replace(c["DOCKER-USER"], "-A DOCKER-USER -s 172.18.0.0/16 -j DROP\n", "", 1)
+			},
+			mode: "--docker", wantFail: true, wantMsg: "port allowlist missing",
+		},
+		{
+			name: "docker 192.168/16 DROP missing",
+			mutate: func(c map[string]string) {
+				c["DOCKER-USER"] = strings.Replace(c["DOCKER-USER"], "-A DOCKER-USER -s 172.18.0.0/16 -d 192.168.0.0/16 -j DROP\n", "", 1)
+			},
+			mode: "--docker", wantFail: true, wantMsg: "192.168/16 DROP missing",
+		},
+		{
+			name: "docker 10/8 DROP below the sandbox allowlist",
+			mutate: func(c map[string]string) {
+				c["DOCKER-USER"] = strings.Replace(c["DOCKER-USER"], "-A DOCKER-USER -d 10.0.0.0/8 -j DROP\n", "", 1) +
+					"-A DOCKER-USER -d 10.0.0.0/8 -j DROP\n"
+			},
+			mode: "--docker", wantFail: true, wantMsg: "BELOW the sandbox allowlist",
 		},
 		{
 			name: "FC INPUT reply-ACCEPT below the DROP",
