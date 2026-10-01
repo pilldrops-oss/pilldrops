@@ -241,9 +241,10 @@ export const setSandboxSlug = (id: string, slug: string) =>
   request<SandboxDetail>('PATCH', `/v1/sandboxes/${id}`, { slug })
 
 // A Go nil slice serialises as null; normalise to [] so no consumer trips on it.
+// The orchestrator names the lifecycle `state`, a node names it `status`.
 export const listSandboxes = () =>
-  request<{ sandboxes: SandboxRow[] | null }>('GET', '/v1/sandboxes', undefined).then(r => ({
-    sandboxes: r.sandboxes ?? [],
+  request<{ sandboxes: (SandboxRow & { state?: string })[] | null }>('GET', '/v1/sandboxes', undefined).then(r => ({
+    sandboxes: (r.sandboxes ?? []).map(s => ({ ...s, status: s.status ?? s.state ?? '' })),
   }))
 
 // getDeployStatus reports async_setup progress, distinct from the sandbox's own logs.
