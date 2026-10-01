@@ -53,6 +53,13 @@ describe('detectProject — a start command must name a file that exists', () =>
     expect(det?.label).toMatch(/fastapi/i)
   })
 
+  it('FastAPI maps to the real catalogue id, not the python-3.11 alias', () => {
+    const det = detectProject([
+      { path: 'requirements.txt', content: 'fastapi\n' },
+    ])
+    expect(det?.templateId).toBe('code-interpreter')
+  })
+
   it('a FastAPI APP with a real entry point gets one', () => {
     const det = detectProject([
       { path: 'requirements.txt', content: 'fastapi\nuvicorn\n' },

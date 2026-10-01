@@ -38,7 +38,7 @@ describe('materialisePlan', () => {
 
     expect(units).toHaveLength(1)
     const u = units[0]
-    expect(u.template.id).toBe('fastapi')
+    expect(u.template.id).toBe('code-interpreter')
     expect(u.hosts.sort()).toEqual(['api', 'db'])
   })
 
@@ -75,7 +75,7 @@ describe('materialisePlan', () => {
   it('leaves an agent alone', () => {
     const units = materialisePlan(agentOnly)
     expect(units).toHaveLength(1)
-    expect(units[0].template.id).toBe('claude')
+    expect(units[0].template.id).toBe('node')
     expect(units[0].setup).toEqual([])
   })
 

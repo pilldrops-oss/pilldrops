@@ -104,15 +104,11 @@ func newStreamClient() *http.Client {
 
 // forwardStream issues an authenticated request to a node with the body
 // streamed, not buffered. client is the inbound header set (nil relays none);
-// an optional org is relayed as a signed X-Org-Override.
+// an optional org is relayed as a signed X-Org-Override. relayClientHeaders is
+// a security boundary: a client-supplied X-Forwarded-Host must never reach a
+// node, since the proxy itself sets that header from the real inbound Host
+// when forwarding to a sandbox's app.
 func (s *Server) forwardStream(ctx context.Context, node *cluster.Node, method, path string, body io.Reader, ctype string, client http.Header, org ...string) (*http.Response, error) {
-	return s.forwardStreamRelaying(ctx, node, method, path, body, ctype, client, relayClientHeaders, org...)
-}
-
-// forwardStreamRelaying is forwardStream with an explicit header allowlist.
-// The list is a security boundary: the agent origin relays X-Forwarded-Host,
-// which the shared API host must never let a caller assert.
-func (s *Server) forwardStreamRelaying(ctx context.Context, node *cluster.Node, method, path string, body io.Reader, ctype string, client http.Header, relay []string, org ...string) (*http.Response, error) {
 	base, hop, err := s.nodeHop(node, hopStream)
 	if err != nil {
 		return nil, err
@@ -127,7 +123,7 @@ func (s *Server) forwardStreamRelaying(ctx context.Context, node *cluster.Node, 
 	if ctype != "" {
 		req.Header.Set("Content-Type", ctype)
 	}
-	for _, h := range relay {
+	for _, h := range relayClientHeaders {
 		if v := client.Get(h); v != "" {
 			req.Header.Set(h, v)
 		}

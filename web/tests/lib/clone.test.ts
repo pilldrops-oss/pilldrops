@@ -7,9 +7,9 @@ const body = (template: string): CreateSandboxReq => ({ template }) as CreateSan
 
 const recents: StoredLaunch[] = [
   { template: 'playwright', name: 'Playwright', at: 200, body: body('playwright') },
-  { template: 'fastapi', name: 'FastAPI', at: 100, body: body('fastapi') },
+  { template: 'code-interpreter', name: 'Code Interpreter', at: 100, body: body('code-interpreter') },
   // Large uploads are stored body-less by launchMemory (MAX_BODY_JSON).
-  { template: 'nextjs', name: 'Next.js', at: 300 },
+  { template: 'node', name: 'Node + TypeScript', at: 300 },
 ]
 
 describe('cloneSourceFor', () => {
@@ -20,9 +20,9 @@ describe('cloneSourceFor', () => {
   })
 
   it('falls back to template-only when the body was not kept', () => {
-    const r = cloneSourceFor(recents, 'nextjs')
+    const r = cloneSourceFor(recents, 'node')
     expect(r.body).toBeUndefined()
-    expect(r.template).toBe('nextjs')
+    expect(r.template).toBe('node')
     expect(r.exact).toBe(false)
   })
 

@@ -63,7 +63,7 @@ import (
 
 // fleetPaths are the API prefixes the portal forwards to the orchestrator.
 // A new top-level node resource must be added here or it 404s at the portal.
-var fleetPaths = []string{"/v1/sandboxes", "/v1/cron", "/v1/integrations"}
+var fleetPaths = []string{"/v1/sandboxes", "/v1/cron"}
 
 func isFleetPath(p string) bool {
 	for _, pre := range fleetPaths {
@@ -2816,8 +2816,6 @@ func main() {
 		}
 		for _, pat := range []string{
 			"/v1/cron", "/v1/cron/{id}", "/v1/cron/{id}/toggle", "/v1/cron/{id}/run",
-			"/v1/integrations",
-			"/v1/sandboxes/{id}/integrations", "/v1/sandboxes/{id}/chat",
 			// The node probes what the preview would actually serve.
 			"/v1/sandboxes/{id}/preview-status",
 			"/v1/sandboxes/{id}/fork", "/v1/sandboxes/{id}/visibility",

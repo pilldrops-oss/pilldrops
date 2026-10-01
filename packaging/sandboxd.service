@@ -96,7 +96,7 @@ Environment=OVERLAY_DIR=/var/lib/sandbox/overlays
 
 # Templates this node offers (comma list) and the preview domain. Listing a
 # template does not build it: a create for a listed-but-unbuilt id answers 400.
-Environment=TEMPLATE=base,node,go,claude,codex,code-interpreter,grok,opencode,amp,desktop,playwright
+Environment=TEMPLATE=base,node,go,code-interpreter,desktop,playwright
 # Set this to the domain sandbox preview URLs should be served under, e.g. a
 # nip.io/sslip.io wildcard pointed at this node's IP, or your own domain.
 Environment=SANDBOXD_SANDBOX_DOMAIN=<your-sandbox-domain>

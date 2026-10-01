@@ -95,7 +95,7 @@ export function detectProject(files: ProjFile[]): Detection | null {
     // No app file, no start command: never invent a `main:app` that does not exist.
     const appFile = pyFiles.find(f => /FastAPI\s*\(/.test(f.content))
     return {
-      templateId: 'python-3.11',
+      templateId: 'code-interpreter',
       label: appFile ? 'FastAPI app' : 'Python project using FastAPI',
       start: appFile
         ? `uvicorn ${appFile.path.replace(/\.py$/, '').replace(/\//g, '.')}:app --host 0.0.0.0 --port $PORT`
