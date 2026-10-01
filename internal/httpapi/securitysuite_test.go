@@ -20,7 +20,7 @@ func TestSecuritySuiteDiskVerdictNeedsAnOperatorKey(t *testing.T) {
 		t.Fatalf("operator key: %v", err)
 	}
 	verdict := func(operatorKey string) string {
-		cmd := exec.Command("bash", "../../scripts/security-suite.sh", "--host", srv.URL)
+		cmd := exec.Command("bash", "../../scripts/security-suite.sh", "--self-test", "--host", srv.URL)
 		cmd.Env = append(os.Environ(), "SELFTEST_DISK_WROTE=3000000000",
 			"PILLDROPS_API_KEY="+tenant, "PILLDROPS_OPERATOR_KEY="+operatorKey)
 		out, _ := cmd.CombinedOutput()
@@ -42,5 +42,20 @@ func TestSecuritySuiteDiskVerdictNeedsAnOperatorKey(t *testing.T) {
 	// /metrics reaches the real verdict: over the cap and undetected.
 	if got := verdict(operator); got != "FAIL" {
 		t.Errorf("operator key: verdict %s, want FAIL from the counter it read", got)
+	}
+}
+
+// The self-test variables used to take over a run by themselves, so one left
+// in the environment turned a real security run into a single verdict. Without
+// --self-test they are ignored and the real run's preconditions apply.
+func TestSecuritySuiteIgnoresSelfTestEnvWithoutTheFlag(t *testing.T) {
+	cmd := exec.Command("bash", "../../scripts/security-suite.sh", "--host", "http://127.0.0.1:1")
+	cmd.Env = append(os.Environ(), "SELFTEST_DISK_WROTE=3000000000", "SELFTEST_TERMINAL_URL=http://127.0.0.1:1")
+	out, err := cmd.CombinedOutput()
+	if strings.Contains(string(out), "SELF-TEST") {
+		t.Fatalf("a stray SELFTEST_* variable ran the self-test:\n%s", out)
+	}
+	if !strings.Contains(string(out), "--runtime is required") || err == nil {
+		t.Errorf("want the real run's --runtime precondition to refuse, got %v:\n%s", err, out)
 	}
 }

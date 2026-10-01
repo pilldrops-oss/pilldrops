@@ -43,6 +43,10 @@ usage: security-suite.sh --runtime <firecracker|docker|gvisor> [options]
   --strict       also fail on a SKIP whose reason is not "not applicable to
                  this runtime". Use this in CI: it turns "the suite stopped
                  testing things" into a failure instead of a quiet pass.
+  --self-test    run only the verdict named by SELFTEST_TERMINAL_URL or
+                 SELFTEST_DISK_WROTE, to show a probe failing. Without this
+                 flag those variables are ignored, so a stray one cannot
+                 shorten a real run.
 EOF
 }
 
@@ -55,13 +59,21 @@ while [ $# -gt 0 ]; do
     --template) TEMPLATE="${2:-}"; shift 2 ;;
     --image)   IMAGE="${2:-}"; shift 2 ;;
     --strict)  STRICT=1; shift ;;
+    --self-test) SELF_TEST=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
 
-# SELFTEST_TERMINAL_URL runs only the terminal verdict, so it needs no node, key or runtime.
-# SELFTEST_DISK_WROTE runs only the over-cap disk verdict against --host.
+# With --self-test, SELFTEST_TERMINAL_URL runs only the terminal verdict (no
+# node, key or runtime needed) and SELFTEST_DISK_WROTE only the over-cap disk
+# verdict against --host. Without it they are dropped: a real run is never cut short.
+if [ "${SELF_TEST:-}" = 1 ]; then
+  [ -n "${SELFTEST_TERMINAL_URL:-}${SELFTEST_DISK_WROTE:-}" ] \
+    || { echo "--self-test needs SELFTEST_TERMINAL_URL or SELFTEST_DISK_WROTE" >&2; exit 2; }
+else
+  unset SELFTEST_TERMINAL_URL SELFTEST_DISK_WROTE
+fi
 if [ -z "${SELFTEST_TERMINAL_URL:-}" ] && [ -z "${SELFTEST_DISK_WROTE:-}" ]; then
   [ -n "$RUNTIME" ] || { echo "--runtime is required" >&2; usage; exit 2; }
   [ -n "$KEY" ] || { echo "no API key: set PILLDROPS_API_KEY or pass --key" >&2; exit 2; }
