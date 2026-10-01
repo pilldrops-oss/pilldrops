@@ -300,6 +300,26 @@ func (s *Store) DeleteSandbox(ctx context.Context, id string) error {
 	return err
 }
 
+// ForgetSandbox deletes a sandbox and everything bound to it: chat links and
+// messages, cron jobs, config, integrations and agent webhooks, then the row.
+// Every destroy path must come here, not to DeleteSandbox alone, or the bound
+// rows outlive it; an orphaned cron job on a private sandbox leaked its command
+// text to the whole org. The agent mirror deliberately survives, bounded by
+// retention. Per-table cleanup is best-effort; the sandbox row is deleted last.
+func (s *Store) ForgetSandbox(ctx context.Context, id string) error {
+	for _, forget := range []func(context.Context, string) error{
+		s.DeleteChatLinksForSandbox,
+		s.DeleteChatMessagesForSandbox,
+		s.DeleteCronJobsForSandbox,
+		s.DeleteSandboxConfig,
+		s.DeleteSandboxIntegrations,
+		s.DeleteAgentWebhooksForSandbox,
+	} {
+		_ = forget(ctx, id)
+	}
+	return s.DeleteSandbox(ctx, id)
+}
+
 // SandboxesByOrg returns the live sandboxes for one org, id-ordered.
 func (s *Store) SandboxesByOrg(ctx context.Context, orgID string) ([]SandboxRecord, error) {
 	return s.querySandboxes(ctx, `WHERE org_id = ? ORDER BY id`, orgID)

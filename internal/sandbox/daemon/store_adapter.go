@@ -89,21 +89,9 @@ func (a StoreAdapter) SaveSandbox(ctx context.Context, rec PersistedSandbox) err
 	})
 }
 
-// DeleteSandbox forgets a sandbox and everything bound to it; every destroy
-// path funnels here. The agent mirror deliberately survives, bounded by
-// retention. Per-table cleanup is best-effort; the sandbox row is deleted last.
+// DeleteSandbox forgets a sandbox and everything bound to it; see store.ForgetSandbox.
 func (a StoreAdapter) DeleteSandbox(ctx context.Context, id string) error {
-	for _, forget := range []func(context.Context, string) error{
-		a.S.DeleteChatLinksForSandbox,
-		a.S.DeleteChatMessagesForSandbox,
-		a.S.DeleteCronJobsForSandbox,
-		a.S.DeleteSandboxConfig,
-		a.S.DeleteSandboxIntegrations,
-		a.S.DeleteAgentWebhooksForSandbox,
-	} {
-		_ = forget(ctx, id)
-	}
-	return a.S.DeleteSandbox(ctx, id)
+	return a.S.ForgetSandbox(ctx, id)
 }
 
 func (a StoreAdapter) RecordHistory(ctx context.Context, r SandboxHistory) error {

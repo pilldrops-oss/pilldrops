@@ -489,7 +489,7 @@ func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 					ExitState: store.StateLost, CreatedAt: rec.CreatedAt, DestroyedAt: now,
 					DurationSecs: now - rec.CreatedAt, VCPU: rec.VCPU, MemMiB: rec.MemMiB,
 				})
-				if err := st.DeleteSandbox(r.Context(), id); err != nil {
+				if err := st.ForgetSandbox(r.Context(), id); err != nil {
 					writeErr(w, http.StatusServiceUnavailable, "could not forget the lost sandbox: "+err.Error())
 					return
 				}

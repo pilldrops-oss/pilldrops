@@ -197,9 +197,12 @@ func (s *Server) mayActOnJobSandbox(r *http.Request, sandboxID string) bool {
 	if err != nil {
 		return false
 	}
-	// A job outlives its sandbox only until the destroy sweeps it; the org may clean it up.
+	// An orphan (its sandbox gone without the destroy sweeping it) may have
+	// been on a private sandbox, and nothing is left to say whether it was or
+	// whose it was: a job records no creator. Operators only, so its command
+	// text is not listed to the whole org.
 	if !found {
-		return true
+		return operatorPrincipal(r)
 	}
 	return sandbox.Visible(row.ID, row.Visibility, row.CreatedBy, keyIDOf(r), operatorPrincipal(r))
 }

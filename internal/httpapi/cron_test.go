@@ -228,3 +228,39 @@ func TestCronListHidesJobsOnAnotherMembersPrivateSandbox(t *testing.T) {
 		t.Errorf("an operator sees %d jobs, want 2", n)
 	}
 }
+
+// A job whose sandbox row is gone may have been on a private sandbox, and
+// nothing records whose: only an operator sees it, command text included.
+func TestCronOrphanIsOperatorOnly(t *testing.T) {
+	srv, st, _ := newTestServerWithStore(t)
+	k1, k2, kop := twoMembersAndAnOperator(t, st)
+	_, priv := do(t, "POST", srv.URL+"/v1/sandboxes", k1, `{"template":"base","visibility":"private"}`)
+	code, job := do(t, "POST", srv.URL+"/v1/cron", k1,
+		`{"sandbox_id":"`+str(priv, "id")+`","schedule":"0 9 * * *","command":"echo secret"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("cron create = %d (%v)", code, job)
+	}
+	// The row goes the way the old lost-sandbox destroy took it: alone.
+	if err := st.DeleteSandbox(t.Context(), str(priv, "id")); err != nil {
+		t.Fatal(err)
+	}
+	listed := func(key string) int {
+		_, out := do(t, "GET", srv.URL+"/v1/cron", key, "")
+		jobs, _ := out["jobs"].([]any)
+		return len(jobs)
+	}
+	for name, key := range map[string]string{"another member": k2, "the creator": k1} {
+		if n := listed(key); n != 0 {
+			t.Errorf("%s sees %d orphaned jobs, want 0", name, n)
+		}
+	}
+	if n := listed(kop); n != 1 {
+		t.Errorf("an operator sees %d orphaned jobs, want 1", n)
+	}
+	if code, _ := do(t, "DELETE", srv.URL+"/v1/cron/"+str(job, "id"), k2, ""); code == http.StatusOK {
+		t.Error("another member deleted an orphaned job")
+	}
+	if code, _ := do(t, "DELETE", srv.URL+"/v1/cron/"+str(job, "id"), kop, ""); code != http.StatusOK {
+		t.Errorf("operator delete of an orphan = %d, want 200", code)
+	}
+}
