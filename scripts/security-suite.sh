@@ -11,6 +11,8 @@ set -uo pipefail
 
 HOST="${SECSUITE_HOST:-http://localhost:18080}"
 KEY="${PILLDROPS_API_KEY:-}"
+# Node /metrics is node-wide, so only an operator key reads it.
+OPERATOR_KEY="${PILLDROPS_OPERATOR_KEY:-}"
 TEMPLATE="${SECSUITE_TEMPLATE:-probe}"
 # IMAGE creates from a Docker image instead of a template: the docker runtime
 # never reads templates/<id>/Dockerfile, so `--template probe` has no tools there.
@@ -29,6 +31,11 @@ usage: security-suite.sh --runtime <firecracker|docker|gvisor> [options]
                  runtime-specific and skip cleanly on the others.
   --host URL     API base (default $SECSUITE_HOST or http://localhost:18080)
   --key K        API key (default $PILLDROPS_API_KEY)
+  --operator-key K
+                 operator key for node /metrics (default
+                 $PILLDROPS_OPERATOR_KEY, then --key). If /metrics refuses
+                 it, the disk probe SKIPs when a write passes the cap, since
+                 only /metrics tells a limit the node detected from a silent one.
   --template T   probe template (default "probe"; see templates/probe/)
   --image TAG    create from a Docker image instead of a template. Use this on
                  the docker runtime, where templates/<id>/Dockerfile is not
@@ -44,6 +51,7 @@ while [ $# -gt 0 ]; do
     --runtime) RUNTIME="${2:-}"; shift 2 ;;
     --host)    HOST="${2:-}"; shift 2 ;;
     --key)     KEY="${2:-}"; shift 2 ;;
+    --operator-key) OPERATOR_KEY="${2:-}"; shift 2 ;;
     --template) TEMPLATE="${2:-}"; shift 2 ;;
     --image)   IMAGE="${2:-}"; shift 2 ;;
     --strict)  STRICT=1; shift ;;
@@ -53,7 +61,8 @@ while [ $# -gt 0 ]; do
 done
 
 # SELFTEST_TERMINAL_URL runs only the terminal verdict, so it needs no node, key or runtime.
-if [ -z "${SELFTEST_TERMINAL_URL:-}" ]; then
+# SELFTEST_DISK_WROTE runs only the over-cap disk verdict against --host.
+if [ -z "${SELFTEST_TERMINAL_URL:-}" ] && [ -z "${SELFTEST_DISK_WROTE:-}" ]; then
   [ -n "$RUNTIME" ] || { echo "--runtime is required" >&2; usage; exit 2; }
   [ -n "$KEY" ] || { echo "no API key: set PILLDROPS_API_KEY or pass --key" >&2; exit 2; }
   command -v jq >/dev/null || { echo "jq is required on the machine running this suite" >&2; exit 2; }
@@ -169,6 +178,36 @@ classify_ws_code() {
     *)      fail "$1" "$3 returned $2, want 401 — a token is not being required before the upgrade" ;;
   esac
 }
+
+DISK_CAP_MB=1024
+DISK_TRY_MB=3000
+
+# disk_over_cap <bytes-written>: a write past the cap fails only when the node
+# does not know, since a driver that accepts --storage-opt and ignores it must
+# be detected and reported. One function so the self-test runs this logic.
+disk_over_cap() {
+  local wrote_mb=$(( $1 / 1000000 )) metrics code unenf
+  metrics=$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer ${OPERATOR_KEY:-$KEY}" "$HOST/metrics")
+  code=${metrics##*$'\n'}
+  if [ "$code" != "200" ]; then
+    skip "exhaust.disk" "wrote $wrote_mb MB into a declared ${DISK_CAP_MB}MB cap, but node /metrics answered $code, so whether the node detected it is unknown; /metrics needs an operator key (--operator-key or PILLDROPS_OPERATOR_KEY)"
+    return
+  fi
+  unenf=$(printf '%s\n' "${metrics%$'\n'*}" | awk '/^sandboxd_storage_cap_unenforced_total /{print $2}' | tail -1)
+  if [ -n "$unenf" ] && [ "${unenf%.*}" -gt 0 ] 2>/dev/null; then
+    skip "exhaust.disk" "this host's storage driver cannot enforce the cap (wrote $wrote_mb MB of a declared ${DISK_CAP_MB}MB) — the node detected it at boot and reports sandboxd_storage_cap_unenforced_total=$unenf; a production node refuses to run in this state" na
+  else
+    fail "exhaust.disk" "wrote $wrote_mb MB into a declared ${DISK_CAP_MB}MB cap and the node reports NO unenforced-cap counter — the cap is silently ineffective"
+  fi
+}
+
+if [ -n "${SELFTEST_DISK_WROTE:-}" ]; then
+  echo "security-suite: disk over-cap SELF-TEST against ${HOST}"
+  disk_over_cap "$SELFTEST_DISK_WROTE"
+  printf '\nsummary  pass=%d fail=%d skip=%d\n' "$PASS" "$FAIL" "$SKIP"
+  [ "$FAIL" -gt 0 ] && exit 1
+  exit 0
+fi
 
 # Self-test: run the terminal verdict against any URL so the probe can be shown failing.
 if [ -n "${SELFTEST_TERMINAL_URL:-}" ]; then
@@ -695,8 +734,6 @@ section "6. Resource exhaustion is contained"
 # Disk: declare a small cap, try to exceed it. Direct IO on purpose: a buffered
 # write is OOM-killed by the memory cgroup long before the disk cap, which looks
 # like containment and is not.
-DISK_CAP_MB=1024
-DISK_TRY_MB=3000
 DISK_SBX=$(sb_create_sized "$DISK_CAP_MB")
 if [ -z "$DISK_SBX" ]; then
   skip "exhaust.disk" "could not create a sandbox with a declared ${DISK_CAP_MB}MB cap"
@@ -708,14 +745,7 @@ else
   elif [ -z "$WROTE" ]; then
     skip "exhaust.disk" "could not parse dd output: $(printf '%s' "$DISK" | tr -d '\r' | tail -1)"
   elif [ "$WROTE" -gt $(( DISK_CAP_MB * 1024 * 1024 * 12 / 10 )) ]; then
-    # Over the cap is only a failure when the node does not know: a driver that
-    # accepts --storage-opt and ignores it must be detected and reported.
-    UNENF=$(api GET /metrics | awk '/^sandboxd_storage_cap_unenforced_total /{print $2}' | tail -1)
-    if [ -n "$UNENF" ] && [ "${UNENF%.*}" -gt 0 ] 2>/dev/null; then
-      skip "exhaust.disk" "this host's storage driver cannot enforce the cap (wrote $(( WROTE / 1000000 )) MB of a declared ${DISK_CAP_MB}MB) — the node detected it at boot and reports sandboxd_storage_cap_unenforced_total=$UNENF; a production node refuses to run in this state" na
-    else
-      fail "exhaust.disk" "wrote $(( WROTE / 1000000 )) MB into a declared ${DISK_CAP_MB}MB cap and the node reports NO unenforced-cap counter — the cap is silently ineffective"
-    fi
+    disk_over_cap "$WROTE"
   else
     pass "exhaust.disk" "write stopped at $(( WROTE / 1000000 )) MB against a declared ${DISK_CAP_MB}MB cap"
   fi
