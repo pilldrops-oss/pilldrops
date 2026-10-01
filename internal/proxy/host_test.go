@@ -291,110 +291,31 @@ func TestHostRouter_EmptyDomainReturnsNext(t *testing.T) {
 	}
 }
 
-func TestParseAgentHost(t *testing.T) {
-	const domain = "sb.pilldrops.com"
-	cases := []struct {
-		name   string
-		host   string
-		wantID string
-		wantOK bool
-	}{
-		{"simple id", "agent-sb1.sb.pilldrops.com", "sb1", true},
-		{"hyphenated id", "agent-sb-1783-abcd.sb.pilldrops.com", "sb-1783-abcd", true},
-		{"id beginning with agent-", "agent-agent-x.sb.pilldrops.com", "agent-x", true},
-		{"not our domain", "agent-sb1.other.com", "", false},
-		{"deeper subdomain", "agent-sb1.extra.sb.pilldrops.com", "", false},
-		{"apex", "sb.pilldrops.com", "", false},
-		{"empty id", "agent-.sb.pilldrops.com", "", false},
-		{"bare label", "agent.sb.pilldrops.com", "", false},
-		{"different label", "agents-sb1.sb.pilldrops.com", "", false},
-		{"a port host is not an agent host", "8000-sb1.sb.pilldrops.com", "", false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			id, ok := ParseAgentHost(c.host, domain)
-			if ok != c.wantOK || id != c.wantID {
-				t.Fatalf("ParseAgentHost(%q) = (%q,%v), want (%q,%v)",
-					c.host, id, ok, c.wantID, c.wantOK)
-			}
-		})
-	}
-}
-
-func TestParseAgentHost_EmptyDomain(t *testing.T) {
-	if _, ok := ParseAgentHost("agent-sb1.sb.pilldrops.com", ""); ok {
-		t.Fatal("empty domain must never match")
-	}
-}
-
-func TestAgentHostIsCheckedBeforeThePortParse(t *testing.T) {
+// Agent-host routing is gone: agent-<id>.<domain> is now just an unrecognized
+// label like any other. ParseSandboxHost must refuse it safely (no panic on
+// the Atoi of "agent"), and the router must 404 rather than fall through —
+// the same outcome as any other host that names no sandbox and no slug.
+func TestAgentHostBehavesLikeAnyOtherUnknownLabel(t *testing.T) {
 	if _, _, ok := ParseSandboxHost("agent-sb1.sb.pilldrops.com", "sb.pilldrops.com"); ok {
-		t.Fatal("parseSandboxHost accepted an agent host; the two must not overlap")
+		t.Fatal("parseSandboxHost accepted \"agent-sb1\" as a port-id host")
 	}
-	res := &stubResolver{target: "127.0.0.1:1"}
-	var sawPath string
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { sawPath = r.URL.Path })
-	h := HostRouter("sb.pilldrops.com", res, next, alwaysAllowPreview)
-
-	req := httptest.NewRequest("GET", "http://x/v1/agent/status", nil)
-	req.Host = "agent-sb1.sb.pilldrops.com"
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code == http.StatusNotFound {
-		t.Fatalf("agent host 404'd: %s", rec.Body.String())
-	}
-	if sawPath != "/v1/sandboxes/sb1/agent/status" {
-		t.Fatalf("mux saw %q, want the rewritten node route", sawPath)
-	}
-	if res.gotID != "" {
-		t.Fatalf("the request was proxied to the sandbox (%q) instead of served by the node", res.gotID)
-	}
-}
-
-func TestAgentRequestPathRewritesOnlyWhatItShould(t *testing.T) {
-	for _, c := range []struct {
-		in, want string
-		ok       bool
-	}{
-		{"/v1/agent/status", "/v1/sandboxes/sb1/agent/status", true},
-		{"/v1/agent/turns/t1/interrupt", "/v1/sandboxes/sb1/agent/turns/t1/interrupt", true},
-		{"/v1/agent/events", "/v1/sandboxes/sb1/agent/events", true},
-		{"/agent/claim", "/agent/claim", true},
-		{"/v1/sandboxes", "", false},
-		{"/v1/sandboxes/sb1/exec", "", false},
-		{"/v1/keys", "", false},
-		{"/dashboard", "", false},
-		{"/", "", false},
-		// A different sandbox in the path must not outrank the hostname.
-		{"/v1/sandboxes/other/agent/status", "", false},
-	} {
-		got, ok := AgentRequestPath("sb1", c.in)
-		if ok != c.ok || got != c.want {
-			t.Errorf("AgentRequestPath(sb1, %q) = (%q,%v), want (%q,%v)",
-				c.in, got, ok, c.want, c.ok)
-		}
-	}
-}
-
-func TestAgentHostRefusesNonAgentPaths(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatalf("a non-agent path reached the node mux: %s", r.URL.Path)
+		t.Fatalf("an unknown label reached the node mux: %s", r.URL.Path)
 	})
 	h := HostRouter("sb.pilldrops.com", &stubResolver{}, next, alwaysAllowPreview)
 
-	for _, p := range []string{"/v1/sandboxes", "/v1/keys", "/dashboard", "/"} {
+	for _, p := range []string{"/v1/agent/status", "/v1/sandboxes", "/v1/keys", "/dashboard", "/"} {
 		req := httptest.NewRequest("GET", "http://x"+p, nil)
 		req.Host = "agent-sb1.sb.pilldrops.com"
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotFound {
-			t.Errorf("%s on the agent origin = %d, want 404", p, rec.Code)
+			t.Errorf("%s on \"agent-sb1\" = %d, want 404", p, rec.Code)
 		}
 	}
 }
 
-func TestAppPreviewStillWorksAlongsideTheAgentOrigin(t *testing.T) {
+func TestAppPreviewHandlesAnIDThatStartsWithAgentDash(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "app-saw:"+r.URL.Path)
 	}))

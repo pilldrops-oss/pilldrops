@@ -2766,17 +2766,6 @@ body.dark .dep-card:hover {
 .dep-upload-clear { font-size: 12px; padding: 6px 10px; }
 
 /* ── Tabbed Deploy config ─────────────────────────────────────────────────── */
-.dep-tabs {
-  display: flex; gap: 2px; margin: 18px 0 18px; border-bottom: 1px solid var(--line);
-  overflow-x: auto;
-}
-.dep-tab {
-  appearance: none; border: 0; background: none; font: inherit; font-size: 13.5px;
-  font-weight: 600; color: var(--sub); cursor: pointer; white-space: nowrap;
-  padding: 10px 14px 11px; border-bottom: 2px solid transparent; margin-bottom: -1px;
-}
-.dep-tab:hover { color: var(--ink); }
-.dep-tab.on { color: var(--ink); border-bottom-color: var(--green); }
 .dep-tabpanel { animation: depFade 0.15s ease; }
 @keyframes depFade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .dep-tabpanel { animation: none; } }
@@ -3854,364 +3843,11 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
   letter-spacing: -0.01em;
 }
 
-/* ── Build ───────────────────────────────────────────────────────────────── */
-.build-thread { display: flex; flex-direction: column; gap: 14px; margin-bottom: 18px; }
-.build-turn { max-width: 70ch; font-size: 14px; line-height: 1.55; }
-/* Your own messages sit on the right. This is the load-bearing cue for "who
-   said this", and it is deliberately POSITIONAL rather than tonal: measured in
-   a browser, the bubble's surface is 1.07:1 against the page in light and
-   1.14:1 in dark, so on background alone a reader cannot tell their own turn
-   from the assistant's without reading the words. (An earlier fix moved this
-   from --bg2 to --surface2 and its comment claimed that "reads as a bubble in
-   both themes" — it does not; 1.06:1 became 1.14:1, which is the same problem
-   with a different number. Both are far under the 3:1 WCAG 1.4.11 floor for a
-   UI element that conveys information.) The class is `build-turn-you`, NOT
-   `build-you`: naming the wrapper the same as the bubble is what previously
-   applied the padding and background twice. */
-.build-turn-you { align-self: flex-end; }
-.build-you {
-  display: inline-block;
-  padding: 7px 13px;
-  /* Flat corner at bottom-RIGHT — the conventional outgoing-message shape,
-     which only reads correctly because the wrapper right-aligns it above. */
-  border-radius: 14px 14px 3px 14px;
-  /* Kept as a secondary cue, not the primary one — see the note above. */
-  background: var(--surface2);
-  color: var(--ink);
-}
-.build-ask {
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: var(--surface);
-  padding: 14px 16px;
-}
-.build-ask p { margin: 0; }
-/* --sub, not --faint: --faint measures ~1.8:1 here, below even the 3:1
-   non-text floor — illegible for the hint that teaches what to say next. */
 .build-eg { color: var(--sub); font-size: 12.5px; margin-top: 4px !important; }
-.build-actions { display: flex; gap: 8px; margin-top: 12px; }
-.build-started {
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: var(--surface);
-  padding: 14px 16px;
-}
-.build-started p { margin: 0; }
-.build-started p + p { margin-top: 8px !important; }
-.build-input { display: flex; gap: 8px; }
-.build-input .pa-input { flex: 1; }
-
-/* --surface, not --bg2: same trap as .build-you/.build-ask above — --bg2 and
-   --bg are near-identical in dark mode (~1.06:1), so a --bg2 panel here would
-   read as no panel at all. --surface is the vetted surface-against-page
-   token already used by .build-ask/.build-started. */
-.build-running {
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: var(--surface);
-  padding: 10px 14px;
-  margin-bottom: 14px;
-}
-.build-running .field-label { margin-bottom: 6px; }
-.build-run-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 0;
-  text-decoration: none;
-  color: var(--ink);
-}
-.build-run-row + .build-run-row { border-top: 1px solid var(--line); }
-.build-run-tpl {
-  font-family: var(--mono);
-  font-size: 12px;
-  /* --sub, not --faint: --faint measures ~1.8:1 here — same banned token as
-     .build-eg above. */
-  color: var(--sub);
-}
-.build-run-id { font-family: var(--mono); font-size: 13px; color: var(--ink); }
-
-/* Repo plan: the "here's what I'll do" card's key/value list. Reuses the
-   surrounding .build-ask panel, so only the grid itself is new. */
-.build-plan { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 10px 0 0; }
-.build-plan dt {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  /* --sub, not --faint: --faint measures ~1.8:1 and is banned for text on
-     this page (see the .build-eg note). */
-  color: var(--sub);
-  padding-top: 3px;
-}
-.build-plan dd { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--ink); }
-.build-plan dd.build-plan-src { grid-column: 2; color: var(--sub); font-size: 11.5px; }
-
-/* ── Build: centred launcher that becomes a split ────────────────────────── */
-/* The page owns its own height so the composer can sit at the bottom of the
-   chat column rather than wherever the thread happens to end. */
-/* BOUNDED height, not a minimum — this is what makes the inner panes scroll.
-   With min-height the container simply grows to fit its content, so the
-   overflow-y:auto below never engages and the whole PAGE scrolls instead,
-   carrying the composer and the panel off the bottom of the screen.
-
-   The offset is measured, not guessed: --build-top is set from the element's
-   own position (see Build.tsx), because the header and padding above it are
-   not this file's to assume. The 116px is only a first-paint fallback.
-   100dvh rather than 100vh so mobile browser chrome does not push it under. */
-.build-wrap {
-  display: flex;
-  flex-direction: column;
-  height: calc(100dvh - var(--build-top, 116px));
-  min-height: 320px;
-  overflow: hidden;
-}
-.build-shell { display: flex; flex: 1; min-height: 0; gap: 18px; }
-
-/* Chat column. max-width, centred, in the UNSPLIT state — a 2000px-wide page
-   with a 70ch column pinned left is what made the old layout read as broken. */
-.build-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.build-shell:not(.build-split) .build-main { max-width: 760px; margin: 0 auto; width: 100%; }
-
-.build-hero { text-align: center; padding: 6vh 0 22px; }
-.build-hero-h { font-family: var(--mono); font-size: 27px; letter-spacing: -.025em; margin: 0 0 8px; }
-.build-hero-p { color: var(--sub); font-size: 14.5px; margin: 0 auto; max-width: 46ch; }
-/* The scope line: quieter than the pitch above it, but on the first screen —
-   a boundary discovered from a failed prompt is discovered too late. */
-.build-hero-scope { color: var(--sub); opacity: .75; font-size: 13px; margin: 6px auto 0; max-width: 52ch; }
-
-/* The elapsed/ETA readout while a launch verifies — data, not the sentence,
-   so it sits quieter than the words around it. */
-.build-wait-meta { color: var(--sub); font-size: 12.5px; white-space: nowrap; }
-
-/* The thread grows to fill, so the composer stays put instead of riding up
-   and down with the conversation's length. */
-/* Content sits at the BOTTOM of the available space, the way every chat does,
-   so a short conversation hugs the composer instead of stranding it below a
-   screen-height hole. justify-content, not a margin: the thread still scrolls
-   normally once it outgrows the space. */
-.build-thread {
-  flex: 1; min-height: 0; overflow-y: auto;
-  display: flex; flex-direction: column;
-}
-/* Bottom-anchoring via an auto margin on the FIRST child, NOT
-   justify-content: flex-end.
-   
-   They look identical while the conversation is short. Once it outgrows the
-   container they differ completely: with justify-content the overflow escapes
-   past the TOP edge and scrollHeight stays equal to clientHeight, so the
-   scrollbar never appears and everything above is permanently unreachable —
-   measured at 1,234px of conversation with no way to scroll back to it. An
-   auto margin collapses to zero once content fills the box, so it hugs the
-   composer when short and scrolls properly when long. */
-.build-thread > :first-child { margin-top: auto; }
-.build-shell:not(.build-split) .build-thread { flex: 0 0 auto; }
-
-/* ── the composer ── */
-.build-composer { padding-top: 12px; }
-.build-cbox {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.build-cbox:focus-within { border-color: var(--primbg); }
-.build-ta {
-  border: 0; background: transparent; color: var(--ink);
-  font: inherit; font-size: 14.5px; line-height: 1.5;
-  resize: none; outline: none; width: 100%;
-  /* Height is set from scrollHeight in JS; this is only the floor. */
-  min-height: 24px; max-height: 220px;
-}
-.build-ta::placeholder { color: var(--dim); }
-.build-cbar { display: flex; align-items: center; gap: 9px; }
-.build-chint { font-size: 11px; color: var(--dim); margin-right: auto; }
-
-.build-exs { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin-top: 12px; }
-.build-ex {
-  border: 1px solid var(--line); border-radius: 999px;
-  padding: 5px 12px; font-size: 12.5px;
-  /* --sub, not --faint: --faint measures ~1.8:1 and is banned for text here. */
-  color: var(--sub); background: var(--surface); cursor: pointer;
-}
-.build-ex:hover { color: var(--ink); border-color: var(--primbg); }
-
-/* ── live panel ── */
-.build-live {
-  width: 34%; min-width: 300px; max-width: 400px; flex: none;
-  border: 1px solid var(--line); border-radius: var(--r);
-  background: var(--surface); display: flex; flex-direction: column;
-  /* Stretch, not flex-start: a short card floating at the top of a tall
-     column reads as detached from the conversation it belongs to. */
-  align-self: stretch; min-height: 0;
-}
-.build-live-head {
-  display: flex; align-items: center; gap: 9px;
-  padding: 11px 14px; border-bottom: 1px solid var(--line);
-  font-size: 13px;
-}
-.build-live-id { font-family: var(--mono); font-size: 11px; color: var(--sub); margin-left: auto; }
-.build-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primbg); flex: none; }
-.build-dot-wait { background: var(--sub); }
-.build-dot-warn { background: var(--sub); }
-.build-live-body { padding: 14px; flex: 1; min-height: 120px; }
-.build-live-step { margin: 0; font-size: 13.5px; color: var(--ink); }
-.build-live-frame { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.build-live-url {
-  background: var(--surface2); padding: 6px 10px;
-  font-family: var(--mono); font-size: 11px; color: var(--sub);
-  border-bottom: 1px solid var(--line); overflow-wrap: anywhere;
-}
-.build-live-note { padding: 16px 12px; text-align: center; font-size: 12.5px; color: var(--sub); }
-.build-live-foot {
-  border-top: 1px solid var(--line); padding: 10px 14px;
-  display: flex; gap: 14px; font-size: 12.5px;
-}
-.build-live-empty {
-  padding: 30px 18px; text-align: center; font-size: 12.5px; color: var(--sub);
-}
-
-/* Below this the split has no room to be two columns — the panel goes under
-   the chat rather than shrinking to a useless sliver. */
-@media (max-width: 900px) {
-  .build-shell.build-split { flex-direction: column; }
-  .build-live { width: auto; max-width: none; align-self: stretch; }
-}
-
-/* Centred → split moves the chat column left to make room for the panel. It
-   cannot be both centred when alone and left-aligned when split without
-   shifting, so the shift is animated rather than denied: as motion it reads
-   as the panel pushing the conversation aside, whereas as an instant cut it
-   reads as landing on a different page. */
-.build-main { transition: max-width .28s ease, margin .28s ease; }
-.build-live { animation: build-live-in .28s ease both; }
-@keyframes build-live-in { from { opacity: 0; transform: translateX(10px); } }
-@media (prefers-reduced-motion: reduce) {
-  .build-main { transition: none; }
-  .build-live { animation: none; }
-}
-
-/* Panel: the running list and the selected sandbox's detail. */
-.build-live-head { display: flex; align-items: center; padding: 10px 13px; border-bottom: 1px solid var(--line); }
-.build-live-x {
-  margin-left: auto; border: 0; background: transparent; color: var(--sub);
-  cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px;
-}
-.build-live-x:hover { color: var(--ink); }
-.build-live-rows { border-bottom: 1px solid var(--line); max-height: 34vh; overflow-y: auto; flex: none; }
-.build-row {
-  display: flex; align-items: center; gap: 9px; width: 100%;
-  padding: 8px 13px; border: 0; border-left: 2px solid transparent;
-  background: transparent; cursor: pointer; text-align: left; font: inherit; font-size: 12.5px;
-  color: var(--ink);
-}
-.build-row:hover { background: var(--surface2); }
-.build-row-on { background: var(--prim-soft); border-left-color: var(--primbg); }
-.build-row-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.build-row-tpl { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--sub); }
-.build-dot-idle { background: var(--sub); }
-.build-live-det { padding: 13px; flex: 1; min-height: 0; overflow-y: auto; }
-.build-det-h { font-family: var(--mono); font-size: 12.5px; margin: 0 0 3px; }
-.build-det-st { font-size: 12.5px; color: var(--sub); margin: 0 0 11px; }
-.build-det-acts { display: flex; flex-wrap: wrap; gap: 7px; }
-.build-det-acts .btn { font-size: 11.5px; padding: 6px 11px; }
-
-/* Shown in place of the list when the panel is collapsed — enough to know
-   something is there, not a second copy of it. */
-.build-collapsed { font-size: 12.5px; color: var(--sub); margin: 10px 0 0; }
 .build-linkish {
   border: 0; background: transparent; padding: 0; font: inherit;
   color: var(--primbg); cursor: pointer; text-decoration: underline;
 }
-
-/* The line between a restored transcript and this visit. Not decoration: a
-   restored "is up and serving" is otherwise indistinguishable from one written
-   a moment ago, which is a stale false green — harder to spot than an
-   unverified one because nothing about it looks wrong. */
-.build-divider {
-  display: flex; align-items: center; gap: 10px;
-  margin: 4px 0; font-size: 11.5px; color: var(--sub);
-}
-.build-divider::before, .build-divider::after {
-  content: ''; flex: 1; height: 1px; background: var(--line);
-}
-
-/* Done-or-not, readable at a glance rather than inferred from a sentence. */
-.build-badge {
-  display: inline-block; padding: 3px 10px; border-radius: 999px;
-  font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em;
-  border: 1px solid var(--line); margin-bottom: 11px;
-}
-.build-badge-ok { background: var(--prim-soft); border-color: var(--primbg); color: var(--ink); }
-/* Neutral, not red: "unconfirmed" means we observed nothing, not that the
-   user's app failed. Colouring our own blind spot as their error would be the
-   false green pointed the other way. */
-.build-badge-idle { background: var(--surface2); color: var(--sub); }
-.build-badge-bad { background: var(--surface2); border-color: var(--sub); color: var(--ink); }
-
-/* An expiry inside the last five minutes. Uses --amber, the same tone every
-   other "act soon" hint on the dashboard uses, so the warning reads as part of
-   the system rather than as a one-off. The word "in" carries the meaning on
-   its own — colour only reinforces it, never replaces it. */
-.build-expiring { color: var(--amber); }
-.build-det-meta { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0 0 12px; }
-.build-det-meta dt {
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
-  text-transform: uppercase; color: var(--sub); padding-top: 2px;
-}
-.build-det-meta dd {
-  margin: 0; font-family: var(--mono); font-size: 11px; color: var(--ink);
-  overflow-wrap: anywhere;
-}
-
-/* Layout toggle — the mockup put this in the top bar; it lives at the top of
-   the page's own content so Build owns its controls rather than reaching into
-   the shared shell. */
-/* space-between since R2-8: conversations live on the left, the layout
-   segment keeps the right. */
-.build-toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding-bottom: 10px; }
-
-.build-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.build-seg button {
-  border: 0; background: transparent; padding: 4px 11px;
-  font-family: var(--mono); font-size: 11.5px; color: var(--sub); cursor: pointer;
-}
-.build-seg button.on { background: var(--prim-soft); color: var(--ink); }
-
-/* Panel tabs */
-.build-live-tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); }
-.build-tab {
-  border: 0; background: transparent; padding: 5px 10px; border-radius: 7px 7px 0 0;
-  font-family: var(--mono); font-size: 11px; color: var(--sub); cursor: pointer; text-transform: capitalize;
-}
-.build-tab-on { background: var(--bg); color: var(--ink); }
-.build-row-age { font-family: var(--mono); font-size: 10px; color: var(--sub); flex: none; }
-.build-row-tpl { margin-left: auto; }
-.build-setup {
-  margin: 6px 0 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
-  background: var(--bg); font-family: var(--mono); font-size: 10.5px; line-height: 1.6;
-  color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow-y: auto;
-}
-.build-logs { max-height: 320px; }
-.build-embed { width: 100%; height: 340px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
-.build-det-acts { border-top: 1px solid var(--line); padding: 10px 13px; }
-
-/* Composer: attach control and the "aimed at a sandbox" banner */
-.build-attach {
-  border: 1px solid var(--line); border-radius: 7px; width: 26px; height: 26px;
-  display: grid; place-items: center; color: var(--sub); cursor: pointer;
-  background: var(--surface); font-size: 13px; flex: none;
-}
-.build-attach:hover { border-color: var(--primbg); color: var(--ink); }
-.build-target {
-  margin: 0 0 8px; font-size: 12.5px; color: var(--sub);
-  border: 1px solid var(--line); border-left: 3px solid var(--primbg);
-  border-radius: 8px; padding: 8px 11px; background: var(--surface);
-}
-.build-target b { color: var(--ink); }
 
 
 /* ── Spend summary (Usage) ─────────────────────────────────────────────────
@@ -4332,23 +3968,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
 }
 
 
-/* ── First-screen shapes ───────────────────────────────────────────────────
-   Three labelled kinds of input, replacing five unlabelled chips that mixed a
-   reliable path with ones that failed. The label is the point; the example is
-   the illustration, so the label leads. */
-.build-shapes { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 14px; }
-.build-shape {
-  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
-  padding: 9px 13px; border: 1px solid var(--line); border-radius: var(--r);
-  background: var(--surface); cursor: pointer; text-align: left;
-}
-.build-shape:hover { border-color: var(--sub); }
-.build-shape-l { font-size: 12px; font-weight: 600; }
-.build-shape-e { font-family: var(--mono); font-size: 11.5px; color: var(--sub); }
-
-@media (max-width: 560px) { .build-shapes { flex-direction: column; } .build-shape { width: 100%; } }
-
-
 /* ── Architecture view ─────────────────────────────────────────────────────
    Status is shape and LABEL first — every node writes its state in words —
    with colour only reinforcing. A diagram is an efficient way to tell a
@@ -4430,20 +4049,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
   white-space: pre-wrap; word-break: break-word;
 }
 
-/* ── Sticky composer on mobile ─────────────────────────────────────────────
-   Desktop uses a fixed-height column with internal scroll, so the composer is
-   always in view. Mobile had position:static — measured with one conversation,
-   the textarea sat at y=1455px in an 844px viewport, so a chat-first product
-   made you scroll a screen and a half to type. */
-@media (max-width: 900px) {
-  .build-composer {
-    position: sticky; bottom: 0; z-index: 5;
-    background: var(--bg); padding-bottom: 8px;
-    border-top: 1px solid var(--line); margin-top: 8px;
-  }
-}
-
-
 /* ── Plan diff ─────────────────────────────────────────────────────────────
    On a revision the question is not "what is this plan" but "what did my
    message just do", so the change leads and the full service list follows. */
@@ -4466,7 +4071,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
    page — on the one control the whole product is built around. 16px is the
    threshold, not a preference. */
 @media (max-width: 900px) {
-  .build-ta,
   .pa-input,
   .dep-quick-in,
   input[type='text'],
@@ -4679,9 +4283,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
 .recipe-title { font-weight: 600; }
 .recipe-outcome { color: var(--sub); font-size: 13px; line-height: 1.5; }
 .recipe-prompt { color: var(--dim); font-size: 11.5px; }
-.build-recipes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; justify-content: center; }
-.build-recipes-l { color: var(--sub); font-size: 12.5px; }
-.build-recipes-all { font-size: 12.5px; white-space: nowrap; }
 .advice-steps { margin: 6px 0 10px 0; padding-left: 22px; display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; }
 
 /* ── Integration recipes ────────────────────────────────────────────────── */
@@ -4761,15 +4362,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
    composer beneath. Padding moves off the card and into the pieces so the
    pane can run edge to edge. */
 .advisor-chat { display: flex; flex-direction: column; gap: 0; padding: 0; overflow: hidden; }
-/* The advisor turn takes the page: full thread width, the card itself a
-   centered column filling the viewport under the header — a chat SURFACE,
-   not a reply squeezed to 70ch with the composer glued to the last line. */
-.build-turn-full { max-width: none; width: 100%; }
-.build-turn-full .advisor-chat {
-  width: min(100%, 880px); margin: 0 auto;
-  height: clamp(480px, calc(100vh - 250px), 960px);
-}
-.build-turn-full .advisor-msgs { flex: 1 1 auto; max-height: none; }
 .advisor-head {
   display: flex; align-items: baseline; gap: 8px;
   padding: 11px 16px; border-bottom: 1px solid var(--line);
@@ -4852,8 +4444,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
 .file-tab:hover { color: var(--ink); background: var(--hover); }
 .file-tab.on { color: var(--ink); border-bottom-color: var(--green); background: var(--surface); }
 .file-panel .ir-snippet.file-body { margin: 0; border: none; border-radius: 0; max-height: 320px; overflow: auto; }
-.file-panel .build-actions { padding: 8px 12px; margin: 0; border-top: 1px solid var(--line); background: var(--surface2); flex-wrap: wrap; }
-.file-panel .build-actions .btn { white-space: nowrap; }
 .file-panel .lm-error, .file-panel .build-eg { padding: 6px 12px 10px; margin: 0 !important; }
 
 /* The editor overlay: a real reading/tweaking surface for the generated
@@ -4902,62 +4492,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
   .file-editor-list { flex: 0 0 auto; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); padding: 0; }
   .file-item { width: auto; white-space: nowrap; }
 }
-/* ── Shared workstation utilities ────────────────────────────────────────────
-   These class names were already in use across the agent panel and approval
-   cards with no rules behind them, so every "muted" note rendered at full
-   emphasis and every warning looked like body text. Defined once here rather
-   than per-component: the point of a muted note is that it is quieter than what
-   surrounds it, which only holds if there is one definition of quieter. */
-.ws-muted { color: var(--sub); font-size: 12.5px; line-height: 1.55; }
-.ws-warn { color: var(--amber); font-size: 12.5px; line-height: 1.55; }
-.ws-err { color: var(--slate); font-size: 12.5px; line-height: 1.55; }
-.ws-ok { color: var(--green); font-size: 12.5px; }
-.ws-btn {
-  padding: 7px 13px; border: 1px solid var(--line2); border-radius: 7px;
-  background: var(--surface); color: var(--ink); font-size: 13px; cursor: pointer;
-}
-.ws-btn:hover:not(:disabled) { border-color: var(--ink); }
-.ws-btn:disabled { opacity: 0.55; cursor: default; }
-.ws-btn-sm {
-  padding: 3px 9px; border: 1px solid var(--line); border-radius: 6px;
-  background: transparent; color: var(--sub); font-size: 11.5px; cursor: pointer;
-}
-.ws-btn-sm:hover { color: var(--ink); border-color: var(--line2); }
-/* Visually hidden but announced. Used where a glyph carries the meaning — a bare
-   "✓" announces as "check" or as nothing, which is not the same as knowing the
-   answer to a question about a security boundary. */
-.ws-sr-only {
-  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
-}
-
-@keyframes ws-skel { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.85; } }
-
-/* ── Sub-tab strip (§11.2) ───────────────────────────────────────────────────
-   Quieter than the group strip above it: two rows of equal weight read as two
-   competing navigations, and the user cannot tell which one they are inside. */
-.tab-bar-sub {
-  margin-top: -1px; padding-left: 10px;
-  background: var(--bg2, transparent);
-}
-.tab-bar-sub .tab-item { font-size: 12.5px; padding-top: 7px; padding-bottom: 7px; }
-
-/* Auto-open countdown (§11.7). Visible and cancellable — a page that navigates on
-   its own without saying so reads as a loss of control even when it is right. */
-.dp-autoopen {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 9px 13px; margin-bottom: 10px; font-size: 12.5px;
-  border: 1px solid var(--green); border-radius: 8px; background: var(--greensoft);
-}
-
-/* A destructive action reads as one before it is clicked, not after. */
-.ws-danger {
-  padding: 7px 13px; border: 1px solid var(--slate); border-radius: 7px;
-  background: transparent; color: var(--slate); font-size: 13px; cursor: pointer;
-}
-.ws-danger:hover:not(:disabled) { background: var(--slate); color: var(--primfg); }
-.ws-danger:disabled { opacity: 0.55; cursor: default; }
-
 /* ── Sandbox terminal (native xterm, not an iframe) ─────────────────────────
    The Terminal tab renders its own xterm over a WebSocket, so unlike the
    preview it is real DOM in this page and gets styled like the rest of the
