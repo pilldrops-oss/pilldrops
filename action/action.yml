@@ -13,7 +13,7 @@ inputs:
     description: 'Your PillDrops server, e.g. https://sandbox.example.com.'
     required: true
   template:
-    description: 'Template to boot (base, playwright, code-interpreter, loadtest, android, …).'
+    description: 'Template to boot (base, playwright, code-interpreter, node, …).'
     required: false
     default: 'base'
   run:

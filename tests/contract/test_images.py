@@ -81,44 +81,6 @@ def test_playwright_template_node_oneliner(sandbox_factory):
 
 
 @pytest.mark.parity
-@pytest.mark.slow
-def test_mysql_template_boots(sandbox_factory):
-    """mysql:8 must boot and answer a query under the default memory clamp."""
-    import time
-    sb = sandbox_factory(template="mysql", timeout=300)
-    deadline = time.time() + 90
-    while time.time() < deadline:
-        r = sb.exec('mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N -e "select 42"')
-        if "42" in r.stdout:
-            return
-        time.sleep(6)
-    pytest.fail("mysql never answered select 42 within 90s (D-16)")
-
-
-@pytest.mark.guard
-@pytest.mark.slow
-def test_service_dbs_boot(sandbox_factory):
-    """Image-backed DBs must boot under the default memory clamp."""
-    import time
-    checks = {
-        "postgres": 'pg_isready -q && echo PGOK',
-        "redis": 'redis-cli ping',
-        "mongodb": 'mongosh --quiet --eval "db.runCommand({ping:1}).ok" 2>/dev/null || '
-                   'mongo --quiet --eval "db.runCommand({ping:1}).ok" 2>/dev/null',
-    }
-    wants = {"postgres": "PGOK", "redis": "PONG", "mongodb": "1"}
-    for tpl, cmd in checks.items():
-        sb = sandbox_factory(template=tpl, timeout=300)
-        ok = False
-        for _ in range(10):
-            if wants[tpl] in sb.exec(cmd).stdout:
-                ok = True
-                break
-            time.sleep(6)
-        assert ok, f"{tpl} did not come up (D-16 regression?)"
-
-
-@pytest.mark.parity
 def test_catalog_ram_matches_reality(sandbox):
     r = _run(["pilldrops", "--json", "templates"], timeout=30)
     catalog = {t["id"]: t for t in json.loads(r.stdout)}

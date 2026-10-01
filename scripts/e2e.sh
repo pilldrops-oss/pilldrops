@@ -112,15 +112,6 @@ ckc "cacheable"                      "max-age=300" "$(curl -s -D- -o /dev/null $
 ck "env VALUES redacted"             "clean" "$(python3 -c "
 import json;d=json.load(open('$WORK/pub.json'))
 print('LEAK' if [1 for t in d for e in (t.get('env') or []) if e.get('value')] else 'clean')" 2>/dev/null)"
-ck "env NAMES kept (UI needs them)"  "kept" "$(python3 -c "
-import json;d=json.load(open('$WORK/pub.json'))
-print('kept' if any(e.get('name') for t in d for e in (t.get('env') or [])) else 'STRIPPED')" 2>/dev/null)"
-missing=""
-for t in postgres redis mysql mongodb kafka; do
-  grep -q "\"id\":\"$t\"" "$WORK/pub.json" || missing="$missing $t"
-done
-ck "service templates in the catalogue" "all" "$([ -z "$missing" ] && echo all || echo "missing:$missing")"
-
 sec "Threads — 404'd through the control plane before the migration"
 TID=$(curl -s -X POST "$O/v1/threads" -H "Authorization: Bearer $FLEET_KEY" \
       -H 'Content-Type: application/json' -d '{}' | jq_ ";print(json.load(sys.stdin).get('id',''))")

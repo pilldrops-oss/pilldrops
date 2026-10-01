@@ -42,7 +42,7 @@ the sandbox running so the preview URL stays live. Requires `port`.
 | Input | Default | Notes |
 |---|---|---|
 | `api-key` | — | **Required.** Store it as a repository secret. |
-| `template` | `base` | `playwright`, `code-interpreter`, `loadtest`, `android`, `node-20`, … |
+| `template` | `base` | `playwright`, `code-interpreter`, `docker`, `node-20`, … |
 | `run` | — | Command to execute. Mutually exclusive with `serve`. |
 | `serve` | — | Command that starts a server. Needs `port`. Implies `keep: true`. |
 | `path` | `.` | File or directory to upload. `none` skips the upload. |
@@ -95,16 +95,16 @@ jobs:
           port: 8000        # report + trace + video at the preview URL
 ```
 
-Load-test a staging API and fail the build on a latency regression:
+Smoke-test a staging API and fail the build on a bad response:
 
 ```yaml
 - uses: pilldrops/action@v1
   with:
     api-key: ${{ secrets.PILLDROPS_API_KEY }}
     api-url: ${{ vars.PILLDROPS_API_URL }}
-    template: loadtest
+    template: base
     path: none
-    run: pdload https://staging.example.com/health --vus 50 --duration 60s
+    run: curl -sf https://staging.example.com/health
 ```
 
 Comment the preview URL on the pull request:

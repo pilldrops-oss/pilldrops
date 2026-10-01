@@ -3,12 +3,6 @@ import { PILLDROPS_VERSION, type PilldropsConfig } from './pilldropsConfig'
 import { type ComposedBody, type CustomEnv, type Kind, shellQuote, startsServer, requiredRuntime, resolveLifetime } from './launchKinds'
 import { START_FILE, universalStartBody } from './launchStarters'
 
-// Verdict templates run their check on boot; the target arrives as $PD_TARGET_URL.
-const VERDICT_RUNNER: Record<string, string> = {
-  loadtest: 'pdload "$PD_TARGET_URL"',
-  security: 'pdscan --url "$PD_TARGET_URL"',
-}
-
 // composeCreateBody assembles the per-kind create-request slice from the form state.
 export function composeCreateBody(cfg: {
   tpl: Template
@@ -23,8 +17,6 @@ export function composeCreateBody(cfg: {
   timeoutInput?: string
   /** Seconds; empty means keep-alive default. */
   idleInput?: string
-  /** The manifest primary input's value (verdict URL/target). */
-  primaryValue?: string
 }): ComposedBody {
   const {
     tpl,
@@ -37,23 +29,9 @@ export function composeCreateBody(cfg: {
     previewPort,
     timeoutInput = '',
     idleInput = '',
-    primaryValue = '',
   } = cfg
   const portNum = port ? parseInt(port, 10) : undefined
   const life = resolveLifetime(startsServer(kind, start), timeoutInput, idleInput)
-
-  // Verdict templates run their check on boot. The target travels as an env var
-  // so user input is never shell-quoted; a blank target leaves the built-in server.
-  const verdictRunner =
-    tpl.kind === 'verdict' && primaryValue.trim() ? (VERDICT_RUNNER[tpl.id] ?? '') : ''
-  if (verdictRunner) {
-    return {
-      env: [...envList, `PD_TARGET_URL=${primaryValue.trim()}`],
-      start: `sh -c '${verdictRunner}; exec /usr/local/bin/start.sh'`,
-      port: portNum ?? previewPort,
-      ...resolveLifetime(true, timeoutInput, idleInput),
-    }
-  }
 
   if (kind === 'service') {
     return { env: envList.length ? envList : undefined, start: undefined, port: portNum, ...life }

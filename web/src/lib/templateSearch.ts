@@ -4,25 +4,12 @@ import type { Template } from '../types'
 // aliases: "e2e" should find Playwright but is not a valid template id.
 const SYNONYMS: Record<string, string[]> = {
   playwright: ['e2e', 'end-to-end', 'cypress', 'puppeteer', 'selenium', 'browser testing', 'ui test'],
-  postgres: ['postgresql', 'pg', 'db', 'sql', 'database', 'relational'],
-  mysql: ['mariadb', 'db', 'sql', 'database', 'relational'],
-  mongodb: ['mongo', 'db', 'nosql', 'document database'],
-  redis: ['cache', 'kv', 'key value', 'db'],
-  kafka: ['queue', 'streaming', 'events', 'pubsub', 'broker'],
   'code-interpreter': ['jupyter', 'notebook', 'pandas', 'data science', 'python'],
   desktop: ['gui', 'vnc', 'computer use', 'fluxbox'],
   browser: ['chromium', 'chrome', 'headless', 'scraping'],
-  nextjs: ['next', 'react', 'ssr', 'frontend'],
-  fastapi: ['api', 'rest', 'uvicorn', 'python api'],
   node: ['nodejs', 'typescript', 'ts', 'javascript', 'js'],
   go: ['golang'],
   rust: ['cargo', 'rustc'],
-  claude: ['claude code', 'anthropic', 'ai agent', 'coding agent'],
-  codex: ['openai', 'gpt', 'ai agent', 'coding agent'],
-  research: ['deep research', 'report', 'investigate'],
-  'web-scraper': ['scraper', 'scraping', 'crawl', 'beautifulsoup'],
-  loadtest: ['k6', 'load', 'stress', 'benchmark', 'performance'],
-  security: ['scan', 'pentest', 'vulnerability', 'audit'],
 }
 
 // One-edit Damerau-Levenshtein: a substitution, an insertion/deletion, or an

@@ -59,8 +59,9 @@ func execPathPrefix(user string) string {
 }
 
 // privilegeHandover is the shell prologue root PID 1 runs before dropping: it
-// chowns the workspace and /root/app (the nextjs starter) to user and nothing
-// else. Also fixes up root-owned workspaces in snapshots taken before the drop.
+// chowns the workspace and /root/app (a baked-in starter app, if present) to
+// user and nothing else. Also fixes up root-owned workspaces in snapshots
+// taken before the drop.
 func privilegeHandover(user string) string {
 	if user == "" {
 		return ""

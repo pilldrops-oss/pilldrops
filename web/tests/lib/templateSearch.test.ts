@@ -19,7 +19,7 @@ describe('scoreTemplate', () => {
   it('finds a template through a synonym it does not literally contain', () => {
     // "e2e" appears nowhere in the Playwright entry's own text.
     expect(scoreTemplate(t('playwright', ['browser']), 'e2e')).toBeGreaterThan(0)
-    expect(scoreTemplate(t('postgres', ['database']), 'db')).toBeGreaterThan(0)
+    expect(scoreTemplate(t('code-interpreter', ['sdk']), 'jupyter')).toBeGreaterThan(0)
   })
 
   it('tolerates a one-character typo on a reasonably long query', () => {

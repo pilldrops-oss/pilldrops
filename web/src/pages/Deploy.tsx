@@ -461,7 +461,6 @@ export default function Deploy() {
             previewPort: cfg.previewPort,
             timeoutInput: effLifetime.timeoutInput,
             idleInput: effLifetime.idleInput,
-            primaryValue: cfg.primaryValue,
           })
         : null,
     [
@@ -474,7 +473,6 @@ export default function Deploy() {
       cfg.envList,
       cfg.previewPort,
       effLifetime,
-      cfg.primaryValue,
     ],
   )
 

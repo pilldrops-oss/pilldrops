@@ -146,14 +146,6 @@ printf '{"plan":"scale"}' > /tmp/e2e-all/pl.json
   && ok "legacy scale still contact-sales" || bad "scale became self-serve"
 [ "$(code $B/v1/billing -H "$H")" = 200 ] && ok "billing summary" || bad "billing summary"
 
-sec "E. Web chat"
-r=$(curl -s -X POST $B/v1/sandboxes/$SB/chat -H "$H" -H 'Content-Type: application/json' -d '{"message":"hello"}')
-echo "$r" | grep -q "chat-capable" && ok "non-agent template explains itself" || bad "chat error unclear: $r"
-m=$(curl -s $B/v1/sandboxes/$SB/chat -H "$H" | jq_ "print(len(d.get('messages',[])))")
-[ "$m" -ge 2 ] && ok "transcript records both turns ($m)" || bad "transcript ($m msgs)"
-[ "$(code -X POST $B/v1/sandboxes/$SB/chat -H "$H" -H 'Content-Type: application/json' -d '{"message":"  "}')" = 400 ] \
-  && ok "empty message rejected" || bad "empty message accepted"
-
 sec "F. Scheduled runs"
 J=$(curl -s -X POST $B/v1/cron -H "$H" -H 'Content-Type: application/json' \
   -d "{\"sandbox_id\":\"$SB\",\"schedule\":\"0 9 * * *\",\"command\":\"echo cron-fired\",\"timezone\":\"Europe/London\"}" \
@@ -169,34 +161,6 @@ printf '{"sandbox_id":"%s","schedule":"nonsense","command":"x"}' "$SB" > /tmp/e2
 [ "$(code -X POST $B/v1/cron/$J/toggle -H "$H" -H 'Content-Type: application/json' -d '{"enabled":false}')" = 200 ] \
   && ok "toggle" || bad "toggle"
 [ "$(code -X DELETE $B/v1/cron/$J -H "$H")" = 200 ] && ok "delete" || bad "delete"
-
-sec "G. Integrations (MCP)"
-ncat=$(curl -s $B/v1/integrations -H "$H" | jq_ "print(len(d.get('servers',[])))")
-[ "$ncat" -ge 8 ] && ok "catalogue served ($ncat servers)" || bad "catalogue ($ncat)"
-
-ASB=$(curl -s -X POST $B/v1/sandboxes -H "$H" -H 'Content-Type: application/json' -d '{"template":"node"}' | jq_ "print(d.get('id',''))")
-[ -n "$ASB" ] && ok "agent workstation created" || bad "agent workstation"
-cli=$(curl -s -X POST $B/v1/sandboxes/$ASB/exec -H "$H" -H 'Content-Type: application/json' \
-  -d '{"cmd":"which claude || echo MISSING"}' | jq_ "print(d.get('stdout','').strip())")
-case "$cli" in */claude) ok "agent CLI installed ($cli)";; *) bad "agent CLI missing";; esac
-
-p=$(curl -s -X POST $B/v1/sandboxes/$ASB/integrations -H "$H" -H 'Content-Type: application/json' \
-  -d '{"servers":["github","playwright"],"env":{"GITHUB_TOKEN":"ghp_e2e"}}' | jq_ "print(d.get('path',''))")
-[ "$p" = "~/.claude.json" ] && ok "config targeted at user scope" || bad "config path '$p'"
-
-echo '{"cmd":"claude mcp list 2>&1 | head -6","timeout":150}' > /tmp/e2e-all/mcp.json
-conn=$(curl -s -X POST $B/v1/sandboxes/$ASB/exec -H "$H" -H 'Content-Type: application/json' --data-binary @/tmp/e2e-all/mcp.json | jq_ "print(d.get('stdout',''))")
-c1=$(echo "$conn" | grep -c "Connected")
-[ "$c1" -ge 2 ] && ok "REAL AGENT reports $c1 servers Connected" || bad "agent sees no connected servers: $(echo $conn|head -c 120)"
-
-curl -s -X POST $B/v1/sandboxes/$ASB/integrations -H "$H" -H 'Content-Type: application/json' -d '{"servers":["playwright"]}' >/dev/null
-conn2=$(curl -s -X POST $B/v1/sandboxes/$ASB/exec -H "$H" -H 'Content-Type: application/json' --data-binary @/tmp/e2e-all/mcp.json | jq_ "print(d.get('stdout',''))")
-echo "$conn2" | grep -q "github" && bad "deselected server survived" || ok "deselect removes it from the agent"
-
-sec "H. Phone pairing"
-cl=$(curl -s -X POST $B/v1/sandboxes/$SB/chat-link -H "$H" -H 'Content-Type: application/json' -d '{}' | jq_ "print(d.get('code',''))")
-[ -n "$cl" ] && ok "one-time pairing code minted" || bad "chat-link"
-[ "$(code -X DELETE $B/v1/sandboxes/$SB/chat-link -H "$H")" = 200 ] && ok "revoke pairing" || bad "revoke"
 
 sec "I. Security"
 [ "$(code $B/v1/sandboxes)" = 401 ] && ok "unauthenticated rejected" || bad "auth not enforced"
@@ -220,15 +184,7 @@ left=$(curl -s $B/v1/cron -H "$H" | jq_ "print(len([j for j in d.get('jobs',[]) 
 hist=$(curl -s $B/v1/history -H "$H" | jq_ "print(1 if '$SB' in json.dumps(d) else 0)")
 [ "$hist" = "1" ] && ok "destroyed sandbox recorded in history" || skp "history not yet written"
 
-for x in $ASB $pid; do [ -n "$x" ] && curl -s -X DELETE $B/v1/sandboxes/$x -H "$H" >/dev/null; done
-
-# Only Discord's own servers are mocked; the gateway hop, code, bridge and runner are real.
-sec "L. Discord channel driver"
-if PD_E2E_BASE="$B" PD_E2E_KEY="$K" go test ./internal/dcbridge/ -run TestDiscordEndToEndAgainstLiveNode -count=1 >/tmp/e2e-all/discord.log 2>&1; then
-  ok "discord: link + task round-trip against this node (see internal/dcbridge/e2e_test.go)"
-else
-  bad "discord e2e: $(tail -3 /tmp/e2e-all/discord.log | tr '\n' ' ')"
-fi
+for x in $pid; do [ -n "$x" ] && curl -s -X DELETE $B/v1/sandboxes/$x -H "$H" >/dev/null; done
 
 echo
 echo "════════════════════════════════════════"

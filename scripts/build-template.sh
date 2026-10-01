@@ -68,7 +68,7 @@ tar xf "/tmp/${TEMPLATE}.tar" -C "${TMPDIR}/rootfs"
 # a containment control, not a tidiness one. `cp` follows a symlink at the
 # DESTINATION and writes through it, and an absolute symlink inside an extracted
 # rootfs resolves against the HOST's root, not the rootfs. The openclaw image
-# ships /sbin/init -> /lib/systemd/systemd, so `cp … rootfs/sbin/init` aimed at
+# (since removed) shipped /sbin/init -> /lib/systemd/systemd, so `cp … rootfs/sbin/init` aimed at
 # the host's own systemd; this script runs as root, and it was only ETXTBSY —
 # systemd being PID 1 on that machine — that turned it into a build failure
 # instead of a corrupted host (measured 2026-09-21, twice, reproducibly). Any

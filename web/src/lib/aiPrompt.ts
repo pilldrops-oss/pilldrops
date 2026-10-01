@@ -20,7 +20,7 @@ When I ask for an app or task, prefer the one-shot builder:
 It writes the code, deploys it to a sandbox, self-heals on errors, and prints a live App URL. Give me that URL.
 
 If you build it by hand instead:
-    1. pilldrops template list                       # pick a base (python-3.11, fastapi, node-20, base…)
+    1. pilldrops template list                       # pick a base (python-3.11, node-20, base…)
     2. pilldrops sandbox create --template <t>
     3. pilldrops fs write <id> app.py --file app.py   # add your code
     4. run/serve it → the preview is ${absolutePreviewUrl('<id>', 8000)}

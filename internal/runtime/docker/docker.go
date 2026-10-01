@@ -119,7 +119,7 @@ type Runtime struct {
 	// imageAllowlist and imageRequireDigest mirror internal/httpapi's tenant
 	// image policy (this package cannot import httpapi). They apply only to
 	// tenant-supplied images, never to platform template pulls, or an
-	// allowlist would block python-3.11/android on any cold node.
+	// allowlist would block python-3.11 on any cold node.
 	imageAllowlist     []string
 	imageRequireDigest bool
 	// ociRuntime (SANDBOXD_DOCKER_RUNTIME, e.g. "runsc") runs toolbox sandboxes
