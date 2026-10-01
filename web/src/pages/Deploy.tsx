@@ -335,6 +335,14 @@ export default function Deploy() {
     setRecents(listRecents())
   })
 
+  // Deploy stays mounted across same-route navigations (nav link, "+ New"),
+  // so a stale "ready" screen from the last launch would otherwise persist.
+  // location.key is fresh on every navigation, including to this same path.
+  useEffect(() => {
+    launch.reset()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key])
+
   useEffect(() => {
     const t = cfg.tpl
     if (!t || t.id === seededFor) return
