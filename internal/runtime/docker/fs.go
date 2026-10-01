@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -99,7 +100,7 @@ func (d *dockerFS) Read(ctx context.Context, p string) ([]byte, error) {
 		if strings.Contains(se, "No such file") {
 			return nil, fs.ErrNotExist
 		}
-		return nil, fsFail("read "+p, nil, se)
+		return nil, fsFail("read "+p, nil, code, se)
 	}
 	return []byte(out), nil
 }
@@ -117,7 +118,7 @@ func (d *dockerFS) Write(ctx context.Context, p string, data []byte) error {
 			bytes.NewReader(data))
 		if err == nil {
 			if code != 0 {
-				return fsFail("write "+p, nil, se)
+				return fsFail("write "+p, nil, code, se)
 			}
 			return nil
 		}
@@ -132,7 +133,7 @@ func (d *dockerFS) Write(ctx context.Context, p string, data []byte) error {
 	var se bytes.Buffer
 	cmd.Stderr = &se
 	if err := cmd.Run(); err != nil {
-		return fsFail("write "+p, err, se.String())
+		return fsFail("write "+p, err, 0, se.String())
 	}
 	return nil
 }
@@ -156,7 +157,7 @@ func (d *dockerFS) WriteFrom(ctx context.Context, p string, r io.Reader) (int64,
 		return 0, err
 	}
 	if code != 0 {
-		return 0, fsFail("write "+p, nil, se)
+		return 0, fsFail("write "+p, nil, code, se)
 	}
 	return cr.n, nil
 }
@@ -198,7 +199,7 @@ done`
 func (d *dockerFS) List(ctx context.Context, p string) ([]rt.DirEntry, error) {
 	out, se, code, err := d.shell(ctx, listScript, d.abs(p))
 	if err != nil || code != 0 {
-		return nil, fsFail("list "+p, err, se)
+		return nil, fsFail("list "+p, err, code, se)
 	}
 	var entries []rt.DirEntry
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -222,7 +223,7 @@ func (d *dockerFS) List(ctx context.Context, p string) ([]rt.DirEntry, error) {
 func (d *dockerFS) Mkdir(ctx context.Context, p string) error {
 	_, se, code, err := d.exec(ctx, "mkdir", "-p", "--", d.abs(p))
 	if err != nil || code != 0 {
-		return fsFail("mkdir "+p, err, se)
+		return fsFail("mkdir "+p, err, code, se)
 	}
 	return nil
 }
@@ -233,7 +234,7 @@ const moveScript = `mkdir -p "$(dirname "$2")" && mv "$1" "$2"`
 func (d *dockerFS) Move(ctx context.Context, src, dst string) error {
 	_, se, code, err := d.shell(ctx, moveScript, d.abs(src), d.abs(dst))
 	if err != nil || code != 0 {
-		return fsFail("move "+src+"->"+dst, err, se)
+		return fsFail("move "+src+"->"+dst, err, code, se)
 	}
 	return nil
 }
@@ -241,7 +242,7 @@ func (d *dockerFS) Move(ctx context.Context, src, dst string) error {
 func (d *dockerFS) Remove(ctx context.Context, p string) error {
 	_, se, code, err := d.exec(ctx, "rm", "-rf", "--", d.abs(p))
 	if err != nil || code != 0 {
-		return fsFail("remove "+p, err, se)
+		return fsFail("remove "+p, err, code, se)
 	}
 	return nil
 }
@@ -255,7 +256,7 @@ func (d *dockerFS) Stat(ctx context.Context, p string) (rt.FileInfo, error) {
 		if strings.Contains(se, "No such file") {
 			return rt.FileInfo{}, fs.ErrNotExist
 		}
-		return rt.FileInfo{}, fsFail("stat "+p, nil, se)
+		return rt.FileInfo{}, fsFail("stat "+p, nil, code, se)
 	}
 	parts := strings.SplitN(strings.TrimSpace(out), "|", 4)
 	if len(parts) < 3 {
@@ -276,18 +277,44 @@ func (d *dockerFS) Stat(ctx context.Context, p string) (rt.FileInfo, error) {
 	}, nil
 }
 
-// fsFail is a failed helper's error, tagged with the sentinel its stderr
-// names so the API can answer 404/409/403/400 rather than 503. err is the
-// exec's own failure, nil when the helper ran and exited non-zero.
-func fsFail(what string, err error, stderr string) error {
+// fsFail is a failed helper's error. Only a failure inside the container
+// is the caller's path problem, tagged with the sentinel its stderr names so
+// the API answers 404/409/403/400. A failure to run the helper at all (the
+// engine or CLI unreachable, docker.sock refused, docker exec's own 125-127)
+// is the node's: left untagged, it reaches the caller as a 503, never as a
+// 403 for a "permission denied" that was the node's and not theirs.
+func fsFail(what string, err error, code int, stderr string) error {
 	se := strings.TrimSpace(stderr)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		err, code = nil, exitErr.ExitCode()
+	}
+	if err != nil {
+		return fmt.Errorf("%s: node could not run the file operation: %w %s", what, err, se)
+	}
+	if dockerExecFault(code, se) {
+		return fmt.Errorf("%s: node could not run the file operation: %s", what, se)
+	}
 	if kind := rt.FSKind(se); kind != nil {
 		return fmt.Errorf("%w: %s: %s", kind, what, se)
 	}
-	if err != nil {
-		return fmt.Errorf("%s: %w %s", what, err, se)
-	}
 	return fmt.Errorf("%s: %s", what, se)
+}
+
+// dockerExecFault reports a failure of docker exec itself rather than of the
+// command it ran: exit 125-127 are docker's own, and the CLI's daemon
+// connection errors name the daemon or its socket.
+func dockerExecFault(code int, stderr string) bool {
+	if code >= 125 && code <= 127 {
+		return true
+	}
+	lower := strings.ToLower(stderr)
+	for _, m := range []string{"docker daemon", "docker.sock", "error response from daemon"} {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
 }
 
 var _ rt.FileSystem = (*dockerFS)(nil)
