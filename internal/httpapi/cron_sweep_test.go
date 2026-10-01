@@ -3,11 +3,15 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/pilldrops-oss/pilldrops/internal/cron"
+	"github.com/pilldrops-oss/pilldrops/internal/runtime/process"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox/daemon"
+	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
 // Drives the sweeper with a controlled clock rather than waiting on the real ticker.
@@ -21,8 +25,7 @@ func TestScheduledJobActuallyFires(t *testing.T) {
 	}
 	id, _ := out["id"].(string)
 
-	sw := cron.NewSweeper(api.st, api.cronRunner(), nil)
-	sw.SweepOnce(context.Background(), time.Now().Add(2*time.Minute))
+	api.cronSweeper().SweepOnce(context.Background(), time.Now().Add(2*time.Minute))
 
 	_, out = do(t, "GET", srv+"/v1/cron", key, "")
 	jobs, _ := out["jobs"].([]any)
@@ -61,5 +64,63 @@ func TestDestroyingASandboxRemovesItsJobs(t *testing.T) {
 	_, out := do(t, "GET", srv+"/v1/cron", key, "")
 	if jobs, _ := out["jobs"].([]any); len(jobs) != 0 {
 		t.Errorf("%d job(s) survived the sandbox they target", len(jobs))
+	}
+}
+
+// Every node of a fleet sweeps the one shared table. A node that won the claim
+// for a job whose sandbox lives elsewhere recorded "sandbox not found" and
+// moved the schedule on, so on the rig the job never ran.
+func TestScheduledJobRunsOnceOnTheNodeThatHostsItsSandbox(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(t.Context(), filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	_, key, err := st.CreateKey(t.Context(), "cron", "default")
+	if err != nil {
+		t.Fatalf("key: %v", err)
+	}
+	node := func(id string) (*Server, string) {
+		d := daemon.New(daemon.Config{
+			Runtime:     process.New(filepath.Join(dir, id)),
+			Store:       daemon.StoreAdapter{S: st, NodeID: id},
+			NodeID:      id,
+			SnapshotDir: filepath.Join(dir, id+"-snap"),
+			IdleTimeout: time.Hour, HardTTL: time.Hour,
+		})
+		api := New(d, st)
+		api.SetNodeID(id)
+		srv := httptest.NewServer(api.Routes())
+		t.Cleanup(srv.Close)
+		return api, srv.URL
+	}
+	apiA, urlA := node("node-a")
+	apiB, _ := node("node-b")
+
+	code, out := do(t, "POST", urlA+"/v1/sandboxes", key, `{"template":"base"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create sandbox = %d %v", code, out)
+	}
+	sb, _ := out["id"].(string)
+	code, out = do(t, "POST", urlA+"/v1/cron", key,
+		`{"sandbox_id":"`+sb+`","schedule":"* * * * *","command":"echo fired >> runs; cat runs","timezone":"UTC"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create job = %d %v", code, out)
+	}
+
+	// The first due minute only: a later one would hand node A a second chance.
+	now := time.Unix(int64(out["next_run_at"].(float64)), 0)
+	apiB.cronSweeper().SweepOnce(t.Context(), now)
+	apiA.cronSweeper().SweepOnce(t.Context(), now)
+
+	_, out = do(t, "GET", urlA+"/v1/cron", key, "")
+	jobs, _ := out["jobs"].([]any)
+	if len(jobs) != 1 {
+		t.Fatalf("jobs = %v", out)
+	}
+	j := jobs[0].(map[string]any)
+	if j["last_status"] != "ok" || j["last_output"] != "fired\n" {
+		t.Errorf("last run = %v %q, want ok with exactly one run", j["last_status"], j["last_output"])
 	}
 }

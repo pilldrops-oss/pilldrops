@@ -127,16 +127,27 @@ func (s *Store) CronJobByID(ctx context.Context, orgID, id string) (CronJob, boo
 	return j, true
 }
 
-// DueCronJobs returns enabled jobs whose next run has arrived.
-func (s *Store) DueCronJobs(ctx context.Context, now int64, limit int) ([]CronJob, error) {
+// DueCronJobs returns enabled jobs whose next run has arrived, on sandboxes
+// nodeID owns or no node has stamped yet. Every node of a fleet sweeps this one
+// table and only the owner can exec into a sandbox: a sibling that won the claim
+// recorded "sandbox not found" instead. An empty nodeID (unclustered) sees every job.
+func (s *Store) DueCronJobs(ctx context.Context, nodeID string, now int64, limit int) ([]CronJob, error) {
 	if limit <= 0 {
 		limit = 100
+	}
+	if nodeID == "" {
+		return collectRows(ctx, s,
+			`SELECT `+cronCols+` FROM cron_jobs
+			 WHERE enabled AND next_run_at > 0 AND next_run_at <= ?
+			 ORDER BY next_run_at LIMIT ?`,
+			[]any{now, limit}, scanInto(scanCron))
 	}
 	return collectRows(ctx, s,
 		`SELECT `+cronCols+` FROM cron_jobs
 		 WHERE enabled AND next_run_at > 0 AND next_run_at <= ?
+		   AND sandbox_id IN (SELECT id FROM sandboxes WHERE node_id = ? OR node_id = '')
 		 ORDER BY next_run_at LIMIT ?`,
-		[]any{now, limit}, scanInto(scanCron))
+		[]any{now, nodeID, limit}, scanInto(scanCron))
 }
 
 // ClaimCronJob moves a job's next_run_at forward and reports whether this
