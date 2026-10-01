@@ -689,10 +689,9 @@ export default function SandboxDetail() {
     if (!id) return
     try {
       const data = await getSandbox(id)
-      // The detail GET omits boot type/time; keep what the create response said.
-      setSandbox(prev => prev?.id === data.id
-        ? { ...data, boot_type: data.boot_type || prev.boot_type, boot_ms: data.boot_ms || prev.boot_ms }
-        : data)
+      // The GET now reports boot type/time itself, so it is trusted outright —
+      // not only kept around from the create response that opened this page.
+      setSandbox(data)
       setError(null)
     } catch (e) {
       setError((e as Error).message)

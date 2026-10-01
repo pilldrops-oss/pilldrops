@@ -64,13 +64,22 @@ describe('sandbox detail (U4)', () => {
     expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/preview/sb1/3000/`)
   })
 
-  it('heads the page with the sandbox name and keeps the create response boot fields', async () => {
+  it('heads the page with the sandbox name while the first GET is in flight', async () => {
     renderPage({ sandbox: { ...sb, boot_type: 'snapshot', boot_ms: 412 } })
     expect(await screen.findByText('my-app', { selector: '.detail-name' })).toBeInTheDocument()
     await waitFor(() => expect(api.getSandbox).toHaveBeenCalled())
+  })
+
+  it('trusts the GET for boot type and time instead of what launch handed it', async () => {
+    // The GET reports the sandbox's real (and here different) boot info; a
+    // stale value carried from the launch screen must not win over it.
+    vi.mocked(api.getSandbox).mockResolvedValue({ ...sb, boot_type: '', boot_ms: 0 })
+    renderPage({ sandbox: { ...sb, boot_type: 'cold', boot_ms: 999 } })
+    await waitFor(() => expect(api.getSandbox).toHaveBeenCalled())
     await userEvent.click(screen.getByRole('button', { name: 'Info' }))
-    expect(await screen.findByText('412 ms')).toBeInTheDocument()
-    expect(screen.getByText('snapshot')).toBeInTheDocument()
+    const bootType = await screen.findByText('Boot type')
+    expect(bootType.closest('.info-row')?.textContent).toContain('—')
+    expect(screen.getByText('Boot time').closest('.info-row')?.textContent).toContain('—')
   })
 
   it('keeps the same terminal across a tab switch', async () => {
