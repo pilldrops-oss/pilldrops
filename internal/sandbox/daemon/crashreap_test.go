@@ -68,3 +68,73 @@ func TestScanKeepsLiveSandbox(t *testing.T) {
 		t.Fatalf("live sandbox was wrongly reaped")
 	}
 }
+
+// racingVMM reads dead once, running onFirstProbe in between the scan's
+// lock-free probe and its destroy, the window a pause or restore can fill.
+type racingVMM struct {
+	rt.Instance
+	onFirstProbe func()
+	probes       int
+	aliveAfter   bool
+}
+
+func (r *racingVMM) Alive() bool {
+	r.probes++
+	if r.probes == 1 {
+		if r.onFirstProbe != nil {
+			r.onFirstProbe()
+		}
+		return false
+	}
+	return r.aliveAfter
+}
+
+func TestScanDoesNotReapASandboxThatChangedUnderneathIt(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(d *Daemon, id string, orig rt.Instance, r *racingVMM)
+	}{
+		{"paused", func(d *Daemon, id string, _ rt.Instance, r *racingVMM) {
+			r.onFirstProbe = func() {
+				if err := d.Pause(context.Background(), id); err != nil {
+					t.Errorf("pause: %v", err)
+				}
+			}
+		}},
+		{"instance swapped by a restore", func(d *Daemon, id string, orig rt.Instance, r *racingVMM) {
+			r.onFirstProbe = func() {
+				d.mu.Lock()
+				d.boxes[id].inst = orig
+				d.mu.Unlock()
+			}
+		}},
+		{"answered on the second probe", func(_ *Daemon, _ string, _ rt.Instance, r *racingVMM) {
+			r.aliveAfter = true
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fp := newFakePersister(nil)
+			d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, IdleTimeout: time.Hour, HardTTL: time.Hour})
+			ctx := context.Background()
+			sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			d.mu.Lock()
+			orig := d.boxes[sb.ID].inst
+			r := &racingVMM{Instance: orig}
+			d.boxes[sb.ID].inst = r
+			d.mu.Unlock()
+			tc.setup(d, sb.ID, orig, r)
+
+			d.scanExits(ctx)
+
+			if _, ok := d.Get(sb.ID); !ok {
+				t.Fatal("a healthy sandbox was destroyed by the exit scan")
+			}
+			if n := fp.countEvents("exited"); n != 0 {
+				t.Errorf("exited events = %d, want 0", n)
+			}
+		})
+	}
+}

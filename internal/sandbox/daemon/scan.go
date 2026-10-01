@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"time"
@@ -95,8 +96,10 @@ func (d *Daemon) scanExits(ctx context.Context) {
 		if r, ok := t.lv.(rt.OOMKilledReporter); ok && r.OOMKilled() {
 			reason = "oom"
 		}
-		d.log().Warn("sandbox instance died underneath it", "sandbox_id", t.id, "reason", reason)
-		if err := d.destroy(ctx, t.id, false, reason); err != nil {
+		switch err := d.destroy(ctx, t.id, false, reason, t.lv); {
+		case err == nil:
+			d.log().Warn("sandbox instance died underneath it", "sandbox_id", t.id, "reason", reason)
+		case !errors.Is(err, errNoLongerDead) && !errors.Is(err, rt.ErrNotFound):
 			d.log().Warn("reaping a dead sandbox failed", "sandbox_id", t.id, "error", err)
 		}
 	})

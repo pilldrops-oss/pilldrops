@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -290,6 +291,9 @@ func (d *Daemon) ResumeTimed(ctx context.Context, id string) (took time.Duration
 	return took, nil
 }
 
+// errNoLongerDead is a reap called off because the sandbox changed or answered.
+var errNoLongerDead = errors.New("sandbox is no longer the dead instance the scan found")
+
 // destroyLogCaptureTimeout is a var so tests can shrink it.
 var destroyLogCaptureTimeout = 5 * time.Second
 
@@ -297,7 +301,7 @@ var destroyLogCaptureTimeout = 5 * time.Second
 // sandbox on opMu. Every guest-facing step is deadline-bounded or killable from
 // the host, so no guest state can make DELETE hang.
 func (d *Daemon) Destroy(ctx context.Context, id string) (err error) {
-	return d.destroy(ctx, id, false, "destroyed")
+	return d.destroy(ctx, id, false, "destroyed", nil)
 }
 
 // Evict stops and forgets a sandbox that now runs on another node under the
@@ -305,11 +309,14 @@ func (d *Daemon) Destroy(ctx context.Context, id string) (err error) {
 // agent tokens) belongs to the moved copy, so only this node's instance, its
 // local files and its final usage are dealt with.
 func (d *Daemon) Evict(ctx context.Context, id string) error {
-	return d.destroy(ctx, id, true, "")
+	return d.destroy(ctx, id, true, "", nil)
 }
 
 // exitState names how the sandbox ended, in its history row and its last event.
-func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState string) (err error) {
+// dead, when set, is the instance a scan found dead without the op lock; the
+// destroy goes ahead only if it is still this sandbox's running instance and
+// still dead, since a pause or a checkpoint restore may have run in between.
+func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState string, dead rt.Liveness) (err error) {
 	ctx, span := observability.StartInternal(ctx, "daemon.Destroy", attribute.String("sandbox_id", id))
 	defer func() { observability.End(span, err) }()
 
@@ -318,6 +325,16 @@ func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState s
 		return err
 	}
 	defer release()
+
+	if dead != nil {
+		d.mu.Lock()
+		lv, ok := sb.inst.(rt.Liveness)
+		current := ok && lv == dead && sb.State == StateRunning
+		d.mu.Unlock()
+		if !current || dead.Alive() {
+			return errNoLongerDead
+		}
+	}
 
 	d.mu.Lock()
 	u := sb.meter.sample(d.clock.Now())
