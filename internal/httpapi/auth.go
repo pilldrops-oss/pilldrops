@@ -189,10 +189,13 @@ func (s *Server) auth(next http.HandlerFunc) http.Handler {
 	})
 }
 
-// authAdmin is auth plus an operator-role gate.
+// authAdmin is auth plus an operator-role gate. The wire key is the control
+// plane's on every forwarded request, so a forwarded caller it names must be
+// an operator too; its own unnamed hop (an operator acting as itself) passes on
+// the wire key, since that hop asserts no role to check.
 func (s *Server) authAdmin(next http.HandlerFunc) http.Handler {
 	return s.auth(func(w http.ResponseWriter, r *http.Request) {
-		if roleOf(r) != "operator" {
+		if roleOf(r) != "operator" || (keyIDOf(r) != "" && !operatorPrincipal(r)) {
 			writeErr(w, http.StatusForbidden, "operator role required")
 			return
 		}
