@@ -67,7 +67,7 @@ and tenant code that no longer runs as root.
 `sudo scripts/pre-upgrade-check.sh` answers the machine-checkable half on a
 node. It exits 2 for a check it could not run, which is not a pass.
 
-**Docker nodes, builds from 2026-10-01 on:** re-run
+**Docker nodes, builds that include the docker egress allowlist change:** re-run
 `sudo scripts/setup-docker-egress.sh` on every docker node after upgrading it.
 The new rules give docker sandboxes the Firecracker DNS/HTTP/HTTPS allowlist,
 and node preflight runs `verify-egress.sh --docker`, which fails until they are
