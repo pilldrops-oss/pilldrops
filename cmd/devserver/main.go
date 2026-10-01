@@ -1851,7 +1851,9 @@ func registerSandboxActionRoutes(r chi.Router, mgr *DevManager, ownerID func(*ht
 			seconds = body.Timeout
 		}
 		if seconds == 0 {
-			http.Error(w, `{"error":"\"seconds\" is required: a positive TTL from now"}`, http.StatusBadRequest)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]string{"error": `"seconds" is required: a positive TTL from now`})
 			return
 		}
 		if seconds > 0 {

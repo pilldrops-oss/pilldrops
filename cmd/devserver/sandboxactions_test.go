@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -278,6 +279,12 @@ func TestSandboxTimeout_ReadsSecondsAndRefusesZero(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
+		if w.Code == http.StatusBadRequest {
+			var e map[string]string
+			if ct := w.Header().Get("Content-Type"); ct != "application/json" || json.Unmarshal(w.Body.Bytes(), &e) != nil || e["error"] == "" {
+				t.Errorf("%s: 400 came back as %q %q, want a JSON error", body, ct, w.Body.String())
+			}
+		}
 		return w.Code
 	}
 
