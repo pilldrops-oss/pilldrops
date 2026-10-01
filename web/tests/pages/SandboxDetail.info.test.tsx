@@ -54,7 +54,7 @@ describe('sandbox detail (U4)', () => {
   it('Info shows name, storage cap without usage, ports, and copyable preview URL', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(navigator, { clipboard: { writeText } })
-    render(<InfoTab sandbox={{ ...sb, boot_type: 'cold', boot_ms: 1136 }} previewPort={3000} />)
+    render(<ToastProvider><InfoTab sandbox={{ ...sb, boot_type: 'cold', boot_ms: 1136 }} previewPort={3000} /></ToastProvider>)
     expect(screen.getByText('my-app')).toBeInTheDocument()
     expect(screen.getByText('2 GB (usage not reported)')).toBeInTheDocument()
     expect(screen.getByText('cold')).toBeInTheDocument()

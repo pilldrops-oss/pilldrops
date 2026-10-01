@@ -68,6 +68,7 @@ describe('InlineRename', () => {
     await waitFor(() => expect(renameMock).toHaveBeenCalledWith('sb1', 'renamed-box'))
     await waitFor(() => expect(onRenamed).toHaveBeenCalledWith('renamed-box'))
     expect(screen.queryByRole('textbox')).toBeNull()
+    expect(await screen.findByText('Renamed to renamed-box')).toBeInTheDocument()
   })
 
   it('cancels on Escape without calling the API, reverting to the original value', async () => {

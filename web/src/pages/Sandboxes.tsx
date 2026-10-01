@@ -600,6 +600,7 @@ export function InlineRename({ id, name, onRenamed }: InlineRenameProps) {
       const updated = await renameSandbox(id, next)
       setEditing(false)
       onRenamed(updated.name ?? next)
+      toast.success(updated.name ? `Renamed to ${updated.name}` : 'Name cleared')
     } catch (e) {
       toast.error(errText(e))
     } finally {

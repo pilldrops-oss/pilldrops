@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, setSandboxSlug, slugUrl, setSandboxVisibility, absolutePreviewUrl, IS_LOCAL_RUNTIME } from '../api'
+import { getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, setSandboxSlug, slugUrl, setSandboxVisibility, absolutePreviewUrl, ApiError, IS_LOCAL_RUNTIME } from '../api'
 import UnsafeEmbedNotice from '../components/UnsafeEmbedNotice'
 import { useConfirm } from '../components/ConfirmModal'
 import { useToast } from '../components/Toast'
@@ -429,6 +429,7 @@ function SlugRow({ sandbox, onChanged }: { sandbox: SandboxDetailType; onChanged
   const [value, setValue] = useState(sandbox.slug ?? '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const toast = useToast()
   const host = slugUrl(sandbox.slug)
   async function save() {
     setBusy(true)
@@ -436,6 +437,7 @@ function SlugRow({ sandbox, onChanged }: { sandbox: SandboxDetailType; onChanged
     try {
       const updated = await setSandboxSlug(sandbox.id, value.trim())
       onChanged(updated.slug ?? '')
+      toast.success(updated.slug ? `Slug set to ${updated.slug}` : 'Slug cleared')
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -679,6 +681,8 @@ export default function SandboxDetail() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  // Cleared on a 404 too, so a destroyed sandbox is not polled until unmount.
+  const pollRef = useRef<number | null>(null)
   const loadSandbox = useCallback(async () => {
     if (!id) return
     try {
@@ -690,14 +694,20 @@ export default function SandboxDetail() {
       setError(null)
     } catch (e) {
       setError((e as Error).message)
+      if (e instanceof ApiError && e.status === 404 && pollRef.current !== null) {
+        window.clearInterval(pollRef.current)
+        pollRef.current = null
+      }
     }
     setLoading(false)
   }, [id])
 
   useEffect(() => {
     loadSandbox()
-    const interval = setInterval(loadSandbox, 5000)
-    return () => clearInterval(interval)
+    pollRef.current = window.setInterval(loadSandbox, 5000)
+    return () => {
+      if (pollRef.current !== null) window.clearInterval(pollRef.current)
+    }
   }, [loadSandbox])
 
   const previewPort = sandbox ? previewPortOf(sandbox, tplMeta) : 8000
@@ -705,7 +715,7 @@ export default function SandboxDetail() {
 
   const confirmDialog = useConfirm()
   const toast = useToast()
-  const doAction = useCallback(async (fn: () => Promise<unknown>, confirmMsg?: string) => {
+  const doAction = useCallback(async (fn: () => Promise<unknown>, confirmMsg?: string, successMsg?: string) => {
     if (confirmMsg && !(await confirmDialog({
       title: 'Destroy sandbox?',
       body: confirmMsg,
@@ -716,6 +726,7 @@ export default function SandboxDetail() {
     try {
       await fn()
       await loadSandbox()
+      if (successMsg) toast.success(successMsg)
     } catch (e) {
       toast.error(errText(e))
     }
@@ -740,6 +751,7 @@ export default function SandboxDetail() {
     await doAction(async () => {
       const res = await setSandboxVisibility(id, isPrivate ? 'org' : 'private')
       if (res.wipe_skipped) toast.error(`Shared, but the agent logins were NOT removed: ${res.wipe_skipped}`)
+      else toast.success(isPrivate ? 'Shared with the org' : 'Made private')
     })
   }, [id, isPrivate, doAction, confirmDialog, toast])
 
@@ -812,7 +824,7 @@ export default function SandboxDetail() {
             <button
               className="btn"
               disabled={busy}
-              onClick={() => doAction(() => pauseSandbox(id))}
+              onClick={() => doAction(() => pauseSandbox(id), undefined, 'Paused')}
             >
               Pause
             </button>
@@ -820,7 +832,7 @@ export default function SandboxDetail() {
             <button
               className="btn"
               disabled={busy}
-              onClick={() => doAction(() => resumeSandbox(id))}
+              onClick={() => doAction(() => resumeSandbox(id), undefined, 'Resumed')}
             >
               Resume
             </button>
@@ -830,7 +842,11 @@ export default function SandboxDetail() {
             className="btn"
             disabled={busy}
             title="Copy this sandbox, memory and running processes included"
-            onClick={() => doAction(() => forkSandbox(id).then((f) => navigate(`/sandbox/${f.id}`)))}
+            onClick={() => doAction(
+              () => forkSandbox(id).then((f) => { navigate(`/sandbox/${f.id}`); return f }),
+              undefined,
+              'Forked',
+            )}
           >
             Fork
           </button>
@@ -853,7 +869,7 @@ export default function SandboxDetail() {
           <button
             className="btn"
             disabled={busy}
-            onClick={() => doAction(() => refreshSandbox(id))}
+            onClick={() => doAction(() => refreshSandbox(id), undefined, 'TTL refreshed')}
             title="Extend TTL"
           >
             Refresh TTL
