@@ -382,12 +382,18 @@ func (i *dockerInstance) Procs() ([]rt.Proc, error) {
 		return parseProcs(out, false), nil
 	}
 	// An image with no /bin/sh (a distroless service): docker top still lists
-	// it, though by host pids, which Signal cannot reach.
+	// it, but by host pids, which a kill inside the container would read as
+	// some other process and which say nothing a tenant should see. Listed with
+	// pid 0, which the signal route refuses.
 	out, _, code, err := dockerOut(ctx, "top", i.cid, "-eo", "pid,comm")
 	if err != nil || code != 0 {
 		return nil, nil // best-effort, like the process runtime
 	}
-	return parseProcs(out, true), nil
+	procs := parseProcs(out, true)
+	for n := range procs {
+		procs[n].PID = 0
+	}
+	return procs, nil
 }
 
 // parseProcs reads "pid comm" lines, skipping docker top's header row.

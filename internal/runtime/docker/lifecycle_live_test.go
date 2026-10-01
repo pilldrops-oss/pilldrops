@@ -191,4 +191,9 @@ func TestLiveProcsWithoutAShell(t *testing.T) {
 	if err != nil || len(procs) == 0 {
 		t.Fatalf("procs without a shell = %v, %v; want the container's processes", procs, err)
 	}
+	for _, p := range procs {
+		if p.PID != 0 {
+			t.Errorf("%q listed with host pid %d, which Signal would send into the container", p.Cmd, p.PID)
+		}
+	}
 }

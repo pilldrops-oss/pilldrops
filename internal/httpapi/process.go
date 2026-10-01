@@ -37,6 +37,12 @@ func (s *Server) handleProcSignal(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	// 0 and negative pids are process groups and "every process" to kill(2);
+	// 0 is also how a runtime lists a process it cannot address.
+	if body.PID <= 0 {
+		writeErr(w, http.StatusBadRequest, `"pid" must be a process id from the process list; a process listed with pid 0 cannot be signalled`)
+		return
+	}
 	sig := signalNumber(body.Signal)
 	if err := s.d.Signal(id, body.PID, sig); err != nil {
 		writeErr(w, statusForErr(err), err.Error())
