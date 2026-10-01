@@ -1,6 +1,9 @@
 package docker
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -237,4 +240,32 @@ func bootImageBody(t *testing.T, body string) string {
 			"function or nothing at all", marker)
 	}
 	return body[i:]
+}
+
+// API B24: the run uid had no passwd entry, so `id -un` failed in every docker
+// sandbox. The handover names it once and leaves an image's own entry alone.
+func TestPrivilegeHandoverNamesTheRunUser(t *testing.T) {
+	etc := t.TempDir()
+	passwd, group := filepath.Join(etc, "passwd"), filepath.Join(etc, "group")
+	if err := os.WriteFile(passwd, []byte("root:x:0:0:root:/root:/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(group, []byte("root:x:0:\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := strings.ReplaceAll(passwdEntry(sandboxRunUser), "/etc/", etc+"/")
+	for range 2 {
+		if out, err := exec.Command("/bin/sh", "-c", script).CombinedOutput(); err != nil {
+			t.Fatalf("passwd entry script: %v %s", err, out)
+		}
+	}
+	for file, want := range map[string]string{passwd: ":" + sandboxRunUID + ":" + sandboxRunUID + ":", group: ":" + sandboxRunUID + ":"} {
+		raw, _ := os.ReadFile(file)
+		if n := strings.Count(string(raw), want); n != 1 {
+			t.Errorf("%s has %d entries for uid %s after two boots, want 1:\n%s", filepath.Base(file), n, sandboxRunUID, raw)
+		}
+	}
+	if !strings.Contains(privilegeHandover(sandboxRunUser), "/etc/passwd") {
+		t.Error("the handover does not add the passwd entry")
+	}
 }

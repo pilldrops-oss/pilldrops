@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -150,6 +151,11 @@ func TestCreateFromAnUnreadySnapshotIs404(t *testing.T) {
 	status, out := f.do(t, "POST", "/v1/sandboxes", "apikey", `{"snapshot":"never-saved"}`)
 	if status != http.StatusNotFound || out["code"] != "snapshot_not_ready" {
 		t.Fatalf("a create from an unknown snapshot answered %d %v", status, out["_raw"])
+	}
+	// The rig created from a snapshot straight after saving it; the answer has
+	// to say what to poll, not only that it is not ready.
+	if msg, _ := out["error"].(string); !strings.Contains(msg, "GET /v1/snapshots/never-saved") {
+		t.Errorf("snapshot_not_ready error %q does not say what to poll", msg)
 	}
 	// A name whose only version is still building is the same answer: not ready.
 	if _, out := f.do(t, "POST", "/v1/sandboxes/sb-1/snapshot", "apikey", `{"name":"slow"}`); out["status"] != "building" {

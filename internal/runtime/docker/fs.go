@@ -99,7 +99,7 @@ func (d *dockerFS) Read(ctx context.Context, p string) ([]byte, error) {
 		if strings.Contains(se, "No such file") {
 			return nil, fs.ErrNotExist
 		}
-		return nil, fmt.Errorf("read %s: %s", p, strings.TrimSpace(se))
+		return nil, fsFail("read "+p, nil, se)
 	}
 	return []byte(out), nil
 }
@@ -117,7 +117,7 @@ func (d *dockerFS) Write(ctx context.Context, p string, data []byte) error {
 			bytes.NewReader(data))
 		if err == nil {
 			if code != 0 {
-				return fmt.Errorf("write %s: %s", p, strings.TrimSpace(se))
+				return fsFail("write "+p, nil, se)
 			}
 			return nil
 		}
@@ -132,7 +132,7 @@ func (d *dockerFS) Write(ctx context.Context, p string, data []byte) error {
 	var se bytes.Buffer
 	cmd.Stderr = &se
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("write %s: %w %s", p, err, strings.TrimSpace(se.String()))
+		return fsFail("write "+p, err, se.String())
 	}
 	return nil
 }
@@ -156,7 +156,7 @@ func (d *dockerFS) WriteFrom(ctx context.Context, p string, r io.Reader) (int64,
 		return 0, err
 	}
 	if code != 0 {
-		return 0, fmt.Errorf("write %s: %s", p, strings.TrimSpace(se))
+		return 0, fsFail("write "+p, nil, se)
 	}
 	return cr.n, nil
 }
@@ -186,7 +186,7 @@ func (c *countingReader) Read(b []byte) (int, error) {
 
 // listScript prints one line per entry: name\ttype(d|f)\tsize\tmtimeEpoch.
 // POSIX sh only, so it works on every slim base image.
-const listScript = `cd "$1" 2>/dev/null || exit 0
+const listScript = `cd "$1" || exit 1
 for e in * .*; do
   [ -e "$e" ] || continue
   case "$e" in .|..) continue;; esac
@@ -198,7 +198,7 @@ done`
 func (d *dockerFS) List(ctx context.Context, p string) ([]rt.DirEntry, error) {
 	out, se, code, err := d.shell(ctx, listScript, d.abs(p))
 	if err != nil || code != 0 {
-		return nil, fmt.Errorf("list %s: %w %s", p, err, strings.TrimSpace(se))
+		return nil, fsFail("list "+p, err, se)
 	}
 	var entries []rt.DirEntry
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -222,7 +222,7 @@ func (d *dockerFS) List(ctx context.Context, p string) ([]rt.DirEntry, error) {
 func (d *dockerFS) Mkdir(ctx context.Context, p string) error {
 	_, se, code, err := d.exec(ctx, "mkdir", "-p", "--", d.abs(p))
 	if err != nil || code != 0 {
-		return fmt.Errorf("mkdir %s: %w %s", p, err, strings.TrimSpace(se))
+		return fsFail("mkdir "+p, err, se)
 	}
 	return nil
 }
@@ -233,7 +233,7 @@ const moveScript = `mkdir -p "$(dirname "$2")" && mv "$1" "$2"`
 func (d *dockerFS) Move(ctx context.Context, src, dst string) error {
 	_, se, code, err := d.shell(ctx, moveScript, d.abs(src), d.abs(dst))
 	if err != nil || code != 0 {
-		return fmt.Errorf("move %s->%s: %w %s", src, dst, err, strings.TrimSpace(se))
+		return fsFail("move "+src+"->"+dst, err, se)
 	}
 	return nil
 }
@@ -241,7 +241,7 @@ func (d *dockerFS) Move(ctx context.Context, src, dst string) error {
 func (d *dockerFS) Remove(ctx context.Context, p string) error {
 	_, se, code, err := d.exec(ctx, "rm", "-rf", "--", d.abs(p))
 	if err != nil || code != 0 {
-		return fmt.Errorf("remove %s: %w %s", p, err, strings.TrimSpace(se))
+		return fsFail("remove "+p, err, se)
 	}
 	return nil
 }
@@ -255,7 +255,7 @@ func (d *dockerFS) Stat(ctx context.Context, p string) (rt.FileInfo, error) {
 		if strings.Contains(se, "No such file") {
 			return rt.FileInfo{}, fs.ErrNotExist
 		}
-		return rt.FileInfo{}, fmt.Errorf("stat %s: %s", p, strings.TrimSpace(se))
+		return rt.FileInfo{}, fsFail("stat "+p, nil, se)
 	}
 	parts := strings.SplitN(strings.TrimSpace(out), "|", 4)
 	if len(parts) < 3 {
@@ -274,6 +274,20 @@ func (d *dockerFS) Stat(ctx context.Context, p string) (rt.FileInfo, error) {
 		Mode:     mode,
 		Modified: time.Unix(mt, 0),
 	}, nil
+}
+
+// fsFail is a failed helper's error, tagged with the sentinel its stderr
+// names so the API can answer 404/409/403/400 rather than 503. err is the
+// exec's own failure, nil when the helper ran and exited non-zero.
+func fsFail(what string, err error, stderr string) error {
+	se := strings.TrimSpace(stderr)
+	if kind := rt.FSKind(se); kind != nil {
+		return fmt.Errorf("%w: %s: %s", kind, what, se)
+	}
+	if err != nil {
+		return fmt.Errorf("%s: %w %s", what, err, se)
+	}
+	return fmt.Errorf("%s: %s", what, se)
 }
 
 var _ rt.FileSystem = (*dockerFS)(nil)

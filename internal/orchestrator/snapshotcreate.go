@@ -51,7 +51,8 @@ func (s *Server) resolveSnapshotCreate(w http.ResponseWriter, r *http.Request, b
 			// is not allowed to know exist.
 			writeJSONErr(w, http.StatusNotFound, "snapshot_not_ready",
 				"no ready snapshot named "+req.Snapshot+
-					" — it may still be building, or may not exist")
+					" — it may still be building, or may not exist; poll GET /v1/snapshots/"+req.Snapshot+
+					` until its status is "ready"`)
 			return out, false
 		}
 		writeErr(w, http.StatusInternalServerError, err.Error())

@@ -259,6 +259,26 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 					memMB, biggest))
 				return
 			}
+			// A domain allowlist only lands on a node running the name layer, and
+			// no docker node runs it: "no capacity" sent the caller looking for RAM.
+			if place.EgressDomains {
+				loose := place
+				loose.EgressDomains = false
+				if cluster.Pick(s.reg.Nodes(), loose, s.now(), cluster.NodeTTL) != nil {
+					where := "no node with room for this sandbox"
+					if runtime != "" {
+						where = "the " + runtime + " runtime"
+					}
+					s.metrics.recordSchedule(schedNoRuntime)
+					writeJSON(w, http.StatusNotImplemented, map[string]string{
+						"error": where + " does not support egress allowlists that name a domain: only " +
+							"firecracker nodes run the name layer that enforces them, so create the " +
+							`sandbox with "runtime":"firecracker"`,
+						"code": "egress_not_enforced",
+					})
+					return
+				}
+			}
 			// Only this branch means "add nodes".
 			s.metrics.recordSchedule(schedNoCapacity)
 			w.Header().Set("Retry-After", "5")

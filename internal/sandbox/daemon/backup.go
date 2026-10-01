@@ -40,7 +40,7 @@ var (
 	ErrBackupInFlight = errors.New("a backup of this sandbox is already running")
 	// ErrBackupNotReady means the capture never finished, so there is nothing
 	// to restore from.
-	ErrBackupNotReady = errors.New("backup is not ready")
+	ErrBackupNotReady = errors.New(`backup is not ready: poll GET /v1/sandboxes/{id}/backups until its status is "ready"`)
 	// ErrRestoreNotConfirmed means the caller did not say yes to losing the
 	// sandbox's current disk.
 	ErrRestoreNotConfirmed = errors.New("restore overwrites the sandbox's current disk and needs confirm: true")

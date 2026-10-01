@@ -460,7 +460,9 @@ func (i *dockerInstance) ListenTarget(port int) (string, error) {
 	defer cancel()
 	h, err := mappedPort(ctx, i.cid, port)
 	if err != nil {
-		return "", fmt.Errorf("%w: sandbox %s publishes port %d and its declared ports only, not %d", rt.ErrNoAppOnPort, i.id, appPort, port)
+		return "", fmt.Errorf("%w: sandbox %s publishes port %d and its declared ports only, not %d; docker "+
+			"publishes ports when the container is created, so create the sandbox with \"ports\":[%d]",
+			rt.ErrNoAppOnPort, i.id, appPort, port, port)
 	}
 	if i.ports == nil {
 		i.ports = map[int]string{}

@@ -738,12 +738,19 @@ func fsError(p, stderr string, code int) error {
 	if strings.Contains(msg, "No such file or directory") {
 		return fmt.Errorf("%w: %s", rt.ErrPathNotFound, p)
 	}
+	// confineShell's own refusals: the caller's path, every time.
+	if strings.Contains(msg, "path escapes workspace") || strings.Contains(msg, "path resolution failed") {
+		return fmt.Errorf("%w: %s", rt.ErrPathRefused, p)
+	}
 	// Drop the leading "tool: " the helper stamps on anything else it says.
 	if tool, rest, ok := strings.Cut(msg, ": "); ok && !strings.ContainsAny(tool, " \t") {
 		msg = rest
 	}
 	if msg == "" {
 		msg = fmt.Sprintf("the sandbox refused it (exit %d)", code)
+	}
+	if kind := rt.FSKind(msg); kind != nil {
+		return fmt.Errorf("%w: %s: %s", kind, p, msg)
 	}
 	return fmt.Errorf("%s: %s", p, msg)
 }
@@ -760,6 +767,11 @@ func fsError(p, stderr string, code int) error {
 func pathRefusal(p string, err error) error {
 	if err != nil && strings.Contains(err.Error(), "invalid path") {
 		return fmt.Errorf("%w: %s", rt.ErrPathRefused, p)
+	}
+	if err != nil {
+		if kind := rt.FSKind(err.Error()); kind != nil {
+			return fmt.Errorf("%w: %s: %w", kind, p, err)
+		}
 	}
 	return err
 }

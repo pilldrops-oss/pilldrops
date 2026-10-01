@@ -2,7 +2,11 @@ package orchestrator
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/pilldrops-oss/pilldrops/internal/cluster"
 )
 
 // The control plane must refuse a domain rule itself, not lean on the node: a
@@ -39,5 +43,34 @@ func TestControlPlaneRefusesDomainEgressRulesUntilTheNameLayerExists(t *testing.
 			t.Errorf("create %s was refused as unenforceable (%v) — address rules are enforced "+
 				"in the node's netns chain, so this refuses a policy that works", body, out)
 		}
+	}
+}
+
+// API B18: a domain allowlist pinned to docker was answered "no docker node
+// has capacity", which sends an operator to add RAM. Docker never runs the
+// name layer, so the answer is the runtime, not the room.
+func TestADomainAllowlistOnDockerNamesTheRuntimeNotCapacity(t *testing.T) {
+	s := NewServer("fleet-key", "nodetoken")
+	capy := cluster.Capacity{Cores: 8, MemTotalMB: 64000, MemAvailMB: 64000}
+	for _, n := range []struct {
+		id, runtime string
+		domains     bool
+	}{{"d1", "docker", false}, {"f1", "firecracker", true}} {
+		if err := s.reg.Upsert(cluster.NodeUpsert{ID: n.id, URL: "http://" + n.id + ".invalid", Key: "k-" + n.id, Cap: capy}, s.now()); err != nil {
+			t.Fatal(err)
+		}
+		s.reg.SetNodeMeta(n.id, cluster.NodeMeta{Runtime: n.runtime, EgressDomains: n.domains})
+	}
+	srv := httptest.NewServer(s.Routes())
+	t.Cleanup(srv.Close)
+
+	code, out := do(t, srv, "POST", "/v1/sandboxes", "fleet-key",
+		`{"template":"base","runtime":"docker","network":{"allow":["example.com"]}}`)
+	msg, _ := out["error"].(string)
+	if code != http.StatusNotImplemented || out["code"] != "egress_not_enforced" {
+		t.Fatalf("create = %d %v, want 501 egress_not_enforced", code, out)
+	}
+	if !strings.Contains(msg, "docker runtime") || !strings.Contains(msg, "firecracker") {
+		t.Errorf("error %q should name the docker runtime and point at firecracker", msg)
 	}
 }

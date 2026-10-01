@@ -143,7 +143,8 @@ func HostRouter(domain string, r Resolver, next http.Handler, verifyPreview func
 			case errors.Is(err, rt.ErrNotFound), errors.Is(err, rt.ErrForeignOrg):
 				http.Error(w, "sandbox not found", http.StatusNotFound)
 			case errors.Is(err, rt.ErrNoAppOnPort):
-				http.Error(w, err.Error(), http.StatusNotFound)
+				// The caller's port, not a missing sandbox: 404 read as a wrong id.
+				http.Error(w, err.Error(), http.StatusBadRequest)
 			default:
 				http.Error(w, "sandbox unavailable: "+err.Error(), http.StatusServiceUnavailable)
 			}
