@@ -56,3 +56,41 @@ func TestChangingTheFleetNeedsTheOperatorKey(t *testing.T) {
 		}
 	}
 }
+
+// TestFleetReadsNeedTheOperatorKey pins the same gate on the routes that read
+// the whole fleet: node addresses and capacity, every org's users and
+// sessions, and the node admin routes the catch-all would otherwise forward
+// under the control plane's operator key.
+func TestFleetReadsNeedTheOperatorKey(t *testing.T) {
+	s, _ := domainServer(t)
+	tenant := orgKey(t, s, "u:tenant")
+
+	paths := []string{
+		"/metrics",
+		"/v1/nodes",
+		"/v1/cluster/stats",
+		"/v1/admin/whoami",
+		"/v1/admin/overview",
+		"/v1/admin/users",
+		"/v1/admin/sessions",
+		"/v1/admin/feedback",
+		"/v1/admin/funnel",
+		"/v1/images/export",
+	}
+	get := func(path, key string) int {
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.RemoteAddr = "203.0.113.9:1234"
+		w := httptest.NewRecorder()
+		s.Routes().ServeHTTP(w, req)
+		return w.Code
+	}
+	for _, p := range paths {
+		if code := get(p, tenant); code != http.StatusForbidden {
+			t.Errorf("GET %s with a tenant key = %d, want 403", p, code)
+		}
+		if code := get(p, "fleet-key"); code != http.StatusOK {
+			t.Errorf("GET %s with the operator key = %d, want 200", p, code)
+		}
+	}
+}

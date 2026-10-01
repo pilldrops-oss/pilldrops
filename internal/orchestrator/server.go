@@ -280,8 +280,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("POST /internal/heartbeat", s.handleHeartbeat)
 	// Behind auth: the scrape names every node.
-	mux.HandleFunc("GET /metrics", s.auth(s.handleMetrics))
-	mux.HandleFunc("GET /v1/nodes", s.auth(s.handleNodes))
+	mux.HandleFunc("GET /metrics", s.authOperator(s.handleMetrics))
+	mux.HandleFunc("GET /v1/nodes", s.authOperator(s.handleNodes))
 	// Mounted explicitly, or the /v1/ catch-all would return one node's answer as the fleet's.
 	mux.HandleFunc("GET /v1/capabilities", s.auth(s.handleCapabilities))
 	mux.HandleFunc("GET /v1/whoami", s.auth(s.handleWhoami))
@@ -296,7 +296,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/sandboxes/{id}/preview-status", s.auth(s.bySlug(s.handlePreviewStatus)))
 	mux.HandleFunc("GET /v1/sandboxes/{id}/metrics", s.auth(s.bySlug(s.handleSandboxMetrics)))
 	mux.HandleFunc("GET /v1/sandboxes/{id}/ports", s.auth(s.bySlug(s.handleSandboxPorts)))
-	mux.HandleFunc("GET /v1/cluster/stats", s.auth(s.handleClusterStats))
+	mux.HandleFunc("GET /v1/cluster/stats", s.authOperator(s.handleClusterStats))
 	mux.HandleFunc("POST /v1/nodes/{id}/cordon", s.auth(s.handleCordon))
 	mux.HandleFunc("POST /v1/nodes/{id}/uncordon", s.auth(s.handleUncordon))
 	mux.HandleFunc("POST /v1/nodes/{id}/drain", s.auth(s.handleDrain))
@@ -314,24 +314,25 @@ func (s *Server) Routes() http.Handler {
 	// Fanned out to every node so the tag launches anywhere.
 	mux.HandleFunc("POST /v1/images/build", s.auth(s.handleImageBuild))
 	mux.HandleFunc("GET /v1/history/{id}", s.auth(s.handleHistoryGet))
-	mux.HandleFunc("PATCH /v1/images/{id}", s.auth(s.handleImagePatch))
+	mux.HandleFunc("PATCH /v1/images/{id}", s.authOperator(s.handleImagePatch))
+	mux.HandleFunc("GET /v1/images/export", s.authOperator(s.handleNodeResourceProxy))
 	// Admin analytics go to one healthy node; a fan-out would double-count logins.
-	mux.HandleFunc("POST /v1/admin/login-event", s.auth(s.handleLoginEventProxy))
-	mux.HandleFunc("GET /v1/admin/users", s.auth(s.handleAdminUsersProxy))
-	mux.HandleFunc("GET /v1/admin/users/{ownerID}", s.auth(s.handleAdminUserDetailProxy))
-	mux.HandleFunc("GET /v1/admin/overview", s.auth(s.handleAdminOverviewProxy))
-	mux.HandleFunc("GET /v1/admin/sessions", s.auth(s.handleAdminSessionsProxy))
-	mux.HandleFunc("GET /v1/admin/errors", s.auth(s.handleAdminErrorsProxy))
-	mux.HandleFunc("GET /v1/admin/history/{id}", s.auth(s.handleAdminHistoryProxy))
-	mux.HandleFunc("GET /v1/admin/sandboxes/{id}", s.auth(s.handleAdminSandboxProxy))
+	mux.HandleFunc("POST /v1/admin/login-event", s.authOperator(s.handleLoginEventProxy))
+	mux.HandleFunc("GET /v1/admin/users", s.authOperator(s.handleAdminUsersProxy))
+	mux.HandleFunc("GET /v1/admin/users/{ownerID}", s.authOperator(s.handleAdminUserDetailProxy))
+	mux.HandleFunc("GET /v1/admin/overview", s.authOperator(s.handleAdminOverviewProxy))
+	mux.HandleFunc("GET /v1/admin/sessions", s.authOperator(s.handleAdminSessionsProxy))
+	mux.HandleFunc("GET /v1/admin/errors", s.authOperator(s.handleAdminErrorsProxy))
+	mux.HandleFunc("GET /v1/admin/history/{id}", s.authOperator(s.handleAdminHistoryProxy))
+	mux.HandleFunc("GET /v1/admin/sandboxes/{id}", s.authOperator(s.handleAdminSandboxProxy))
 	// Authorization probe for the admin SPA: 200 = allowed, 403 = signed in but not allow-listed.
-	mux.HandleFunc("GET /v1/admin/whoami", s.auth(s.handleAdminWhoami))
+	mux.HandleFunc("GET /v1/admin/whoami", s.authOperator(s.handleAdminWhoami))
 
 	mux.HandleFunc("POST /v1/feedback", s.auth(s.handleFeedbackCreate))
-	mux.HandleFunc("GET /v1/admin/feedback", s.auth(s.handleFeedbackList))
+	mux.HandleFunc("GET /v1/admin/feedback", s.authOperator(s.handleFeedbackList))
 
 	mux.HandleFunc("POST /v1/waitlist", s.auth(s.handleWaitlistCreateProxy))
-	mux.HandleFunc("GET /v1/admin/waitlist", s.auth(s.handleAdminWaitlistProxy))
+	mux.HandleFunc("GET /v1/admin/waitlist", s.authOperator(s.handleAdminWaitlistProxy))
 	mux.HandleFunc("/v1/sandboxes/{id}/{rest...}", s.auth(s.bySlug(s.handleSandboxProxy)))
 
 	// Routes this tier answers from the shared store go before the /v1/
@@ -357,6 +358,9 @@ func (s *Server) Routes() http.Handler {
 	// at request time, after Routes() has returned.
 	mux.Handle("/mcp", &mcp.HTTPServer{API: mux})
 
+	// A node trusts the control plane's key as an operator, so the role check
+	// for admin routes no handler here names has to happen at this door.
+	mux.HandleFunc("/v1/admin/", s.authOperator(s.handleNodeResourceProxy))
 	mux.HandleFunc("/v1/", s.auth(s.handleNodeResourceProxy))
 
 	// The SPA's path to the live-stats stream is a constant, so this tier must serve it.
@@ -472,7 +476,8 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		if s.apiKey == "" {
 			// Fail closed: an unset key must not serve anonymously.
 			if devInsecure() {
-				next(w, r)
+				// No credential exists to tell callers apart, so each is the operator.
+				next(w, r.WithContext(withOperator(r.Context())))
 				return
 			}
 			writeErr(w, 503, "orchestrator not configured: no API key set (refusing to serve unauthenticated; set ORCHESTRATOR_API_KEY, or DEV_INSECURE=1 for local dev)")

@@ -639,6 +639,16 @@ func (s *Server) requireFleetOperator(w http.ResponseWriter, r *http.Request) bo
 	if isOperator(r) {
 		return true
 	}
-	writeErr(w, http.StatusForbidden, "changing the fleet is an operator action")
+	writeErr(w, http.StatusForbidden, "operator role required")
 	return false
+}
+
+// authOperator is auth plus requireFleetOperator, for routes that read or
+// change the whole fleet rather than one org's resources.
+func (s *Server) authOperator(next http.HandlerFunc) http.HandlerFunc {
+	return s.auth(func(w http.ResponseWriter, r *http.Request) {
+		if s.requireFleetOperator(w, r) {
+			next(w, r)
+		}
+	})
 }
