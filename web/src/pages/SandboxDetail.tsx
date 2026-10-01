@@ -427,19 +427,22 @@ function SlugRow({ sandbox, onChanged }: { sandbox: SandboxDetailType; onChanged
     <div className="info-row">
       <div className="info-key">Slug</div>
       <div className="info-val">
-        <input
-          className="sb-name-input"
-          value={value}
-          disabled={busy}
-          maxLength={63}
-          placeholder="myapp"
-          aria-label="Sandbox slug"
-          onChange={e => setValue(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') void save() }}
-        />
-        <button className="btn" disabled={busy || value.trim() === (sandbox.slug ?? '')} onClick={() => void save()} style={{ marginLeft: 8 }}>
-          Save
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            className="sb-name-input"
+            style={{ flex: 1, minWidth: 0 }}
+            value={value}
+            disabled={busy}
+            maxLength={63}
+            placeholder="myapp"
+            aria-label="Sandbox slug"
+            onChange={e => setValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') void save() }}
+          />
+          <button className="btn" disabled={busy || value.trim() === (sandbox.slug ?? '')} onClick={() => void save()}>
+            Save
+          </button>
+        </div>
         {host && (
           <div>
             <a href={host} target="_blank" rel="noopener noreferrer">{host}</a>
