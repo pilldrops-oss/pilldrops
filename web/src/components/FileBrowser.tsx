@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { fsList, fsRead, fsWrite } from '../api'
+import { fsDownload, fsList, fsRead, fsWrite } from '../api'
 import type { FilesystemEntry } from '../types'
 import { joinPath, baseName, ROOT } from '../lib/filePath'
 import { languageIdFor, LANGUAGE_LABEL } from './fileLang'
@@ -12,6 +12,14 @@ import { errText } from '../lib/errText'
 // node_modules would be tens of thousands of them; refuse before starting
 // rather than a minute in.
 const MAX_UPLOAD_FILES = 500
+
+// Past this the editor stalls and a save would round-trip megabytes; download instead.
+const MAX_EDIT_BYTES = 2 * 1024 * 1024
+
+// A NUL in the first chunk is the same binary test git and grep use.
+function looksBinary(text: string): boolean {
+  return text.slice(0, 8000).includes('\u0000')
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -38,6 +46,8 @@ export default function FileBrowser({ id }: { id: string }) {
   const [draft, setDraft] = useState('')
   const [loadingFile, setLoadingFile] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
+  // Why the open file is not shown in the editor, or '' when it is.
+  const [noEdit, setNoEdit] = useState('')
   const [saving, setSaving] = useState(false)
 
   const [fullscreen, setFullscreen] = useState(false)
@@ -88,7 +98,7 @@ export default function FileBrowser({ id }: { id: string }) {
     if (willExpand && !(path in tree.children) && !tree.loading[path]) loadDir(path)
   }, [expanded, tree, loadDir])
 
-  const openFile = useCallback(async (path: string) => {
+  const openFile = useCallback(async (path: string, size = 0) => {
     if (path === openPath) return
     if (openPath !== null && draft !== saved) {
       const ok = await confirm({
@@ -107,18 +117,40 @@ export default function FileBrowser({ id }: { id: string }) {
     }
     setOpenPath(path)
     setFileError(null)
-    setLoadingFile(true)
     setSaved('')
     setDraft('')
+    const tooBig = size > MAX_EDIT_BYTES
+    setNoEdit(tooBig ? `Too large to edit (${formatFileSize(size)})` : '')
+    if (tooBig) return
+    setLoadingFile(true)
     try {
       const text = await fsRead(id, path)
-      setSaved(text)
-      setDraft(text)
+      if (looksBinary(text)) setNoEdit('Binary file')
+      else {
+        setSaved(text)
+        setDraft(text)
+      }
     } catch (e) {
       setFileError(errText(e))
     }
     setLoadingFile(false)
   }, [id, openPath, draft, saved, confirm])
+
+  const download = useCallback(async () => {
+    if (!openPath) return
+    try {
+      const url = URL.createObjectURL(await fsDownload(id, openPath))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = baseName(openPath)
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      toast.error(`Could not download ${baseName(openPath)}: ${errText(e)}`)
+    }
+  }, [id, openPath, toast])
 
   const saveRef = useRef<() => void>(() => {})
 
@@ -254,7 +286,7 @@ export default function FileBrowser({ id }: { id: string }) {
           type="button"
           className={`fx-node fx-file${openPath === childPath ? ' active' : ''}`}
           style={{ paddingLeft: 6 + depth * 13 }}
-          onClick={() => openFile(childPath)}
+          onClick={() => openFile(childPath, entry.size)}
           title={childPath}
         >
           <span className="fx-caret" aria-hidden />
@@ -355,7 +387,10 @@ export default function FileBrowser({ id }: { id: string }) {
                 {openPath}
                 {dirty && <span className="fx-dirty" title="Unsaved changes" aria-label="Unsaved changes">●</span>}
               </span>
-              <span className="fx-bar-lang">{LANGUAGE_LABEL[lang]}</span>
+              <span className="fx-bar-lang">{noEdit ? '—' : LANGUAGE_LABEL[lang]}</span>
+              <button type="button" className="btn ghost" onClick={download} title="Download this file">
+                Download
+              </button>
               <button
                 type="button"
                 className="btn primary fx-save"
@@ -392,7 +427,13 @@ export default function FileBrowser({ id }: { id: string }) {
           )}
           {openPath && loadingFile && <div className="fx-loading">Loading {baseName(openPath)}…</div>}
           {openPath && fileError && <div className="fx-file-err">{fileError}</div>}
-          {openPath && !loadingFile && !fileError && (
+          {openPath && noEdit && (
+            <div className="fx-empty">
+              <span>{noEdit} — download instead</span>
+              <button type="button" className="btn" onClick={download}>Download {baseName(openPath)}</button>
+            </div>
+          )}
+          {openPath && !loadingFile && !fileError && !noEdit && (
             <LazyFileEditor value={draft} language={lang} onChange={setDraft} onSave={onSave} />
           )}
         </div>

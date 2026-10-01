@@ -269,15 +269,16 @@ export const getSandboxPorts = (id: string) =>
 export const fsList = (id: string, path: string) =>
   request<FilesystemListResp>('GET', `/v1/sandboxes/${id}/filesystem/list?path=${encodeURIComponent(path)}`, undefined)
 
-export const fsRead = async (id: string, path: string): Promise<string> => {
+export const fsDownload = async (id: string, path: string): Promise<Blob> => {
   const key = await bearerToken()
-  return fetch(`/v1/sandboxes/${id}/files?path=${encodeURIComponent(path)}`, {
+  const r = await fetch(`/v1/sandboxes/${id}/files?path=${encodeURIComponent(path)}`, {
     headers: bearerHeader(key),
-  }).then(r => {
-    if (!r.ok) throw new Error(`GET /v1/sandboxes/${id}/files → ${r.status}`)
-    return r.text()
   })
+  if (!r.ok) throw new Error(`GET /v1/sandboxes/${id}/files → ${r.status}`)
+  return r.blob()
 }
+
+export const fsRead = async (id: string, path: string): Promise<string> => (await fsDownload(id, path)).text()
 
 // content may be a Blob (a File from a drop or a picker), which is sent as-is
 // rather than read into a string first: /files streams the body to the sandbox
