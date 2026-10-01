@@ -141,7 +141,6 @@ func TestDomainCreateRefusesAPrivateSandbox(t *testing.T) {
 	}
 }
 
-// A wrong-org key must not learn that the host exists.
 func TestDomainCreateRefusesPlatformPorts(t *testing.T) {
 	s, _ := domainServer(t)
 	for _, port := range []string{"7681", "6080"} {
@@ -155,6 +154,7 @@ func TestDomainCreateRefusesPlatformPorts(t *testing.T) {
 	}
 }
 
+// A wrong-org key must not learn that the host exists.
 func TestDomainOwnershipIs404Not403(t *testing.T) {
 	s, _ := domainServer(t)
 	if w := apiReq(t, s, "POST", "u:one", "/v1/domains", `{"host":"app.example.com","sandbox_id":"sb1"}`); w.Code != http.StatusCreated {
