@@ -9,6 +9,7 @@ import (
 
 	"github.com/pilldrops-oss/pilldrops/internal/cron"
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
@@ -101,6 +102,10 @@ func (s *Server) handleCronList(w http.ResponseWriter, r *http.Request) {
 //	DELETE /v1/cron/{id}
 func (s *Server) handleCronDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !s.ownsCronJob(r, id) {
+		writeErr(w, http.StatusNotFound, "job not found")
+		return
+	}
 	ok, err := s.st.DeleteCronJob(r.Context(), orgID(r), id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not delete the job")
@@ -126,6 +131,10 @@ func (s *Server) handleCronToggle(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	if !s.ownsCronJob(r, id) {
+		writeErr(w, http.StatusNotFound, "job not found")
+		return
+	}
 	ok, err := s.st.SetCronEnabled(r.Context(), orgID(r), id, body.Enabled)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not update the job")
@@ -145,7 +154,7 @@ func (s *Server) handleCronToggle(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCronRunNow(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	job, ok := s.st.CronJobByID(r.Context(), orgID(r), id)
-	if !ok {
+	if !ok || !s.ownsCronJob(r, id) {
 		writeErr(w, http.StatusNotFound, "job not found")
 		return
 	}
@@ -163,6 +172,26 @@ func (s *Server) handleCronRunNow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": job.ID, "status": status, "exit_code": code, "output": out,
 	})
+}
+
+// ownsCronJob applies the sandbox rule to a job's sandbox, so a member cannot
+// run, delete or disable a job on another member's private sandbox. Judged from
+// the shared row rather than owns(), because any node of a fleet answers
+// delete and toggle, not only the one hosting the sandbox.
+func (s *Server) ownsCronJob(r *http.Request, id string) bool {
+	job, ok := s.st.CronJobByID(r.Context(), orgID(r), id)
+	if !ok {
+		return false
+	}
+	row, found, err := s.st.GetActiveSandboxRow(r.Context(), job.SandboxID)
+	if err != nil {
+		return false
+	}
+	// A job outlives its sandbox only until the destroy sweeps it; the org may clean it up.
+	if !found {
+		return true
+	}
+	return sandbox.Visible(row.ID, row.Visibility, row.CreatedBy, keyIDOf(r), operatorPrincipal(r))
 }
 
 // daemonCronRunner runs a job's command inside its sandbox.

@@ -44,6 +44,15 @@ func TestCronCreateAndRunReachTheNodeHostingTheSandbox(t *testing.T) {
 	}
 	s.reg.Place("sb-on-n1", "n1")
 	s.reg.Place("sb-on-n2", "n2")
+	s.reg.Place("sb-private", "n1")
+	for id, vis := range map[string]string{"sb-on-n1": "", "sb-on-n2": "", "sb-private": "private"} {
+		if err := st.SaveSandbox(t.Context(), store.SandboxRecord{
+			ID: id, Template: "base", OrgID: "u:tenant", State: "running",
+			CreatedBy: "key_someone_else", Visibility: vis,
+		}); err != nil {
+			t.Fatalf("save %s: %v", id, err)
+		}
+	}
 	tenant := orgKey(t, s, "u:tenant")
 
 	call := func(method, path, body string) int {
@@ -90,4 +99,16 @@ func TestCronCreateAndRunReachTheNodeHostingTheSandbox(t *testing.T) {
 	if code := call("POST", "/v1/cron/"+other.ID+"/run", ""); code != http.StatusNotFound {
 		t.Errorf("run-now on another org's job = %d, want 404", code)
 	}
+	// Another member's private sandbox is not the caller's to schedule on.
+	mu.Lock()
+	hits = map[string][]string{}
+	mu.Unlock()
+	if code := call("POST", "/v1/cron", `{"sandbox_id":"sb-private","schedule":"* * * * *","command":"true"}`); code != http.StatusNotFound {
+		t.Errorf("create on another member's private sandbox = %d, want 404", code)
+	}
+	mu.Lock()
+	if len(hits) != 0 {
+		t.Errorf("a refused create still reached a node: %v", hits)
+	}
+	mu.Unlock()
 }

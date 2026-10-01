@@ -44,10 +44,11 @@ func (s *Server) handleCronRunProxy(w http.ResponseWriter, r *http.Request) {
 	s.forwardToSandboxNode(w, r, job.SandboxID, nil)
 }
 
-// forwardToSandboxNode relays r, with body, to the node that hosts sandboxID.
+// forwardToSandboxNode relays r, with body, to the node that hosts sandboxID,
+// if the caller may act on that sandbox: a job runs as its sandbox's owner.
 func (s *Server) forwardToSandboxNode(w http.ResponseWriter, r *http.Request, sandboxID string, body []byte) {
 	node, ok := s.reg.NodeFor(sandboxID)
-	if !ok {
+	if !ok || !s.callerOwnsSandbox(r, sandboxID) {
 		writeErr(w, http.StatusNotFound, "sandbox not found")
 		return
 	}

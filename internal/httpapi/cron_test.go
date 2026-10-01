@@ -161,3 +161,39 @@ func TestCronRefusesAgentMode(t *testing.T) {
 		}
 	}
 }
+
+// A job acts on its sandbox, so on a private sandbox only its creator and an
+// operator may run, disable or delete it, as with the sandbox itself.
+func TestCronJobOnAPrivateSandboxIsTheCreators(t *testing.T) {
+	srv, st, _ := newTestServerWithStore(t)
+	k1, k2, kop := twoMembersAndAnOperator(t, st)
+	code, out := do(t, "POST", srv.URL+"/v1/sandboxes", k1, `{"template":"base","visibility":"private"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("private create = %d (%v)", code, out)
+	}
+	code, out = do(t, "POST", srv.URL+"/v1/cron", k1,
+		`{"sandbox_id":"`+str(out, "id")+`","schedule":"0 9 * * *","command":"true"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("cron create = %d (%v)", code, out)
+	}
+	job := srv.URL + "/v1/cron/" + str(out, "id")
+
+	for _, probe := range []struct{ method, path, body string }{
+		{"POST", job + "/run", ""},
+		{"POST", job + "/toggle", `{"enabled":false}`},
+		{"DELETE", job, ""},
+	} {
+		if code, _ := do(t, probe.method, probe.path, k2, probe.body); code != http.StatusNotFound {
+			t.Errorf("another member %s %s = %d, want 404", probe.method, probe.path, code)
+		}
+	}
+	if code, _ := do(t, "POST", job+"/toggle", kop, `{"enabled":false}`); code != http.StatusOK {
+		t.Errorf("operator toggle = %d, want 200", code)
+	}
+	if code, _ := do(t, "POST", job+"/run", k1, ""); code != http.StatusOK {
+		t.Errorf("creator run = %d, want 200", code)
+	}
+	if code, _ := do(t, "DELETE", job, k1, ""); code != http.StatusOK {
+		t.Errorf("creator delete = %d, want 200", code)
+	}
+}
