@@ -284,7 +284,12 @@ export const fsDownload = async (id: string, path: string): Promise<Blob> => {
   const r = await fetch(`/v1/sandboxes/${id}/files?path=${encodeURIComponent(path)}`, {
     headers: bearerHeader(key),
   })
-  if (!r.ok) throw new Error(`GET /v1/sandboxes/${id}/files → ${r.status}`)
+  if (!r.ok) {
+    // The server's own message is what says *why* — a 404 naming the missing
+    // path reads very differently from a bare status.
+    const body = await r.text().catch(() => '')
+    throw new Error(`GET /v1/sandboxes/${id}/files → ${r.status}: ${body}`)
+  }
   return r.blob()
 }
 

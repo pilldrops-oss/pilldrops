@@ -8,6 +8,7 @@ import { cancellableCreate } from '../lib/cancellableCreate'
 import { pollPreviewReady, type PollResult } from '../lib/previewStatus'
 import { probeSettles, REVERIFY_INTERVAL_MS, REVERIFY_MAX_TICKS } from '../lib/reverify'
 import { track } from '../lib/telemetry'
+import { errText } from '../lib/errText'
 
 export type LaunchPhase = 'form' | 'running' | 'done' | 'error'
 
@@ -130,7 +131,10 @@ export function useLaunchRun(
       }
       setPhase('done')
     } catch (err) {
-      setError((err as Error).message)
+      // The server's own message (a docker port refusal, an egress allowlist
+      // error, …) is what says why the create failed; errText also copes
+      // with a rejection that is not a plain Error.
+      setError(errText(err))
       setPhase('error')
       track('launch_outcome', { template: t.id, state: 'create_failed' })
     }
