@@ -254,19 +254,21 @@ function PurposeConfig({ cfg }: { cfg: LaunchConfig }) {
             report is served on the preview URL. Leave blank to just open a terminal.
           </p>
         </div>
-        <div className="lm-sec">
-          <button
-            type="button"
-            className="pa-toggle"
-            aria-pressed={cfg.serveReport}
-            onClick={() => cfg.setServeReport(!cfg.serveReport)}
-          >
-            <span className={`pa-tg${cfg.serveReport ? ' on' : ''}`}>
-              <i />
-            </span>
-            Serve the HTML report on preview
-          </button>
-        </div>
+        {cfg.tpl?.outcome !== 'report' && (
+          <div className="lm-sec">
+            <button
+              type="button"
+              className="pa-toggle"
+              aria-pressed={cfg.serveReport}
+              onClick={() => cfg.setServeReport(!cfg.serveReport)}
+            >
+              <span className={`pa-tg${cfg.serveReport ? ' on' : ''}`}>
+                <i />
+              </span>
+              Serve the HTML report on preview
+            </button>
+          </div>
+        )}
       </>
     )
   }

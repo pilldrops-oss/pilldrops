@@ -193,10 +193,12 @@ export function PreviewTab({
   id,
   status,
   defaultPort,
+  outcome,
 }: {
   id: string
   status: string
   defaultPort?: number
+  outcome?: string
 }) {
   const seed = String(defaultPort || 8000)
   const [port, setPort] = useState(seed)
@@ -222,6 +224,10 @@ export function PreviewTab({
   }
 
   const iframeUrl = usePreviewLink(id, activePort)
+  // The preview root is a directory listing whose root-relative links 404 under
+  // path-form previews, so the report gets a direct link.
+  const [previewPath, previewQuery] = iframeUrl.split('?')
+  const reportUrl = `${previewPath}report/${previewQuery ? `?${previewQuery}` : ''}`
 
   function previewBody() {
     if (!isRunning) return <NotRunningNotice status={status} what="preview your application" />
@@ -266,6 +272,11 @@ export function PreviewTab({
             className="btn"
           >
             Open in new tab ↗
+          </a>
+        )}
+        {isRunning && outcome === 'report' && iframeUrl && (
+          <a href={reportUrl} target="_blank" rel="noopener noreferrer" className="btn primary">
+            View report ↗
           </a>
         )}
       </div>
@@ -341,7 +352,11 @@ function NotRunningNotice({ status, what }: { status: string; what: string }) {
   )
 }
 
-function LogsTab({ id }: { id: string }) {
+// Colour and cursor escapes; the feed is plain text, so they would show as junk.
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
+
+export function LogsTab({ id }: { id: string }) {
   const [lines, setLines] = useState<string[]>([])
   const [note, setNote] = useState('')
   const [truncated, setTruncated] = useState(false)
@@ -355,7 +370,7 @@ function LogsTab({ id }: { id: string }) {
       getSandboxLogs(id)
         .then(r => {
           if (!alive) return
-          setLines(r.lines ?? [])
+          setLines((r.lines ?? []).map(l => l.replace(ANSI_RE, '')))
           setNote(r.note ?? '')
           setTruncated(r.truncated ?? false)
         })
@@ -369,36 +384,44 @@ function LogsTab({ id }: { id: string }) {
     if (autoScroll && bottomRef.current) bottomRef.current.scrollIntoView()
   }, [lines, autoScroll])
 
+  // Scrolling up to read stops following; the checkbox turns it back on.
   function handleScroll() {
     const el = containerRef.current
-    if (!el) return
-    setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 60)
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight >= 60) setAutoScroll(false)
   }
 
   return (
-    <div
-      ref={containerRef}
-      onScroll={handleScroll}
-      className="log-feed"
-      style={{
-        flex: 1, overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: 12.5,
-        background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: 14,
-      }}
-    >
-      {truncated && (
-        <div style={{ color: 'var(--faint)', marginBottom: 6 }}>… older output truncated</div>
-      )}
-      {lines.length === 0 ? (
-        <div className="empty" style={{ padding: '60px 20px' }}>
-          {note || 'No app output yet.'}
-          {!note && <p>stdout and stderr of the start command appear here.</p>}
-        </div>
-      ) : (
-        lines.map((l, i) => (
-          <div key={i} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{l}</div>
-        ))
-      )}
-      <div ref={bottomRef} />
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+      <div className="logbar">
+        <span className="hint">{lines.length} lines</span>
+        <label className="chk">
+          <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} /> auto-scroll
+        </label>
+      </div>
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="log-feed"
+        style={{
+          flex: 1, overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: 12.5,
+          background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: 14,
+        }}
+      >
+        {truncated && (
+          <div style={{ color: 'var(--faint)', marginBottom: 6 }}>… older output truncated</div>
+        )}
+        {lines.length === 0 ? (
+          <div className="empty" style={{ padding: '60px 20px' }}>
+            {note || 'No app output yet.'}
+            {!note && <p>stdout and stderr of the start command appear here.</p>}
+          </div>
+        ) : (
+          lines.map((l, i) => (
+            <div key={i} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{l}</div>
+          ))
+        )}
+        <div ref={bottomRef} />
+      </div>
     </div>
   )
 }
@@ -829,6 +852,7 @@ export default function SandboxDetail() {
             id={id}
             status={sb.status}
             defaultPort={previewPort}
+            outcome={tplMeta?.outcome}
           />
         )}
         {tab === 'logs' && <LogsTab id={id} />}

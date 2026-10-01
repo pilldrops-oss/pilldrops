@@ -55,7 +55,9 @@ export function composeCreateBody(cfg: {
       const reportServe = /playwright/.test(cmd)
         ? 'npx playwright show-report --host 0.0.0.0 --port $PORT'
         : 'python3 -m http.server $PORT'
-      const start = serveReport ? `${cmd}; ${reportServe}` : cmd
+      // A template whose preview is its report serves it already (playwright's
+      // start.sh serves /root/recordings on $PORT), so a second server would only fail.
+      const start = serveReport && tpl.outcome !== 'report' ? `${cmd}; ${reportServe}` : cmd
       return { ...vars, start, port: portNum, ...life }
     }
     const body = universalStartBody(previewPort)
