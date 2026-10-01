@@ -19,6 +19,13 @@ const STATUS_LABEL: Record<Status, string> = {
   closed: 'disconnected',
 }
 
+// A preview on its own sandbox domain arrives as an absolute https:// URL, which
+// must keep its host; only a relative path is served by the dashboard's origin.
+export function socketUrl(wsPath: string, loc: Pick<Location, 'protocol' | 'host'>): string {
+  if (/^https?:\/\//.test(wsPath)) return wsPath.replace(/^http/, 'ws')
+  return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}${wsPath}`
+}
+
 export default function SandboxTerminal({ wsPath, disabledReason, onReady }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const [status, setStatus] = useState<Status>('connecting')
@@ -42,8 +49,7 @@ export default function SandboxTerminal({ wsPath, disabledReason, onReady }: Pro
     term.open(hostRef.current)
     fit.fit()
 
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${location.host}${wsPath}`)
+    const ws = new WebSocket(socketUrl(wsPath, location))
     ws.binaryType = 'arraybuffer'
 
     const sendResize = () => {
