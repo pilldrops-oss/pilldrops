@@ -1,5 +1,4 @@
 import type { Template } from '../types'
-import { AGENT_CONFIG } from './launchAgents'
 
 // START_FILE is where a plain sandbox's terminal start script is written.
 export const START_FILE = '_pd_start.sh'
@@ -126,8 +125,6 @@ go 1.22
 // ships its own server or needs a full uploaded project. The first file is the primary one.
 export function starterFiles(tpl: Template): Array<{ path: string; content: string }> {
   if (tpl.has_server) return []
-  // Coding-CLI agents generate their own code from a task.
-  if (AGENT_CONFIG[tpl.id] || (tpl.tags ?? []).map(t => t.toLowerCase()).includes('coding-cli')) return []
   // Test templates run an uploaded suite, not a server.
   if ((tpl.tags ?? []).map(t => t.toLowerCase()).some(t => ['e2e', 'playwright', 'testing', 'test'].includes(t))) return []
   const id = (tpl.id || '').toLowerCase()

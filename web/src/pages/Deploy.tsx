@@ -33,12 +33,12 @@ import {
   SummaryPanel,
   EnvEditor,
   WhatsInside,
-  PurposeConfig,
   ResourcePicker,
   LifetimePicker,
   DeployProgress,
   deploySteps,
   useLaunchConfig,
+  type LaunchConfig,
   buildCliSnippet,
   buildPilldropsExport,
   ExportPilldropsConfig,
@@ -48,6 +48,7 @@ import {
   starterFiles,
   sizeLabel,
 } from '../components/launchConfig'
+import { envPlaceholder } from '../lib/launchKinds'
 import { lifetimeToInputs } from '../lib/lifetime'
 import { useGitRepo } from '../hooks/useGitRepo'
 import { useLaunchRun } from '../hooks/useLaunchRun'
@@ -108,6 +109,197 @@ function pickProbeFiles(
 function setupCommands(composed: string[] | undefined, fromForm: string[]): string[] | undefined {
   if (composed?.length) return composed
   return fromForm.length ? fromForm : undefined
+}
+
+function StartConfig({
+  tpl,
+  start,
+  onStartChange,
+  port,
+  onPortChange,
+  previewPort,
+}: {
+  tpl: Template
+  start: string
+  onStartChange: (v: string) => void
+  port: string
+  onPortChange: (v: string) => void
+  previewPort: number
+}) {
+  if (tpl.has_server) {
+    return (
+      <div className="lm-note">
+        <b>Built-in server.</b>{' '}
+        {tpl.server_desc || 'This template serves a built-in app on the preview URL.'} Preview
+        port: <code>{tpl.default_port ?? tpl.port ?? previewPort}</code>. No start command needed.
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="form-group lm-fg">
+        <label>
+          Start command{' '}
+          <span className="lm-opt-note">optional — leave blank for just a shell</span>
+        </label>
+        <input
+          value={start}
+          onChange={e => onStartChange(e.target.value)}
+          placeholder={tpl.start_suggestion || 'e.g. python3 -m http.server $PORT'}
+        />
+        <p className="lm-help">
+          Use <code>$PORT</code> so your app binds the port the preview serves.
+        </p>
+      </div>
+      <div className="form-group lm-fg lm-port">
+        <label>Port</label>
+        <input
+          value={port}
+          onChange={e => onPortChange(e.target.value)}
+          inputMode="numeric"
+          placeholder="8000"
+        />
+        <p className="lm-help">
+          Your app must bind <code>$PORT</code>; the preview serves this port.
+        </p>
+      </div>
+    </>
+  )
+}
+
+// PurposeConfig renders the per-kind fields the launch form needs beyond
+// template defaults: a service's credentials, a GUI's note, a test's command,
+// a shell's start command, or (the web fallback) start command + port.
+function PurposeConfig({ cfg }: { cfg: LaunchConfig }) {
+  const { tpl, kind } = cfg
+  if (!tpl) return null
+
+  if (kind === 'service') {
+    const svcPort = tpl.default_port ?? tpl.port ?? cfg.previewPort
+    const declared = tpl.env ?? []
+    return (
+      <>
+        <div className="lm-sec">
+          <div className="lm-sec-h">
+            Connection{' '}
+            <span className="lm-opt-note">reached at the sandbox host on port {svcPort}</span>
+          </div>
+          <div className="lm-note">
+            This service listens on <b>port {svcPort}</b>. No start command — set the credentials
+            below and connect via the sandbox host.
+          </div>
+        </div>
+        {declared.length > 0 && (
+          <div className="lm-sec">
+            <div className="lm-sec-h">Credentials</div>
+            <div className="lm-env">
+              {declared.map(e => (
+                <label key={e.name} className="lm-env-row">
+                  <span className="lm-env-name">
+                    {e.name}
+                    {e.required && (
+                      <span className="lm-req" title="required">
+                        {' '}
+                        *
+                      </span>
+                    )}
+                  </span>
+                  <input
+                    type={e.secret ? 'password' : 'text'}
+                    value={cfg.declaredEnv[e.name] ?? ''}
+                    placeholder={envPlaceholder(e)}
+                    autoComplete="off"
+                    onChange={ev => cfg.setDeclaredEnvVar(e.name, ev.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+      </>
+    )
+  }
+
+  if (kind === 'gui') {
+    return (
+      <div className="lm-sec">
+        <div className="lm-note">
+          <b>Built-in screen.</b>{' '}
+          {tpl.server_desc || 'This template streams a graphical desktop on the preview URL.'}{' '}
+          Preview port: <code>{tpl.default_port ?? tpl.port ?? cfg.previewPort}</code>. No start
+          command — open the preview URL to see and control it.
+        </div>
+      </div>
+    )
+  }
+
+  if (kind === 'test') {
+    return (
+      <>
+        <div className="lm-sec">
+          <div className="lm-sec-h">
+            Test command <span className="lm-opt-note">runs your E2E suite</span>
+          </div>
+          <input
+            className="pa-input mono"
+            value={cfg.testCmd}
+            onChange={e => cfg.setTestCmd(e.target.value)}
+            placeholder="npx playwright test"
+          />
+          <p className="lm-help">
+            Attach your test project (Advanced → Files), then set the command — on finish the HTML
+            report is served on the preview URL. Leave blank to just open a terminal.
+          </p>
+        </div>
+        <div className="lm-sec">
+          <button
+            type="button"
+            className="pa-toggle"
+            aria-pressed={cfg.serveReport}
+            onClick={() => cfg.setServeReport(!cfg.serveReport)}
+          >
+            <span className={`pa-tg${cfg.serveReport ? ' on' : ''}`}>
+              <i />
+            </span>
+            Serve the HTML report on preview
+          </button>
+        </div>
+      </>
+    )
+  }
+
+  if (kind === 'shell') {
+    return (
+      <div className="lm-sec">
+        <div className="lm-sec-h">
+          Start command{' '}
+          <span className="lm-opt-note">optional — leave blank for just a shell</span>
+        </div>
+        <input
+          className="pa-input mono"
+          value={cfg.start}
+          onChange={e => cfg.setStart(e.target.value)}
+          placeholder={tpl.start_suggestion || 'e.g. python3 -m http.server $PORT'}
+        />
+        <div className="lm-note" style={{ marginTop: 10 }}>
+          This is <b>just a shell</b> — a minimal environment. Add a start command to serve
+          something on the preview URL, or leave it blank and open an interactive session.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <StartConfig
+      tpl={tpl}
+      start={cfg.start}
+      onStartChange={cfg.setStart}
+      port={cfg.port}
+      onPortChange={cfg.setPort}
+      previewPort={cfg.previewPort}
+    />
+  )
 }
 
 export default function Deploy() {
@@ -261,48 +453,28 @@ export default function Deploy() {
         ? composeCreateBody({
             tpl: cfg.tpl,
             kind: cfg.kind,
-            agent: cfg.agent,
-            accessMode: cfg.accessMode,
-            apiKey: cfg.apiKey,
-            baseUrl: cfg.baseUrl,
-            model: cfg.model,
-            mcpJson: cfg.mcpJson,
-            task: cfg.task,
             testCmd: cfg.testCmd,
             serveReport: cfg.serveReport,
             start: cfg.start,
             port: cfg.port,
             envList: cfg.envList,
             previewPort: cfg.previewPort,
-            userSetup: cfg.setupCmds,
             timeoutInput: effLifetime.timeoutInput,
             idleInput: effLifetime.idleInput,
             primaryValue: cfg.primaryValue,
-            vaultNames: cfg.vaultNames,
-            agentMode: cfg.agentMode,
           })
         : null,
     [
       cfg.tpl,
       cfg.kind,
-      cfg.agent,
-      cfg.accessMode,
-      cfg.apiKey,
-      cfg.baseUrl,
-      cfg.model,
-      cfg.mcpJson,
-      cfg.task,
       cfg.testCmd,
       cfg.serveReport,
       cfg.start,
       cfg.port,
       cfg.envList,
       cfg.previewPort,
-      cfg.setupCmds,
       effLifetime,
       cfg.primaryValue,
-      cfg.vaultNames,
-      cfg.agentMode,
     ],
   )
 
@@ -314,9 +486,8 @@ export default function Deploy() {
         port: cfg.port,
         envList: cfg.envList,
         composed: composed ?? undefined,
-        mcpFile: cfg.agent?.mcpFile,
       }),
-    [cfg.tpl, cfg.start, cfg.port, cfg.envList, composed, cfg.agent],
+    [cfg.tpl, cfg.start, cfg.port, cfg.envList, composed],
   )
 
   const pilldropsExportConfig = useMemo(
@@ -403,7 +574,6 @@ export default function Deploy() {
       port: composed.port,
       env: composed.env,
       secret_refs: composed.secret_refs,
-      args: composed.args,
       setup: setupCommands(composed.setup, cfg.setupCmds),
       files: files.length ? files : undefined,
       timeout: composed.timeout,
@@ -709,9 +879,7 @@ export default function Deploy() {
             <div>
               <h1 className="h1">Catalog</h1>
               <p>
-                Pick a template to start — pre-configured environments for agents, apps, and
-                testing. Prefer outcomes? <a href="#/recipes">Recipes</a> are one-click starting
-                points built from these.
+                Pick a template to start — pre-configured environments for apps and testing.
               </p>
             </div>
           </div>
@@ -760,7 +928,6 @@ export default function Deploy() {
                 onQuickLaunch={quickLaunch}
                 favorites={favs}
                 onToggleFavorite={id => setFavs(toggleFavorite(id))}
-                vaultNames={cfg.vaultNames}
               />
             </>
         </>
@@ -787,9 +954,7 @@ export default function Deploy() {
                   error={launch.error}
                   onReset={launch.reset}
                   service={cfg.kind === 'service' ? tpl : null}
-                  onOpen={id => { launch.cancelAutoOpen(); navigate(`/sandbox/${id}`) }}
-                  autoOpening={launch.autoOpening}
-                  onCancelAutoOpen={launch.cancelAutoOpen}
+                  onOpen={id => navigate(`/sandbox/${id}`)}
                 />
               </div>
             ) : (
@@ -947,7 +1112,7 @@ export default function Deploy() {
                     Advanced{' '}
                     <span className="lm-opt-note">
                       name · setup commands · lifetime · visibility
-                      {!codeIsPrimary && cfg.kind !== 'agent' ? ' · files' : ''}
+                      {!codeIsPrimary ? ' · files' : ''}
                     </span>
                   </summary>
                   <div className="dep-sec-body">
@@ -1032,7 +1197,7 @@ export default function Deploy() {
                         </span>
                       </label>
                     </div>
-                    {!codeIsPrimary && cfg.kind !== 'agent' && (
+                    {!codeIsPrimary && (
                       <div className="lm-sec">
                         <div className="lm-sec-h">
                           Files <span className="lm-opt-note">optional — attach code to this sandbox</span>
@@ -1047,7 +1212,6 @@ export default function Deploy() {
               <SummaryPanel
                 tpl={tpl}
                 kind={cfg.kind}
-                accessMode={cfg.accessMode}
                 cpu={cfg.cpu}
                 mem={cfg.mem}
                 previewPort={cfg.previewPort}

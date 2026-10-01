@@ -12,7 +12,7 @@ export const TEMPLATES = {
   postgres: t({ id: 'postgres', name: 'Postgres', kind: 'service', tags: ['database', 'sql', 'postgres'], default_port: 5432 }),
   redis: t({ id: 'redis', name: 'Redis', kind: 'service', tags: ['database', 'cache', 'redis'], default_port: 6379 }),
   fastapi: t({ id: 'fastapi', name: 'FastAPI', kind: 'app', tags: ['python', 'api', 'fastapi'], default_port: 8000, start_suggestion: 'uvicorn main:app --port $PORT' }),
-  claude: t({ id: 'claude', name: 'Claude Code', kind: 'agent', tags: ['agent'], agent: {} as never }),
+  claude: t({ id: 'claude', name: 'Claude Code', tags: ['agent'] }),
   weird: t({ id: 'weird', name: 'Weird', kind: 'app', tags: ['weird'], default_port: 8000, start_suggestion: 'node server.js' }),
   nextjs: t({ id: 'nextjs', name: 'Next.js', kind: 'app', language: 'node', tags: ['nextjs', 'react'], default_port: 8000, start_suggestion: 'cd /root/app && npm run dev' }),
 }

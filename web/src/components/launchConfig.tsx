@@ -1,11 +1,8 @@
 
-export { AGENT_CONFIG, type AgentConfig } from '../lib/launchAgents'
-
 export {
-  type AccessMode, type AccessModeMeta, type Category, type ComposedBody,
-  type CustomEnv, type Kind, type ServiceConn,
-  ACCESS_MODES, CATEGORY_ORDER, KEEPALIVE_IDLE, KEEPALIVE_TIMEOUT,
-  agentFor, b64utf8, buildEnvList, categoryOf, ctaLabel, kindOf, previewLabel,
+  type Category, type ComposedBody, type CustomEnv, type Kind, type ServiceConn,
+  CATEGORY_ORDER, KEEPALIVE_IDLE, KEEPALIVE_TIMEOUT,
+  b64utf8, buildEnvList, categoryOf, ctaLabel, kindOf,
   requiredRuntime, resolveLifetime, runsOnLabel, serviceConn, shellQuote,
   sizeLabel, startsServer, withCur,
 } from '../lib/launchKinds'
@@ -19,8 +16,6 @@ export { type LaunchConfig, useLaunchConfig } from './launch/useLaunchConfig'
 export {
   TemplateGallery, TemplateList, groupByCategory, matchesQuery, quickLaunchable,
 } from './launch/TemplateGallery'
-
-export { PurposeConfig, StartConfig } from './launch/PurposeConfig'
 
 export { type DeployPhaseState, DeployProgress, deploySteps } from './launch/DeployProgress'
 

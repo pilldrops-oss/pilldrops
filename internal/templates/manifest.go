@@ -5,7 +5,6 @@ const (
 	KindShell   = "shell"
 	KindCode    = "code"
 	KindApp     = "app"
-	KindAgent   = "agent"
 	KindScreen  = "screen"
 	KindTest    = "test"
 	KindVerdict = "verdict"
@@ -14,7 +13,7 @@ const (
 
 // Kinds lists every valid kind.
 var Kinds = []string{
-	KindShell, KindCode, KindApp, KindAgent, KindScreen, KindTest, KindVerdict, KindService,
+	KindShell, KindCode, KindApp, KindScreen, KindTest, KindVerdict, KindService,
 }
 
 // PrimaryInput is the one thing a template's quick-launch asks for; nil means

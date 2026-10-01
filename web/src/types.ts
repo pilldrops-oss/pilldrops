@@ -206,8 +206,6 @@ export interface CreateSandboxReq {
   name?: string
   /** Vault secret names resolved to env vars server-side; raw values never appear here. */
   secret_refs?: string[]
-  /** Agent bootstrap args, expanded server-side from the template manifest. */
-  args?: { task?: string; access_mode?: string }
   template: string
   timeout?: number
   vcpu?: number
@@ -223,8 +221,6 @@ export interface CreateSandboxReq {
   runtime?: string
   /** Environment variables as "NAME=VALUE" strings. */
   env?: string[]
-  /** Autonomy posture for an agent workstation. Advisory: a "guided" launch whose approval gate fails reports autonomous. */
-  agent_mode?: 'supervised' | 'guided' | 'autonomous'
   /** Idle auto-pause window in seconds; -1 = never pause. */
   idle_timeout?: number
   /** Make the preview reachable without a token; default private. */
@@ -362,8 +358,6 @@ export interface Template {
   primary_input?: TemplatePrimaryInput
   /** Surface a launch lands on: terminal|preview|screen|report|verdict|endpoint|connection. */
   outcome?: string
-  /** Agent-CLI metadata for kind=agent templates. */
-  agent?: TemplateAgentMeta
 }
 
 export interface TemplatePrimaryInput {
@@ -371,26 +365,6 @@ export interface TemplatePrimaryInput {
   type: string
   label: string
   required?: boolean
-}
-
-/** TemplateAgentMeta mirrors Go AgentMeta. */
-export interface TemplateAgentMeta {
-  key_env?: string
-  key_label?: string
-  key_note?: string
-  run_cmd?: string
-  task_placeholder?: string
-  cli_bin?: string
-  install_cmd?: string
-  run_flags?: string
-  base_url_env?: string
-  model_env?: string
-  config_file?: string
-  config_label?: string
-  config_format?: string
-  config_example?: string
-  /** Flag routing tool approvals through the gate. Empty means the agent cannot be gated, so Guided must be offered as unavailable. */
-  permission_tool?: string
 }
 
 export interface FilesystemEntry {
@@ -501,14 +475,12 @@ export interface InvokeOptions {
 export interface Plan {
   id: string
   name: string
-  price_monthly: number
   allowance: number
   max_concurrent: number
   session_ttl_hrs: number
   max_vcpu: number
   max_mem_mb: number
   max_storage_mb: number
-  self_subscribe: boolean
   persistent: boolean
   included_hours: number
   max_workstations: number
@@ -664,34 +636,6 @@ export interface HistoryRecord {
   logs?: string
 }
 
-/** EnvEntry is one env var as the settings page sees it; secret values never leave the server. */
-export interface EnvEntry {
-  name: string
-  /** Present only when the variable is not a credential. */
-  value?: string
-  secret: boolean
-  set: boolean
-}
-
-export interface SandboxConfig {
-  env: EnvEntry[]
-  model: string
-  base_url: string
-}
-
-/** McpServer is a catalogue entry: a process to run (command) or an endpoint to reach (url). */
-export interface McpServer {
-  id: string
-  name: string
-  description: string
-  category: string
-  command?: string
-  args?: string[]
-  url?: string
-  /** Credentials this server needs. */
-  env_keys?: string[]
-}
-
 export interface CronJob {
   id: string
   sandbox_id: string
@@ -705,12 +649,6 @@ export interface CronJob {
   /** "ok" | "failed" (non-zero exit) | "error" (machine unreachable). */
   last_status: string
   last_output: string
-}
-
-export interface ChatMessage {
-  role: 'user' | 'agent'
-  text: string
-  at: number
 }
 
 /**
@@ -794,16 +732,4 @@ export interface ProjectRun {
   services?: RunService[]
   started_at: number
   ended_at?: number
-}
-
-/** ChannelInfo is one way to reach a workstation; unsupported channels are listed with `available:false` and a reason. */
-export interface ChannelInfo {
-  id: string
-  name: string
-  available: boolean
-  reason?: string
-  linked: boolean
-  chat_id?: string
-  read_only?: boolean
-  setup?: string
 }

@@ -7,7 +7,7 @@ import { TemplateIcon } from '../templateIcons'
 import { track } from '../../lib/telemetry'
 import { scoreTemplate, sortTemplates, SORT_LABELS, type SortKey } from '../../lib/templateSearch'
 
-import { type Category, CATEGORY_ORDER, agentFor, categoryOf, kindOf, sizeLabel } from '../../lib/launchKinds'
+import { type Category, CATEGORY_ORDER, categoryOf, sizeLabel } from '../../lib/launchKinds'
 
 export function groupByCategory(templates: Template[]): { category: Category; items: Template[] }[] {
   const byCat = new Map<Category, Template[]>()
@@ -26,11 +26,7 @@ export function matchesQuery(t: Template, q: string): boolean {
   return scoreTemplate(t, q) > 0
 }
 
-export function quickLaunchable(t: Template, vaultNames: string[] = []): boolean {
-  if (kindOf(t) === 'agent') {
-    const keyEnv = agentFor(t)?.keyEnv
-    if (!keyEnv || !vaultNames.includes(keyEnv)) return false
-  }
+export function quickLaunchable(t: Template): boolean {
   if ((t.env ?? []).some(e => e.required && !e.secret && !e.value)) return false
   const pi = t.primary_input
   return !pi || !pi.required
@@ -112,14 +108,12 @@ export function TemplateGallery({
   onQuickLaunch,
   favorites,
   onToggleFavorite,
-  vaultNames,
 }: {
   templates: Template[]
   onPick: (t: Template) => void
   onQuickLaunch?: (t: Template, primaryValue?: string) => void
   favorites?: string[]
   onToggleFavorite?: (id: string) => void
-  vaultNames?: string[]
 }) {
   const [query, setQuery] = useState('')
   const [cat, setCat] = useState<'All' | Category>('All')
@@ -208,7 +202,6 @@ export function TemplateGallery({
                   onQuickLaunch={onQuickLaunch}
                   fav={favorites?.includes(t.id)}
                   onToggleFavorite={onToggleFavorite}
-                  vaultNames={vaultNames}
                 />
               ))}
             </div>
@@ -225,19 +218,17 @@ function TemplateCard({
   onQuickLaunch,
   fav,
   onToggleFavorite,
-  vaultNames,
 }: {
   tpl: Template
   onPick: (t: Template) => void
   onQuickLaunch?: (t: Template, primaryValue?: string) => void
   fav?: boolean
   onToggleFavorite?: (id: string) => void
-  vaultNames?: string[]
 }) {
   const langBadge = tpl.language || tpl.tags?.[0]
   const port = tpl.default_port ?? tpl.port
   const cpu = tpl.cpu || 1
-  const zeroQuick = !!onQuickLaunch && quickLaunchable(tpl, vaultNames)
+  const zeroQuick = !!onQuickLaunch && quickLaunchable(tpl)
   return (
     <div
       className="dep-card"

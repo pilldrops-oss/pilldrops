@@ -7,7 +7,7 @@ import { TemplateIcon } from '../templateIcons'
 import { LIFETIME_CHOICES, type LifetimeKey } from '../../lib/lifetime'
 import { serialisePilldropsConfig, PILLDROPS_FILE, type PilldropsConfig } from '../../lib/pilldropsConfig'
 
-import { type AccessMode, type CustomEnv, type Kind, type ServiceConn, ACCESS_MODES, ctaLabel, envPlaceholder, previewLabel, runsOnLabel, serviceConn, sizeLabel, withCur } from '../../lib/launchKinds'
+import { type CustomEnv, type Kind, type ServiceConn, ctaLabel, envPlaceholder, runsOnLabel, serviceConn, sizeLabel, withCur } from '../../lib/launchKinds'
 
 export function EnvEditor({
   declared,
@@ -400,7 +400,6 @@ export function ServiceConnBlock({ conn }: { conn: ServiceConn }) {
 export function SummaryPanel({
   tpl,
   kind,
-  accessMode,
   cpu,
   mem,
   previewPort,
@@ -413,7 +412,6 @@ export function SummaryPanel({
 }: {
   tpl: Template
   kind: Kind
-  accessMode: AccessMode
   cpu: number
   mem: number
   previewPort: number
@@ -424,7 +422,7 @@ export function SummaryPanel({
   onSubmit?: () => void
   ctaDisabledNote?: string
 }) {
-  const cta = ctaLabel(kind, accessMode)
+  const cta = ctaLabel(kind)
   return (
     <aside className="dep-summary">
       <h4>Summary</h4>
@@ -436,12 +434,6 @@ export function SummaryPanel({
         <span>Purpose</span>
         <b style={{ textTransform: 'capitalize' }}>{kind}</b>
       </div>
-      {kind === 'agent' && (
-        <div className="dep-kv">
-          <span>Access</span>
-          <b>{ACCESS_MODES[accessMode].access}</b>
-        </div>
-      )}
       <div className="dep-kv">
         <span>Runs on</span>
         <b>{runsOnLabel(tpl)}</b>
@@ -461,7 +453,7 @@ export function SummaryPanel({
         <ServiceConnBlock conn={serviceConn(tpl)} />
       ) : (
         <div className="dep-preview">
-          <span className="dep-preview-lbl">{previewLabel(kind, accessMode)}</span>
+          <span className="dep-preview-lbl">Preview URL</span>
           {previewUrl}
         </div>
       )}
