@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -174,6 +175,10 @@ func (s *Server) cronRunner() cron.Runner { return daemonCronRunner{s} }
 func (d daemonCronRunner) RunInSandbox(ctx context.Context, orgIDStr, sandboxID, cmd string) (string, int, error) {
 	res, err := d.s.d.Exec(ctx, sandboxID, rt.ExecSpec{
 		Cmd: cmd, Env: d.s.configEnvFor(ctx, sandboxID), Timeout: cronExecTimeout})
+	if errors.Is(err, rt.ErrNotFound) {
+		// The sweep only hands this node jobs it owns or ones with no live owner.
+		return "", 0, errOwnerDown
+	}
 	if err != nil {
 		return "", 0, err
 	}
@@ -203,6 +208,8 @@ func (d daemonCronRunner) RunBackup(ctx context.Context, _, sandboxID string) (s
 	}
 	return started.ID, nil
 }
+
+var errOwnerDown = errors.New("unavailable: owning node is down")
 
 // cronExecTimeout bounds one scheduled run so a hung command cannot hold a sweep slot.
 const cronExecTimeout = 10 * time.Minute
