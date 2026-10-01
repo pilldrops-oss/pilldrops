@@ -354,6 +354,7 @@ func (s *Server) Routes() http.Handler {
 	s.registerSnapshotRoutes(mux)
 	// Moving a sandbox rides the snapshot plane: capture, create elsewhere, evict.
 	s.registerMoveRoutes(mux)
+	s.registerCronRoutes(mux)
 
 	// MCP dispatches every tool call in-process to mux, so the /v1 handlers
 	// keep enforcing auth and org scoping. The mux reference is only followed
