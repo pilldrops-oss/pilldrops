@@ -289,10 +289,10 @@ func fsFail(what string, err error, code int, stderr string) error {
 	if errors.As(err, &exitErr) {
 		err, code = nil, exitErr.ExitCode()
 	}
-	if err != nil {
+	switch {
+	case err != nil:
 		return fmt.Errorf("%s: node could not run the file operation: %w %s", what, err, se)
-	}
-	if dockerExecFault(code, se) {
+	case (code >= 125 && code <= 127) || dockerCLIFault(se):
 		return fmt.Errorf("%s: node could not run the file operation: %s", what, se)
 	}
 	if kind := rt.FSKind(se); kind != nil {
@@ -301,16 +301,23 @@ func fsFail(what string, err error, code int, stderr string) error {
 	return fmt.Errorf("%s: %s", what, se)
 }
 
-// dockerExecFault reports a failure of docker exec itself rather than of the
-// command it ran: exit 125-127 are docker's own, and the CLI's daemon
-// connection errors name the daemon or its socket.
-func dockerExecFault(code int, stderr string) bool {
-	if code >= 125 && code <= 127 {
-		return true
-	}
+// dockerCLIPrefixes open the errors the docker CLI writes for itself, as
+// opposed to what the command it ran in the container wrote. Matched only at
+// the start of stderr: a helper's own message starts with the helper's name
+// ("mkdir: …"), so a tenant path that happens to say docker.sock cannot pass
+// for one.
+var dockerCLIPrefixes = []string{
+	"error response from daemon",
+	"cannot connect to the docker daemon",
+	"permission denied while trying to connect to the docker daemon",
+	"error during connect",
+	"error: no such container",
+}
+
+func dockerCLIFault(stderr string) bool {
 	lower := strings.ToLower(stderr)
-	for _, m := range []string{"docker daemon", "docker.sock", "error response from daemon"} {
-		if strings.Contains(lower, m) {
+	for _, p := range dockerCLIPrefixes {
+		if strings.HasPrefix(lower, p) {
 			return true
 		}
 	}

@@ -29,3 +29,17 @@ func TestFSFailBlamesTheNodeForDockerFaults(t *testing.T) {
 		t.Errorf("an in-container permission failure = %v, want fs.ErrPermission", err)
 	}
 }
+
+// The node-fault markers matched anywhere in stderr, so a tenant's own path
+// named docker.sock turned their permission error into the node's 503.
+func TestFSFailReadsATenantPathNamedLikeTheSocketAsTheirs(t *testing.T) {
+	for _, se := range []string{
+		"mkdir: cannot create directory '/root/docker.sock/x': Permission denied",
+		"rm: cannot remove '/root/Error response from daemon': Permission denied",
+		"stat: cannot stat '/root/docker daemon': Permission denied",
+	} {
+		if err := fsFail("op", nil, 1, se); !errors.Is(err, fs.ErrPermission) {
+			t.Errorf("%q = %v, want fs.ErrPermission", se, err)
+		}
+	}
+}
