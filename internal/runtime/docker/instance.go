@@ -349,12 +349,25 @@ func (i *dockerInstance) OOMKilled() bool { return i.oomKilled.Load() }
 func (i *dockerInstance) Procs() ([]rt.Proc, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, _, code, err := i.runExec(ctx, rt.ExecSpec{}, procList, []string{"exec", i.cid, "/bin/sh", "-c", procList})
+	if out, _, code, err := i.runExec(ctx, rt.ExecSpec{}, procList, []string{"exec", i.cid, "/bin/sh", "-c", procList}); err == nil && code == 0 {
+		return parseProcs(out, false), nil
+	}
+	// An image with no /bin/sh (a distroless service): docker top still lists
+	// it, though by host pids, which Signal cannot reach.
+	out, _, code, err := dockerOut(ctx, "top", i.cid, "-eo", "pid,comm")
 	if err != nil || code != 0 {
 		return nil, nil // best-effort, like the process runtime
 	}
+	return parseProcs(out, true), nil
+}
+
+// parseProcs reads "pid comm" lines, skipping docker top's header row.
+func parseProcs(out string, header bool) []rt.Proc {
 	var procs []rt.Proc
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for n, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if header && n == 0 {
+			continue
+		}
 		f := strings.Fields(line)
 		if len(f) < 2 {
 			continue
@@ -363,7 +376,7 @@ func (i *dockerInstance) Procs() ([]rt.Proc, error) {
 			procs = append(procs, rt.Proc{PID: pid, Cmd: strings.Join(f[1:], " ")})
 		}
 	}
-	return procs, nil
+	return procs
 }
 
 func (i *dockerInstance) Signal(pid, sig int) error {

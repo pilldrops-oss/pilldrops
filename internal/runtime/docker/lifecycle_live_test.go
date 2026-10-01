@@ -166,3 +166,29 @@ func TestLiveAliveSeesAContainerThatDied(t *testing.T) {
 		t.Error("a plain kill reads as an OOM kill")
 	}
 }
+
+// A service image may have no /bin/sh to list processes with.
+func TestLiveProcsWithoutAShell(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Skipf("docker runtime unavailable: %v", err)
+	}
+	ctx := t.Context()
+	inst, err := r.Boot(ctx, rt.BootSpec{
+		SandboxID: "sb-live-nosh-" + time.Now().Format("150405"),
+		Template:  rt.Template{Name: "base", Image: "alpine:3"},
+		VCPU:      1, MemMiB: 256,
+	})
+	if err != nil {
+		t.Skipf("boot failed (image or daemon unavailable): %v", err)
+	}
+	t.Cleanup(func() { _ = inst.Stop(t.Context()) })
+	cid := inst.(*dockerInstance).cid
+	if _, se, code, err := dockerOut(ctx, "exec", "-u", "0", cid, "rm", "/bin/sh"); err != nil || code != 0 {
+		t.Fatalf("remove /bin/sh: %v %d %s", err, code, se)
+	}
+	procs, err := inst.Procs()
+	if err != nil || len(procs) == 0 {
+		t.Fatalf("procs without a shell = %v, %v; want the container's processes", procs, err)
+	}
+}
