@@ -195,6 +195,16 @@ export interface CustomDomain {
   created_at: number
 }
 
+/**
+ * Capabilities is GET /v1/capabilities (fleet scope): what the deployment can
+ * do, so the UI can show a disabled feature's reason up front instead of
+ * waiting for the action to fail.
+ */
+export interface Capabilities {
+  /** True only once PORTAL_SANDBOX_DOMAIN gives custom domains a CNAME target. */
+  custom_domains: boolean
+}
+
 /** VaultSecret is GET /v1/secrets: name and last4 only, never the value. */
 export interface VaultSecret {
   name: string

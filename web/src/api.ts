@@ -24,6 +24,7 @@ import type {
   LimitsInfo,
   VaultSecret,
   CustomDomain,
+  Capabilities,
   ClusterStats,
   JoinToken,
   ImageInfo,
@@ -431,6 +432,9 @@ export const putSecret = (name: string, value: string, autoInject = false) =>
   request<VaultSecret>('POST', '/v1/secrets', { name, value, auto_inject: autoInject })
 export const deleteSecret = (name: string) =>
   request<void>('DELETE', `/v1/secrets/${encodeURIComponent(name)}`, undefined)
+
+export const getCapabilities = () =>
+  request<Capabilities>('GET', '/v1/capabilities', undefined)
 
 export const listDomains = async () =>
   (await request<{ domains: CustomDomain[] }>('GET', '/v1/domains', undefined)).domains
