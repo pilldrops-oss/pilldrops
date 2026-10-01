@@ -381,6 +381,8 @@ export interface Template {
   primary_input?: TemplatePrimaryInput
   /** Surface a launch lands on: terminal|preview|screen|report|verdict|endpoint|connection. */
   outcome?: string
+  /** Whether some schedulable node can boot it; absent on a server too old to say (treat as available). */
+  available?: boolean
 }
 
 export interface TemplatePrimaryInput {

@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { listTemplates, listPublicTemplates, listNodes, serverOrigin } from '../api'
+import { listTemplates, listPublicTemplates, serverOrigin } from '../api'
 
-import type { Template, CreateSandboxReq, NodeInfo } from '../types'
+import type { Template, CreateSandboxReq } from '../types'
 import { aiOperatorPrompt } from '../lib/aiPrompt'
 import { detectProject } from '../lib/detect'
 import { cloneCommand, CLONE_DIR } from '../lib/repo'
@@ -432,12 +432,7 @@ export default function Deploy() {
       .catch(() => listPublicTemplates().then(setTemplates).catch(() => setTemplates([])))
   }, [])
 
-  const [nodes, setNodes] = useState<NodeInfo[] | null>(null)
-  useEffect(() => {
-    // A node list this caller cannot read greys nothing; see bootableOn.
-    listNodes().then(r => setNodes(r.nodes)).catch(() => setNodes(null))
-  }, [])
-  const bootable = useMemo(() => bootableOn(nodes), [nodes])
+  const bootable = useMemo(() => bootableOn(templates), [templates])
 
   useEffect(() => {
     if (!wantTemplate || cfg.tpl) return

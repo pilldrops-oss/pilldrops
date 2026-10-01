@@ -2,33 +2,26 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { TemplateGallery, bootableOn } from '../../src/components/launch/TemplateGallery'
-import type { NodeInfo, Template } from '../../src/types'
+import type { Template } from '../../src/types'
 
-const node = (over: Partial<NodeInfo>): NodeInfo => ({
-  id: 'n', url: '', zone: '', healthy: true, status: 'ok', first_seen: 0, last_seen: 0,
-  capacity: {
-    cpu_cores: 1, cpu_percent: 0, load1: 0, mem_total_mb: 0, mem_available_mb: 0,
-    mem_committed_mb: 0, disk_free_gb: 0, sandboxes_active: 0,
-  },
-  ...over,
-})
+const tpl = (id: string, available?: boolean): Template =>
+  ({ id, name: id, description: '', cpu: 1, memory_mb: 512, visibility: 'public', available })
 
-// The same rule the scheduler applies (cluster.Node.hostsTemplate).
+// The server computes `available` from the scheduler's own rule
+// (cluster.Node.hostsTemplate); the web just reads it.
 describe('bootableOn', () => {
-  it('boots what a healthy node holds, nothing else', () => {
-    const ok = bootableOn([node({ templates: ['base'] }), node({ templates: ['rust'], healthy: false })])
+  it('boots what the catalog marks available, nothing else', () => {
+    const ok = bootableOn([tpl('base', true), tpl('rust', false)])
     expect(ok('base')).toBe(true)
     expect(ok('rust')).toBe(false)
   })
 
-  it('treats a node that does not enumerate, or can fetch, as booting anything', () => {
-    expect(bootableOn([node({ templates: null })])('desktop')).toBe(true)
-    expect(bootableOn([node({})])('desktop')).toBe(true)
-    expect(bootableOn([node({ templates: [], can_fetch_templates: true })])('desktop')).toBe(true)
+  it('treats a missing `available` as available, same as an unknown id', () => {
+    expect(bootableOn([tpl('desktop')])('desktop')).toBe(true)
+    expect(bootableOn([tpl('desktop', true)])('anything-else')).toBe(true)
   })
 
-  it('greys nothing when there is no node list', () => {
-    expect(bootableOn(null)('anything')).toBe(true)
+  it('greys nothing when there is no catalog', () => {
     expect(bootableOn([])('anything')).toBe(true)
   })
 })

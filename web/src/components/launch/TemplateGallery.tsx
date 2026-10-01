@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import type { NodeInfo, Template } from '../../types'
+import type { Template } from '../../types'
 
 import { TemplateIcon } from '../templateIcons'
 
@@ -32,13 +32,13 @@ export function quickLaunchable(t: Template): boolean {
   return !pi || !pi.required
 }
 
-// bootableOn mirrors the scheduler's hostsTemplate: a healthy node boots a
-// template it holds, or anything when it does not enumerate or can fetch.
-// No node list (local, devserver, a key that may not read it) greys nothing.
-export function bootableOn(nodes: NodeInfo[] | null): (id: string) => boolean {
-  if (!nodes?.length) return () => true
-  const healthy = nodes.filter(n => n.healthy)
-  return id => healthy.some(n => n.templates == null || n.can_fetch_templates || n.templates.includes(id))
+// bootableOn uses the catalog's own `available` flag (GET /v1/templates),
+// which the server computes from the same schedulable-node rule for every
+// caller, tenants included. A template missing the field — an older or
+// non-fleet server — is treated as available, same as no catalog at all.
+export function bootableOn(templates: Template[]): (id: string) => boolean {
+  const byId = new Map(templates.map(t => [t.id, t]))
+  return id => byId.get(id)?.available !== false
 }
 
 export function TemplateList({
