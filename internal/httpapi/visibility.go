@@ -91,6 +91,16 @@ func (s *Server) handleVisibility(w http.ResponseWriter, r *http.Request) {
 		from = sandbox.VisibilityOrg
 	}
 
+	// Counted before anything changes: preview tokens are bound to the count,
+	// so one minted before this flip stays dead even if the sandbox is flipped
+	// back. First, because a failure here must leave no flip uncounted; a
+	// count with no flip after it only retracts links, which is always safe.
+	if want != from {
+		if err := s.st.BumpPreviewGeneration(r.Context(), id); err != nil {
+			writeErr(w, http.StatusServiceUnavailable, "visibility not changed: old preview links could not be retracted: "+err.Error())
+			return
+		}
+	}
 	resp := map[string]any{"id": id, "visibility": want, "was": from}
 	// Handing a private sandbox to the org hands over whatever is logged in
 	// inside it, so the agent credentials go first and the flip follows. The
@@ -106,14 +116,6 @@ func (s *Server) handleVisibility(w http.ResponseWriter, r *http.Request) {
 	if err := s.d.SetVisibility(r.Context(), id, want); err != nil {
 		writeErr(w, statusForErr(err), err.Error())
 		return
-	}
-	// Counted, not just changed: preview tokens are bound to the count, so one
-	// minted before this flip stays dead even if the sandbox is flipped back.
-	if want != from {
-		if err := s.st.BumpPreviewGeneration(r.Context(), id); err != nil {
-			writeErr(w, http.StatusServiceUnavailable, "visibility changed, but old preview links could not be retracted: "+err.Error())
-			return
-		}
 	}
 
 	event := "sandbox.unshare"

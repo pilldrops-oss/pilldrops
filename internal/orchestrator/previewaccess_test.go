@@ -199,3 +199,37 @@ func TestGetNamesThePreviewGenerationTheGateChecks(t *testing.T) {
 		t.Errorf("preview_generation = %v, want %q (after two flips)", doc["preview_generation"], want)
 	}
 }
+
+// The flag used to move before the count. A failed count then left the flip
+// uncounted, and flipping back revived every token from before it. Now the
+// count goes first, so a failure changes nothing.
+func TestAFailedRetractionLeavesPreviewAccessUnchanged(t *testing.T) {
+	s, orch, owner, _ := previewAccessFleet(t)
+	ctx := context.Background()
+	old := s.previewToken(ctx, "sb1", 3000)
+
+	restore := store.FailPreviewBumpsForTest(t, s.st.Load())
+	if code := setPreviewAccess(t, orch, owner, `{"public":true}`); code != http.StatusServiceUnavailable {
+		t.Fatalf("flip with a failing count = %d, want 503", code)
+	}
+	if s.isPublicPreview(ctx, "sb1") {
+		t.Fatal("the flag moved although its flip could not be counted")
+	}
+	// A no-op flip needs no count, so it still answers while counting fails.
+	if code := setPreviewAccess(t, orch, owner, `{"public":false}`); code != http.StatusOK {
+		t.Errorf("no-op flip while counting fails = %d, want 200", code)
+	}
+	if !opens(s, old) {
+		t.Error("a request that changed nothing retracted the owner's link")
+	}
+	restore()
+
+	for _, public := range []string{"true", "false"} {
+		if code := setPreviewAccess(t, orch, owner, `{"public":`+public+`}`); code != http.StatusOK {
+			t.Fatalf("flip to %s = %d", public, code)
+		}
+	}
+	if opens(s, old) {
+		t.Error("a token from before the flips opens the preview again")
+	}
+}

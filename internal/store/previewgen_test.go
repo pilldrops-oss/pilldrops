@@ -29,3 +29,17 @@ func TestPreviewGenerationCountsEveryFlip(t *testing.T) {
 		t.Errorf("generation survived its sandbox: %d", n)
 	}
 }
+
+// The failure seam the flip handlers are tested with must work on both
+// dialects, and leave the counter usable once removed.
+func TestFailPreviewBumpsForTest(t *testing.T) {
+	s := openTemp(t)
+	restore := FailPreviewBumpsForTest(t, s)
+	if err := s.BumpPreviewGeneration(t.Context(), "sb1"); err == nil {
+		t.Fatal("bump succeeded while failures were injected")
+	}
+	restore()
+	if err := s.BumpPreviewGeneration(t.Context(), "sb1"); err != nil {
+		t.Fatalf("bump after restore: %v", err)
+	}
+}

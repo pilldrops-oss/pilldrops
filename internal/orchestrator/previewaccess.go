@@ -87,17 +87,18 @@ func (s *Server) handlePreviewAccess(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	was := s.isPublicPreview(r.Context(), id)
+	// Counted before the flag moves: a flip that lands uncounted would let a
+	// later flip back revive old tokens, while a count with no flip after it
+	// only retracts links, which is always safe.
+	if was != *body.Public {
+		if err := s.bumpPreviewGeneration(r.Context(), id); err != nil {
+			writeErr(w, http.StatusServiceUnavailable, "preview access not changed: old preview links could not be retracted: "+err.Error())
+			return
+		}
+	}
 	if err := s.setPublicPreview(r.Context(), id, *body.Public); err != nil {
 		writeErr(w, http.StatusServiceUnavailable, "could not record preview access: "+err.Error())
 		return
-	}
-	if was != *body.Public {
-		if err := s.bumpPreviewGeneration(r.Context(), id); err != nil {
-			// The flag already moved; old tokens still differ by its marker,
-			// but flipping back would revive them, so say it did not stick.
-			writeErr(w, http.StatusServiceUnavailable, "could not retract old preview links: "+err.Error())
-			return
-		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "public_preview": *body.Public, "was": was})
 }

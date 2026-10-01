@@ -301,3 +301,26 @@ func TestVisibilityFlipsAreCounted(t *testing.T) {
 		t.Errorf("preview generation = %d, %v; want 2 flips counted", n, err)
 	}
 }
+
+// The count goes before the flip: when it cannot be recorded the visibility
+// stays put, so no flip ever lands uncounted.
+func TestAFailedRetractionLeavesVisibilityUnchanged(t *testing.T) {
+	srv, st, key := newTestServerWithStore(t)
+	_, out := do(t, "POST", srv.URL+"/v1/sandboxes", key, `{"template":"base"}`)
+	id := str(out, "id")
+
+	restore := store.FailPreviewBumpsForTest(t, st)
+	if code, got := do(t, "POST", srv.URL+"/v1/sandboxes/"+id+"/visibility", key, `{"visibility":"private"}`); code != http.StatusServiceUnavailable {
+		t.Fatalf("flip with a failing count = %d (%v), want 503", code, got)
+	}
+	if _, got := do(t, "GET", srv.URL+"/v1/sandboxes/"+id, key, ""); str(got, "visibility") != "org" {
+		t.Errorf("visibility = %q after a refused flip, want org", str(got, "visibility"))
+	}
+	restore()
+	if code, _ := do(t, "POST", srv.URL+"/v1/sandboxes/"+id+"/visibility", key, `{"visibility":"private"}`); code != http.StatusOK {
+		t.Fatalf("flip after recovery = %d", code)
+	}
+	if n, _ := st.PreviewGeneration(t.Context(), id); n != 1 {
+		t.Errorf("generation = %d, want 1", n)
+	}
+}
