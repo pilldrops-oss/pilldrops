@@ -132,21 +132,30 @@ export function buildPilldropsExport(cfg: {
   return config
 }
 
-// buildCliSnippet mirrors the current config as a CLI command.
+// buildCliSnippet mirrors the current config as a CLI command. Flag names and
+// availability are checked against pilldrops-cli's `sandbox create`
+// (internal/cli/cmd_sandbox.go): it has --vcpu, --mem (not --memory) and
+// --public, but no --name, so the sandbox name from the form is not shown.
 export function buildCliSnippet(cfg: {
   tpl: Template | null
   start: string
   port: string
   envList: string[]
+  /** Resource overrides from the form; the CLI's own defaults are per-template. */
+  cpu?: number
+  mem?: number
+  isPublic?: boolean
   /** When present it drives the flags so the snippet reflects the real request. */
   composed?: ComposedBody
 }): string {
-  const { tpl, start, port, envList, composed } = cfg
+  const { tpl, start, port, envList, cpu, mem, isPublic, composed } = cfg
   if (!tpl) return ''
 
   const parts = ['pilldrops sandbox create', `--template ${tpl.id}`]
   const rt = requiredRuntime(tpl)
   if (rt) parts.push(`--runtime ${rt}`)
+  if (cpu) parts.push(`--vcpu ${cpu}`)
+  if (mem) parts.push(`--mem ${mem}`)
 
   let startCmd: string | undefined
   if (composed) startCmd = composed.start
@@ -168,6 +177,7 @@ export function buildCliSnippet(cfg: {
   if (portVal) parts.push(`--port ${portVal}`)
   if (composed?.timeout !== undefined) parts.push(`--timeout ${composed.timeout}`)
   if (composed?.idle_timeout !== undefined) parts.push(`--idle-timeout ${composed.idle_timeout}`)
+  if (isPublic) parts.push('--public')
 
   let out = parts.join(' \\\n  ')
   if (hasUniversalScript) {

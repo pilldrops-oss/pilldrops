@@ -496,9 +496,12 @@ export default function Deploy() {
         start: cfg.start,
         port: cfg.port,
         envList: cfg.envList,
+        cpu: cfg.cpu,
+        mem: cfg.mem,
+        isPublic,
         composed: composed ?? undefined,
       }),
-    [cfg.tpl, cfg.start, cfg.port, cfg.envList, composed],
+    [cfg.tpl, cfg.start, cfg.port, cfg.envList, cfg.cpu, cfg.mem, isPublic, composed],
   )
 
   const pilldropsExportConfig = useMemo(
