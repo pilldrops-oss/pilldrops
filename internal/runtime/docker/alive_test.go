@@ -20,20 +20,31 @@ func TestConfirmDeadNeedsTwoReadsApart(t *testing.T) {
 	}
 }
 
-// A dockerd restart without live-restore stops every container at once.
+// A dockerd restart without live-restore stops every container at once, just
+// before the new daemon starts (graceful) or just after (crash), and the
+// daemon's start time is only known to the second.
 func TestConfirmDeadIgnoresContainersADockerdRestartStopped(t *testing.T) {
-	i := &dockerInstance{}
-	t0 := time.Now()
-	stopped, restarted := t0.Add(-time.Minute), t0.Add(-50*time.Second)
-	for _, now := range []time.Time{t0, t0.Add(time.Minute), t0.Add(time.Hour)} {
-		if i.confirmDead(now, stopped, restarted) {
-			t.Fatalf("a container stopped by the dockerd restart was reported dead at %v", now)
-		}
-	}
-	// One that stopped after the restart is still reaped.
-	after := t0.Add(-10 * time.Second)
-	i.confirmDead(t0, after, restarted)
-	if !i.confirmDead(t0.Add(deadConfirmAfter), after, restarted) {
-		t.Fatal("a container that died after the restart was not reported dead")
+	restarted := time.Now().Add(-10 * time.Minute)
+	for _, tc := range []struct {
+		name    string
+		stopped time.Time
+		reaped  bool
+	}{
+		{"long before the restart", restarted.Add(-restartWindowBefore - time.Second), true},
+		{"at the window's early edge", restarted.Add(-restartWindowBefore), false},
+		{"just before the restart (graceful)", restarted.Add(-time.Second), false},
+		{"just after the restart (btime truncation)", restarted.Add(500 * time.Millisecond), false},
+		{"killed by the new daemon (crash)", restarted.Add(20 * time.Second), false},
+		{"at the window's late edge", restarted.Add(restartWindowAfter), false},
+		{"died on its own after the restart", restarted.Add(restartWindowAfter + time.Second), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			i := &dockerInstance{}
+			now := time.Now()
+			i.confirmDead(now, tc.stopped, restarted)
+			if got := i.confirmDead(now.Add(deadConfirmAfter), tc.stopped, restarted); got != tc.reaped {
+				t.Errorf("reaped = %v, want %v", got, tc.reaped)
+			}
+		})
 	}
 }
