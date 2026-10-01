@@ -2470,6 +2470,8 @@ body.dark .term-stderr {
 body.dark .dep-card:hover {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.4);
 }
+.dep-card.off,
+.dep-card.off:hover { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; border-color: var(--line); }
 .dep-card-head { display: flex; align-items: center; gap: 10px; }
 .dep-card-ic {
   width: 34px;

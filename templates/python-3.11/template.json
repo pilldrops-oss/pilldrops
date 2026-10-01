@@ -1,0 +1,6 @@
+{
+  "name": "Python 3.11",
+  "description": "Python 3.11 + numpy, pandas, requests",
+  "tags": ["python"],
+  "preinstalled": ["python3.11", "pip", "numpy", "pandas", "requests"]
+}

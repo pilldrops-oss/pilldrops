@@ -48,39 +48,42 @@ Jun,North,171,20520
 Jun,South,148,17760
 `
 
-const PY_ANALYSIS_STARTER = `# analysis.py — sample analysis: pandas + matplotlib over sales.csv,
-# report served on $PORT. Edit it, redeploy, see your own analysis.
+const PY_ANALYSIS_STARTER = `# analysis.py — sample analysis over sales.csv, report served on $PORT.
+# Standard library only, so it runs on any Python image. Edit it, redeploy,
+# see your own analysis.
+import csv
+import html
+import http.server
 import os
-import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import socketserver
+from collections import defaultdict
 
-df = pd.read_csv("sales.csv")
-by_month = df.groupby("month", sort=False)["revenue"].sum()
-by_region = df.groupby("region")["revenue"].sum()
+by_month, by_region = defaultdict(int), defaultdict(int)
+with open("sales.csv") as f:
+    for row in csv.DictReader(f):
+        by_month[row["month"]] += int(row["revenue"])
+        by_region[row["region"]] += int(row["revenue"])
 
-fig, ax = plt.subplots(figsize=(7, 3.5))
-by_month.plot(kind="bar", ax=ax, color="#0c8a56")
-ax.set_title("Revenue by month")
-ax.set_ylabel("USD")
-fig.tight_layout()
-fig.savefig("chart.png", dpi=120)
+top = max(by_month.values())
+bars = "".join(
+    f"<rect x='{i * 60 + 10}' y='{200 - v * 180 // top}' width='40' height='{v * 180 // top}' fill='#0c8a56'/>"
+    f"<text x='{i * 60 + 30}' y='218' text-anchor='middle' font-size='12'>{html.escape(m)}</text>"
+    for i, (m, v) in enumerate(by_month.items())
+)
+rows = "".join(f"<tr><td>{html.escape(r)}</td><td>{v:,}</td></tr>" for r, v in by_region.items())
 
 with open("index.html", "w") as f:
     f.write(
         "<!doctype html><meta charset='utf-8'><title>Sales analysis</title>"
         "<body style='font-family:system-ui;max-width:720px;margin:40px auto'>"
-        "<h1>📊 Sales analysis</h1>"
-        "<img src='chart.png' style='max-width:100%'>"
-        "<h2>Revenue by region</h2>"
-        + by_region.to_frame().to_html()
-        + "<p>Edit <code>analysis.py</code> and redeploy to run your own.</p>"
+        "<h1>📊 Sales analysis</h1><h2>Revenue by month</h2>"
+        f"<svg width='{len(by_month) * 60 + 20}' height='225'>{bars}</svg>"
+        f"<h2>Revenue by region</h2><table>{rows}</table>"
+        "<p>Edit <code>analysis.py</code> and redeploy to run your own.</p>"
     )
 
-print(by_region)
+print(dict(by_region))
 print("report ready — serving on $PORT")
-import http.server, socketserver
 port = int(os.environ.get("PORT", "8000"))
 with socketserver.TCPServer(("0.0.0.0", port), http.server.SimpleHTTPRequestHandler) as httpd:
     httpd.serve_forever()
@@ -120,6 +123,38 @@ const GO_MOD = `module sandbox
 go 1.22
 `
 
+// Standard library only: a crate with no dependencies builds without reaching crates.io.
+const RUST_STARTER = `use std::io::{Read, Write};
+use std::net::TcpListener;
+
+fn main() {
+    let port = std::env::var("PORT").unwrap_or_else(|_| "8000".into());
+    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).expect("bind $PORT");
+    println!("listening on {port}");
+    let body = "<h1>🚀 Your Rust sandbox is running</h1><p>Edit main.rs and redeploy.</p>";
+    for mut stream in listener.incoming().flatten() {
+        let mut request = [0u8; 1024];
+        let _ = stream.read(&mut request);
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\\r\\nContent-Type: text/html; charset=utf-8\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+            body.len(),
+            body
+        );
+    }
+}
+`
+
+const CARGO_TOML = `[package]
+name = "sandbox"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sandbox"
+path = "main.rs"
+`
+
 
 // starterFiles returns the default project files for a template, or [] when it
 // ships its own server or needs a full uploaded project. The first file is the primary one.
@@ -131,7 +166,11 @@ export function starterFiles(tpl: Template): Array<{ path: string; content: stri
   const lang = (tpl.language || '').toLowerCase()
   const has = (...w: string[]) => w.some(x => id.includes(x) || lang === x)
 
-  if (has('rust', 'cargo')) return []
+  if (has('rust', 'cargo'))
+    return [
+      { path: 'main.rs', content: RUST_STARTER },
+      { path: 'Cargo.toml', content: CARGO_TOML },
+    ]
   if (has('node', 'typescript', 'javascript') || lang === 'node' || lang === 'ts' || lang === 'js')
     return [{ path: 'server.js', content: NODE_STARTER }]
   if (has('go', 'golang') || lang === 'go')

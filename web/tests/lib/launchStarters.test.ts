@@ -1,0 +1,31 @@
+import { describe, it, expect } from 'vitest'
+import { starterFiles } from '../../src/lib/launchStarters'
+import type { Template } from '../../src/types'
+
+// python-3.11's image has no matplotlib, and a starter that imports a missing
+// module leaves a sandbox that never answers. The Python starter runs on the
+// standard library alone, so it works on every Python template.
+describe('python starter', () => {
+  it('imports nothing outside the standard library', () => {
+    const tpl: Template = { id: 'python-3.11', name: 'Python', description: '', cpu: 1, memory_mb: 512, visibility: 'public', language: 'python' }
+    const py = starterFiles(tpl).find(f => f.path.endsWith('.py'))!.content
+    const imports = [...py.matchAll(/^\s*(?:import|from)\s+([\w.]+)/gm)].map(m => m[1].split('.')[0])
+    expect(imports.length).toBeGreaterThan(0)
+    for (const mod of imports) expect(['os', 'csv', 'html', 'http', 'socketserver', 'collections']).toContain(mod)
+  })
+})
+
+// With no starter, rust fell back to the terminal script, which downloads ttyd
+// and has nothing to fall back on in an image with no curl, wget, node or
+// python — the docker rust image — so the preview never answered.
+describe('rust starter', () => {
+  it('ships a crate that serves $PORT with no dependencies to fetch', () => {
+    const tpl: Template = { id: 'rust', name: 'Rust', description: '', cpu: 2, memory_mb: 2048, visibility: 'public', language: 'rust' }
+    const files = starterFiles(tpl)
+    const cargo = files.find(f => f.path === 'Cargo.toml')!.content
+    const main = files.find(f => f.path === 'main.rs')!.content
+    expect(cargo).toContain('path = "main.rs"')
+    expect(cargo).not.toMatch(/\[dependencies\][^[]*\S/)
+    expect(main).toContain('env::var("PORT")')
+  })
+})

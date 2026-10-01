@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import type { Template } from '../../types'
+import type { NodeInfo, Template } from '../../types'
 
 import { TemplateIcon } from '../templateIcons'
 
@@ -30,6 +30,15 @@ export function quickLaunchable(t: Template): boolean {
   if ((t.env ?? []).some(e => e.required && !e.secret && !e.value)) return false
   const pi = t.primary_input
   return !pi || !pi.required
+}
+
+// bootableOn mirrors the scheduler's hostsTemplate: a healthy node boots a
+// template it holds, or anything when it does not enumerate or can fetch.
+// No node list (local, devserver, a key that may not read it) greys nothing.
+export function bootableOn(nodes: NodeInfo[] | null): (id: string) => boolean {
+  if (!nodes?.length) return () => true
+  const healthy = nodes.filter(n => n.healthy)
+  return id => healthy.some(n => n.templates == null || n.can_fetch_templates || n.templates.includes(id))
 }
 
 export function TemplateList({
@@ -108,12 +117,14 @@ export function TemplateGallery({
   onQuickLaunch,
   favorites,
   onToggleFavorite,
+  bootable,
 }: {
   templates: Template[]
   onPick: (t: Template) => void
   onQuickLaunch?: (t: Template, primaryValue?: string) => void
   favorites?: string[]
   onToggleFavorite?: (id: string) => void
+  bootable?: (id: string) => boolean
 }) {
   const [query, setQuery] = useState('')
   const [cat, setCat] = useState<'All' | Category>('All')
@@ -202,6 +213,7 @@ export function TemplateGallery({
                   onQuickLaunch={onQuickLaunch}
                   fav={favorites?.includes(t.id)}
                   onToggleFavorite={onToggleFavorite}
+                  off={bootable ? !bootable(t.id) : false}
                 />
               ))}
             </div>
@@ -218,25 +230,29 @@ function TemplateCard({
   onQuickLaunch,
   fav,
   onToggleFavorite,
+  off,
 }: {
   tpl: Template
   onPick: (t: Template) => void
   onQuickLaunch?: (t: Template, primaryValue?: string) => void
   fav?: boolean
   onToggleFavorite?: (id: string) => void
+  off?: boolean
 }) {
   const langBadge = tpl.language || tpl.tags?.[0]
   const port = tpl.default_port ?? tpl.port
   const cpu = tpl.cpu || 1
-  const zeroQuick = !!onQuickLaunch && quickLaunchable(tpl)
+  const zeroQuick = !off && !!onQuickLaunch && quickLaunchable(tpl)
   return (
     <div
-      className="dep-card"
+      className={`dep-card${off ? ' off' : ''}`}
       role="button"
       tabIndex={0}
-      onClick={() => onPick(tpl)}
+      aria-disabled={off || undefined}
+      title={off ? 'No node in this fleet can boot this template' : undefined}
+      onClick={() => { if (!off) onPick(tpl) }}
       onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        if (!off && (e.key === 'Enter' || e.key === ' ')) {
           e.preventDefault()
           onPick(tpl)
         }
@@ -288,6 +304,7 @@ function TemplateCard({
         {tpl.has_server && port ? (
           <span className="chip dep-chip-g">Opens a web app</span>
         ) : null}
+        {off && <span className="chip">No node can boot this</span>}
       </div>
       {zeroQuick && (
         <div

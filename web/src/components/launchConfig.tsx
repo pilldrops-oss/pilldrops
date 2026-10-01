@@ -14,7 +14,7 @@ export { buildCliSnippet, buildPilldropsExport, composeCreateBody, genSecret } f
 export { type LaunchConfig, useLaunchConfig } from './launch/useLaunchConfig'
 
 export {
-  TemplateGallery, TemplateList, groupByCategory, matchesQuery, quickLaunchable,
+  TemplateGallery, TemplateList, bootableOn, groupByCategory, matchesQuery, quickLaunchable,
 } from './launch/TemplateGallery'
 
 export { type DeployPhaseState, DeployProgress, deploySteps } from './launch/DeployProgress'

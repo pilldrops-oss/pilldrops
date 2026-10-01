@@ -79,6 +79,10 @@ export interface NodeInfo {
   status: string
   first_seen: number
   last_seen: number
+  /** Templates held locally; null/absent means the node does not enumerate and boots anything. */
+  templates?: string[] | null
+  /** The node can fetch a template it does not hold. */
+  can_fetch_templates?: boolean
   capacity: {
     cpu_cores: number
     cpu_percent: number
