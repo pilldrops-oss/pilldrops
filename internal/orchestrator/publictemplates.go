@@ -1,8 +1,12 @@
 package orchestrator
 
 import (
+	"encoding/json"
+	"maps"
 	"net/http"
+	"net/http/httptest"
 
+	"github.com/pilldrops-oss/pilldrops/internal/cluster"
 	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
 
@@ -11,6 +15,29 @@ import (
 // publicCatalog must redact.
 func (s *Server) registerPublicTemplateRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/templates/public", s.handlePublicTemplates)
+	mux.HandleFunc("GET /v1/templates", s.auth(s.handleTemplates))
+}
+
+// handleTemplates relays a node's catalogue and marks each entry with
+// available: whether some healthy, uncordoned node can boot it, by the
+// scheduler's own rule. /v1/nodes is operator-only, so this is the only way a
+// tenant can grey out a template no node will take; it names no node.
+func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
+	rec := httptest.NewRecorder()
+	s.proxyToNode(rec, r, http.MethodGet, r.URL.Path)
+	var cat []map[string]any
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &cat) != nil {
+		maps.Copy(w.Header(), rec.Header())
+		w.WriteHeader(rec.Code)
+		_, _ = w.Write(rec.Body.Bytes()) //nolint:errcheck // best-effort: headers are committed
+		return
+	}
+	now := s.now()
+	for _, t := range cat {
+		id, _ := t["id"].(string)
+		t["available"], _ = s.reg.TemplateSupport(id, now, cluster.NodeTTL)
+	}
+	writeJSON(w, http.StatusOK, cat)
 }
 
 func (s *Server) handlePublicTemplates(w http.ResponseWriter, r *http.Request) {

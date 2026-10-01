@@ -2964,8 +2964,11 @@ func main() {
 			writeJSON(w, map[string]interface{}{"sandboxes": mgr.List(ownerID(r))})
 		})
 
-		// The catalog every launch path in the dashboard starts from.
-		r.Get("/v1/templates", serveCatalog)
+		// The catalog every launch path in the dashboard starts from. The fleet's
+		// answer marks which templates some node can boot (available).
+		r.Get("/v1/templates", func(w http.ResponseWriter, r *http.Request) {
+			fleetProxy(w, r, func(w http.ResponseWriter) { serveCatalog(w, r) })
+		})
 
 		registerFilesRoutes(r, mgr, ownerID)
 
