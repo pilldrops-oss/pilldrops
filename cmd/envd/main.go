@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -38,6 +39,8 @@ const (
 var transportLog onceLogger
 
 func main() {
+	unignoreInterrupt()
+
 	// `envd watch <dir>` is a one-shot tool the node runs through exec, not a
 	// second server; it must return before anything below binds or starts.
 	if len(os.Args) > 1 && os.Args[1] == "watch" {
@@ -97,6 +100,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "envd: serve error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// unignoreInterrupt gives every child envd spawns a default SIGINT, so Ctrl-C
+// reaches a terminal's foreground job. init starts envd as `envd &`, and sh
+// sets SIGINT (and SIGQUIT) to SIG_IGN for a background job; an ignored signal
+// survives exec, so every shell and command inherited it. The Go runtime keeps
+// an inherited SIG_IGN for SIGINT (it already handles SIGQUIT itself), and a
+// handled signal is reset to SIG_DFL by exec, so catching it here is enough.
+// The buffered channel is never read: a stray SIGINT to envd itself is dropped.
+func unignoreInterrupt() {
+	signal.Notify(make(chan os.Signal, 1), syscall.SIGINT)
 }
 
 // envdListenAddr decides whether envd may bind its control-plane port and why.
