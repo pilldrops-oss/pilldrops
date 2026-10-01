@@ -126,6 +126,12 @@ func newSnapshotFleet(t *testing.T) *snapshotFleet {
 	}
 	f.s.reg.SetNodeMeta("node-fc", cluster.NodeMeta{Runtime: "firecracker", Isolation: true, CanFetch: true})
 	f.s.reg.Place("sb-1", "node-fc")
+	if err := f.st.SaveSandbox(t.Context(), store.SandboxRecord{
+		ID: "sb-1", OrgID: "default", NodeID: "node-fc", Template: "base", State: "running",
+		CreatedAt: 1, UpdatedAt: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	return &snapshotFleet{publishFixture: f, node: n}
 }
 
@@ -466,5 +472,26 @@ func TestSnapshotRootImageIsStoredOnceAndSurvivesAPurge(t *testing.T) {
 	bad := f.saveAndWait(t, "liar")
 	if bad["status"] == "ready" {
 		t.Fatal("a root image that does not match its digest was published")
+	}
+}
+
+// Every other route on a sandbox answers another org 404; the snapshot save
+// reached the node as the control plane and captured whatever it was told to.
+func TestAnotherOrgCannotSnapshotASandbox(t *testing.T) {
+	f := newSnapshotFleet(t)
+	_, other, err := f.st.CreateKey(t.Context(), "other", "u:other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := f.do(t, "POST", "/v1/sandboxes/sb-1/snapshot", other, `{"name":"stolen"}`); status != http.StatusNotFound {
+		t.Fatalf("another org's snapshot save answered %d, want 404", status)
+	}
+	if status, _ := f.do(t, "GET", "/v1/snapshots/stolen", other, ""); status != http.StatusNotFound {
+		t.Errorf("the refused save still registered a snapshot (%d)", status)
+	}
+	f.node.mu.Lock()
+	defer f.node.mu.Unlock()
+	if f.node.captures != 0 {
+		t.Errorf("the node was asked to capture for another org")
 	}
 }

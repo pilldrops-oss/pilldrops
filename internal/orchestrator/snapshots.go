@@ -166,7 +166,9 @@ func (s *Server) handleSnapshotSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	node, ok := s.reg.NodeFor(id)
+	// The capture reaches the node as the control plane, which the node does
+	// not scope to an org, so ownership is checked here or nowhere.
+	_, node, ok := s.movable(r, st, id)
 	if !ok {
 		writeErr(w, http.StatusNotFound, "sandbox not found")
 		return
