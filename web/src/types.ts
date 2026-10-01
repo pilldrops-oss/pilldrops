@@ -201,6 +201,8 @@ export interface VaultSecret {
   last4: string
   /** Present only for non-credential settings (gateway URL, model); never for API keys. */
   value?: string
+  /** Injected into every new sandbox in the org without a secret_refs entry. */
+  auto_inject?: boolean
   created_at: string
   updated_at: string
 }

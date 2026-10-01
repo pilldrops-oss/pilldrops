@@ -38,6 +38,8 @@ export interface LaunchConfig {
   setDeclaredEnvVar: (name: string, value: string) => void
   customEnv: CustomEnv[]
   setCustomEnv: (rows: CustomEnv[]) => void
+  secretRefs: string[]
+  setSecretRefs: (names: string[]) => void
 
   kind: Kind
   testCmd: string
@@ -69,6 +71,7 @@ export function useLaunchConfig(): LaunchConfig {
   const [setup, setSetup] = useState('')
   const [declaredEnv, setDeclaredEnv] = useState<Record<string, string>>({})
   const [customEnv, setCustomEnv] = useState<CustomEnv[]>([])
+  const [secretRefs, setSecretRefs] = useState<string[]>([])
 
   const [billing, setBilling] = useState<LimitsInfo | null>(null)
   useEffect(() => {
@@ -103,6 +106,7 @@ export function useLaunchConfig(): LaunchConfig {
     }
     setDeclaredEnv(seeded)
     setCustomEnv([])
+    setSecretRefs([])
 
     setTestCmd(kindOf(t) === 'test' ? (t.start_suggestion ?? 'npx playwright test') : '')
     setServeReport(true)
@@ -158,6 +162,8 @@ export function useLaunchConfig(): LaunchConfig {
     setDeclaredEnvVar: (name, value) => setDeclaredEnv(prev => ({ ...prev, [name]: value })),
     customEnv,
     setCustomEnv,
+    secretRefs,
+    setSecretRefs,
     kind,
     testCmd,
     setTestCmd,

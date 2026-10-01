@@ -12,6 +12,8 @@ export function composeCreateBody(cfg: {
   start: string
   port: string
   envList: string[]
+  /** Vault secret names the server resolves into env at create. */
+  secretRefs?: string[]
   previewPort: number
   /** Seconds; empty means keep-alive default. */
   timeoutInput?: string
@@ -26,19 +28,24 @@ export function composeCreateBody(cfg: {
     start,
     port,
     envList,
+    secretRefs = [],
     previewPort,
     timeoutInput = '',
     idleInput = '',
   } = cfg
   const portNum = port ? parseInt(port, 10) : undefined
   const life = resolveLifetime(startsServer(kind, start), timeoutInput, idleInput)
+  const vars = {
+    env: envList.length ? envList : undefined,
+    secret_refs: secretRefs.length ? secretRefs : undefined,
+  }
 
   if (kind === 'service') {
-    return { env: envList.length ? envList : undefined, start: undefined, port: portNum, ...life }
+    return { ...vars, start: undefined, port: portNum, ...life }
   }
 
   if (kind === 'gui') {
-    return { env: envList.length ? envList : undefined, start: undefined, port: portNum, ...life }
+    return { ...vars, start: undefined, port: portNum, ...life }
   }
 
   if (kind === 'test') {
@@ -49,17 +56,17 @@ export function composeCreateBody(cfg: {
         ? 'npx playwright show-report --host 0.0.0.0 --port $PORT'
         : 'python3 -m http.server $PORT'
       const start = serveReport ? `${cmd}; ${reportServe}` : cmd
-      return { env: envList.length ? envList : undefined, start, port: portNum, ...life }
+      return { ...vars, start, port: portNum, ...life }
     }
     const body = universalStartBody(previewPort)
     const kal = resolveLifetime(true, timeoutInput, idleInput)
-    return { env: envList.length ? envList : undefined, ...body, ...kal }
+    return { ...vars, ...body, ...kal }
   }
 
   if (kind === 'shell') {
     if (start.trim()) {
       return {
-        env: envList.length ? envList : undefined,
+        ...vars,
         start: start.trim(),
         port: portNum,
         ...life,
@@ -67,17 +74,17 @@ export function composeCreateBody(cfg: {
     }
     const body = universalStartBody(previewPort)
     const kal = resolveLifetime(true, timeoutInput, idleInput)
-    return { env: envList.length ? envList : undefined, ...body, ...kal }
+    return { ...vars, ...body, ...kal }
   }
 
   // web: no start command and no built-in server gets a browser terminal so the preview never hangs.
   if (!tpl.has_server && !start.trim()) {
     const body = universalStartBody(previewPort)
     const kal = resolveLifetime(true, timeoutInput, idleInput)
-    return { env: envList.length ? envList : undefined, ...body, ...kal }
+    return { ...vars, ...body, ...kal }
   }
   return {
-    env: envList.length ? envList : undefined,
+    ...vars,
     start: tpl.has_server ? undefined : start.trim() || undefined,
     port: portNum,
     ...life,

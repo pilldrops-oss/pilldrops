@@ -2025,6 +2025,8 @@ body.dark .term-stderr {
 /* Env editor */
 .lm-env { display: flex; flex-direction: column; gap: 8px; }
 .lm-env-row { display: grid; gap: 4px; }
+.lm-vault { border: 0; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.lm-vault-row { display: flex; align-items: center; gap: 6px; }
 .lm-env-name { font-size: 12px; font-family: var(--mono); color: var(--sub); }
 .lm-req { color: #dc2626; }
 .lm-secret {
@@ -3756,6 +3758,7 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
   margin-top: 10px;
 }
 .vault-add-name { width: 200px; flex: none; }
+.vault-auto { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 
 /* ── Gateway disclosure ──────────────────────────────────────────────────── */
 .vault-gw { margin: 9px 0 0; }

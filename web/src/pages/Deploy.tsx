@@ -33,6 +33,7 @@ import {
   PanelHeader,
   SummaryPanel,
   EnvEditor,
+  VaultSecretPicker,
   WhatsInside,
   ResourcePicker,
   LifetimePicker,
@@ -466,6 +467,7 @@ export default function Deploy() {
             start: cfg.start,
             port: cfg.port,
             envList: cfg.envList,
+            secretRefs: cfg.secretRefs,
             previewPort: cfg.previewPort,
             timeoutInput: effLifetime.timeoutInput,
             idleInput: effLifetime.idleInput,
@@ -479,6 +481,7 @@ export default function Deploy() {
       cfg.start,
       cfg.port,
       cfg.envList,
+      cfg.secretRefs,
       cfg.previewPort,
       effLifetime,
     ],
@@ -1087,6 +1090,7 @@ export default function Deploy() {
                         custom={cfg.customEnv}
                         onCustomChange={cfg.setCustomEnv}
                       />
+                      <VaultSecretPicker selected={cfg.secretRefs} onChange={cfg.setSecretRefs} />
                       <p className="lm-help">
                         Injected into your app and terminal at boot — never shown in the preview URL or logs.
                       </p>

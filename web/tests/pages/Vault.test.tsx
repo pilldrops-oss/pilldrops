@@ -52,7 +52,7 @@ describe('Vault — custom secrets', () => {
     await user.type(screen.getByLabelText('Secret value'), 'postgres://x')
     await user.click(screen.getByRole('button', { name: 'Add secret' }))
 
-    await waitFor(() => expect(api.putSecret).toHaveBeenCalledWith('DATABASE_URL', 'postgres://x'))
+    await waitFor(() => expect(api.putSecret).toHaveBeenCalledWith('DATABASE_URL', 'postgres://x', false))
   })
 
   it('replaces the value of an existing secret under the same name', async () => {
@@ -68,7 +68,7 @@ describe('Vault — custom secrets', () => {
     await user.type(screen.getByLabelText('Secret value'), 'new-value')
     await user.click(screen.getByRole('button', { name: 'Replace secret' }))
 
-    await waitFor(() => expect(api.putSecret).toHaveBeenCalledWith('AAA', 'new-value'))
+    await waitFor(() => expect(api.putSecret).toHaveBeenCalledWith('AAA', 'new-value', false))
   })
 
   it('reports a failed save instead of silently doing nothing', async () => {
@@ -82,5 +82,26 @@ describe('Vault — custom secrets', () => {
     await user.click(screen.getByRole('button', { name: 'Add secret' }))
 
     expect(await screen.findByText(/vault is locked/)).toBeInTheDocument()
+  })
+
+  it('stores a secret as auto-inject and keeps the flag on a rotation', async () => {
+    vi.mocked(api.listSecrets).mockResolvedValue([
+      { name: 'OPENAI_KEY', auto_inject: true, last4: 'abcd', created_at: '', updated_at: '' },
+    ])
+    const user = userEvent.setup()
+    renderVault()
+
+    expect(await screen.findByText('auto-inject')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Replace value' }))
+    expect(screen.getByLabelText('Inject into every new sandbox')).toBeChecked()
+    await user.type(screen.getByLabelText('Secret value'), 'rotated')
+    await user.click(screen.getByRole('button', { name: 'Replace secret' }))
+    await waitFor(() => expect(api.putSecret).toHaveBeenCalledWith('OPENAI_KEY', 'rotated', true))
+
+    await user.type(screen.getByLabelText('Secret name'), 'NEW_ONE')
+    await user.click(screen.getByLabelText('Inject into every new sandbox'))
+    await user.type(screen.getByLabelText('Secret value'), 'v')
+    await user.click(screen.getByRole('button', { name: 'Add secret' }))
+    await waitFor(() => expect(api.putSecret).toHaveBeenCalledWith('NEW_ONE', 'v', true))
   })
 })

@@ -32,10 +32,10 @@ export default function Vault() {
 
   useEffect(() => { refresh() }, [refresh])
 
-  const store = useCallback(async (name: string, value: string, done: string) => {
+  const store = useCallback(async (name: string, value: string, autoInject: boolean, done: string) => {
     setBusy(name)
     try {
-      await putSecret(name, value)
+      await putSecret(name, value, autoInject)
       await refresh()
       toast.success(done)
       return true
@@ -96,12 +96,13 @@ function CustomSecrets({
 }: {
   secrets: VaultSecret[]
   busy: string | null
-  onStore: (name: string, value: string, done: string) => Promise<boolean>
+  onStore: (name: string, value: string, autoInject: boolean, done: string) => Promise<boolean>
   onRemove: (name: string, title: string, body: React.ReactNode) => Promise<void>
   loading: boolean
 }) {
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
+  const [autoInject, setAutoInject] = useState(false)
   const [error, setError] = useState('')
   const valueRef = useRef<HTMLInputElement>(null)
 
@@ -118,10 +119,11 @@ function CustomSecrets({
       return
     }
     setError('')
-    const ok = await onStore(trimmed, value, `${replacing ? 'Replaced' : 'Added'} ${trimmed}`)
+    const ok = await onStore(trimmed, value, autoInject, `${replacing ? 'Replaced' : 'Added'} ${trimmed}`)
     if (ok) {
       setName('')
       setValue('')
+      setAutoInject(false)
     }
   }
 
@@ -143,11 +145,15 @@ function CustomSecrets({
         <div key={s.name} className="vault-custom-row">
           <code className="chip mono">{s.name}</code>
           <span className="vault-last4">…{s.last4}</span>
+          {s.auto_inject && <span className="chip" title="Injected into every new sandbox">auto-inject</span>}
           <button
             type="button"
             className="btn ghost"
             disabled={busy === s.name}
-            onClick={() => { setName(s.name); setValue(''); setError(''); valueRef.current?.focus() }}
+            onClick={() => {
+              setName(s.name); setValue(''); setAutoInject(!!s.auto_inject); setError('')
+              valueRef.current?.focus()
+            }}
           >
             Replace value
           </button>
@@ -187,6 +193,10 @@ function CustomSecrets({
           onChange={e => setValue(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') add() }}
         />
+        <label className="vault-auto">
+          <input type="checkbox" checked={autoInject} onChange={e => setAutoInject(e.target.checked)} />{' '}
+          Inject into every new sandbox
+        </label>
         <button
           type="button"
           className="btn primary"

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 
-import type { Template, TemplateEnv, Plan } from '../../types'
+import type { Template, TemplateEnv, Plan, VaultSecret } from '../../types'
+import { listSecrets } from '../../api'
+import { errText } from '../../lib/errText'
 
 import { TemplateIcon } from '../templateIcons'
 
@@ -86,6 +88,51 @@ export function EnvEditor({
         ＋ Add variable
       </button>
     </div>
+  )
+}
+
+export function VaultSecretPicker({
+  selected,
+  onChange,
+}: {
+  selected: string[]
+  onChange: (names: string[]) => void
+}) {
+  const [secrets, setSecrets] = useState<VaultSecret[] | null>(null)
+  const [loadErr, setLoadErr] = useState('')
+  useEffect(() => {
+    let alive = true
+    listSecrets()
+      .then(list => { if (alive) setSecrets(list) })
+      .catch(e => { if (alive) setLoadErr(errText(e)) })
+    return () => { alive = false }
+  }, [])
+
+  if (loadErr) return <p className="lm-hint">Vault unavailable: {loadErr}</p>
+  if (!secrets) return null
+  return (
+    <fieldset className="lm-vault">
+      <legend className="lm-adv-label">Secrets from vault</legend>
+      {secrets.length === 0 && (
+        <p className="lm-hint">
+          No secrets yet — add one in the <a href="#/vault">Vault</a> to inject it here.
+        </p>
+      )}
+      {secrets.map(s => (
+        <label key={s.name} className="lm-vault-row">
+          <input
+            type="checkbox"
+            checked={!!s.auto_inject || selected.includes(s.name)}
+            disabled={!!s.auto_inject}
+            onChange={e =>
+              onChange(e.target.checked ? [...selected, s.name] : selected.filter(n => n !== s.name))
+            }
+          />{' '}
+          <code className="mono">{s.name}</code>
+          {s.auto_inject && <span className="lm-opt-note"> auto-injected into every sandbox</span>}
+        </label>
+      ))}
+    </fieldset>
   )
 }
 

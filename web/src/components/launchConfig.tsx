@@ -21,5 +21,5 @@ export { type DeployPhaseState, DeployProgress, deploySteps } from './launch/Dep
 
 export {
   CopyCli, DefaultsSummary, EnvEditor, ExportPilldropsConfig, LifetimePicker,
-  PanelHeader, ResourcePicker, ServiceConnBlock, SummaryPanel, TemplateHeader, WhatsInside,
+  PanelHeader, ResourcePicker, ServiceConnBlock, SummaryPanel, TemplateHeader, VaultSecretPicker, WhatsInside,
 } from './launch/panels'
