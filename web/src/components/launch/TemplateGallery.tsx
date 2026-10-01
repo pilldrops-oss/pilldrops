@@ -247,7 +247,7 @@ function TemplateCard({
     <div
       className={`dep-card${off ? ' off' : ''}`}
       role="button"
-      tabIndex={0}
+      tabIndex={off ? -1 : 0}
       aria-disabled={off || undefined}
       title={off ? 'No node in this fleet can boot this template' : undefined}
       onClick={() => { if (!off) onPick(tpl) }}

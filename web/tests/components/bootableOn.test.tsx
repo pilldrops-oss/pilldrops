@@ -47,6 +47,7 @@ describe('gallery', () => {
     expect(off).toHaveLength(1)
     expect(off[0].textContent).toContain('browser')
     expect(off[0].getAttribute('aria-disabled')).toBe('true')
+    expect(off[0].getAttribute('tabindex')).toBe('-1')
     expect(screen.getAllByText(/Quick launch/)).toHaveLength(1)
     ;(off[0] as HTMLElement).click()
     expect(onPick).not.toHaveBeenCalled()
