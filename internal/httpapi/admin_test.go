@@ -48,6 +48,52 @@ func TestDeleteKeyCannotReachAnotherOrg(t *testing.T) {
 	}
 }
 
+// A member of the org that holds the fleet's operator and node keys must not
+// see them, nor revoke them: revoking a node's key detaches the node.
+func TestMemberCannotSeeOrRevokeOperatorKeys(t *testing.T) {
+	srv, st, userKey := newTestServerWithStore(t)
+	nodeKey, nodePlaintext, err := st.CreateKeyWithRole(t.Context(), "node", "default", "operator")
+	if err != nil {
+		t.Fatalf("node key: %v", err)
+	}
+	listed := func(key string) bool {
+		req, _ := http.NewRequest("GET", srv.URL+"/v1/keys", nil)
+		req.Header.Set("Authorization", "Bearer "+key)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("list keys: %v", err)
+		}
+		defer resp.Body.Close()
+		var keys []store.KeyInfo
+		if err := json.NewDecoder(resp.Body).Decode(&keys); err != nil {
+			t.Fatalf("decode keys: %v", err)
+		}
+		for _, k := range keys {
+			if k.ID == nodeKey.ID {
+				return true
+			}
+		}
+		return false
+	}
+
+	if listed(userKey) {
+		t.Fatal("a user-role key lists the org's operator key")
+	}
+	if code, _ := do(t, "DELETE", srv.URL+"/v1/keys/"+nodeKey.ID, userKey, ""); code != http.StatusNotFound {
+		t.Fatalf("member revoking an operator key = %d, want 404", code)
+	}
+	if _, err := st.ValidateKey(t.Context(), nodePlaintext); err != nil {
+		t.Fatalf("a member revoked the node's key: %v", err)
+	}
+
+	if !listed(nodePlaintext) {
+		t.Fatal("the operator does not see its own org's operator key")
+	}
+	if code, _ := do(t, "DELETE", srv.URL+"/v1/keys/"+nodeKey.ID, nodePlaintext, ""); code != http.StatusOK {
+		t.Fatalf("operator revoking an operator key = %d, want 200", code)
+	}
+}
+
 func TestAdminSandboxListSpansAllOrgs(t *testing.T) {
 	srv, st, userKey := newTestServerWithStore(t)
 	_, custKey, err := st.CreateKey(t.Context(), "cust", "u:cust1")
@@ -267,7 +313,7 @@ func TestAuthCacheServesRepeatCalls(t *testing.T) {
 	if err != nil || len(keys) == 0 {
 		t.Fatalf("list keys: %v %d", err, len(keys))
 	}
-	if err := st.RevokeKey(t.Context(), keys[0].ID, "default"); err != nil {
+	if err := st.RevokeKey(t.Context(), keys[0].ID, "default", true); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	if code, _ := do(t, "GET", srv.URL+"/v1/usage", key, ""); code != 200 {
