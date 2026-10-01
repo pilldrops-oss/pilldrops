@@ -83,6 +83,8 @@ export interface NodeInfo {
   templates?: string[] | null
   /** The node can fetch a template it does not hold. */
   can_fetch_templates?: boolean
+  /** "firecracker", "docker" or "process"; absent on a node too old to report it. */
+  runtime?: string
   capacity: {
     cpu_cores: number
     cpu_percent: number
