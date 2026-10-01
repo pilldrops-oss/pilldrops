@@ -284,3 +284,20 @@ func TestAnUnsignedKeyIdIsIgnored(t *testing.T) {
 		t.Fatalf("direct create with a bare X-Key-Id: created_by = %q, want the caller's own key id", got)
 	}
 }
+
+// Preview tokens are bound to a flip count, so the node counts each real flip:
+// org -> private -> org must not land back on the generation it started at.
+func TestVisibilityFlipsAreCounted(t *testing.T) {
+	srv, st, key := newTestServerWithStore(t)
+	_, out := do(t, "POST", srv.URL+"/v1/sandboxes", key, `{"template":"base"}`)
+	id := str(out, "id")
+	for _, v := range []string{"private", "org", "org"} {
+		if code, got := do(t, "POST", srv.URL+"/v1/sandboxes/"+id+"/visibility", key, `{"visibility":"`+v+`"}`); code != http.StatusOK {
+			t.Fatalf("flip to %s = %d (%v)", v, code, got)
+		}
+	}
+	// The last one re-asserts org: not a flip.
+	if n, err := st.PreviewGeneration(t.Context(), id); err != nil || n != 2 {
+		t.Errorf("preview generation = %d, %v; want 2 flips counted", n, err)
+	}
+}

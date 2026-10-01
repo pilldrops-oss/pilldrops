@@ -107,6 +107,14 @@ func (s *Server) handleVisibility(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, statusForErr(err), err.Error())
 		return
 	}
+	// Counted, not just changed: preview tokens are bound to the count, so one
+	// minted before this flip stays dead even if the sandbox is flipped back.
+	if want != from {
+		if err := s.st.BumpPreviewGeneration(r.Context(), id); err != nil {
+			writeErr(w, http.StatusServiceUnavailable, "visibility changed, but old preview links could not be retracted: "+err.Error())
+			return
+		}
+	}
 
 	event := "sandbox.unshare"
 	if want == sandbox.VisibilityOrg {

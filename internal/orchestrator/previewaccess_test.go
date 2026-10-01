@@ -134,3 +134,33 @@ func TestGetReportsPublicPreview(t *testing.T) {
 		t.Errorf("public_preview = %v after turning it on, want true", got)
 	}
 }
+
+// The generation was a value, so off -> on -> off restored the first "off"
+// generation and revived every token minted under it. It is a count now.
+func TestFlippingBackDoesNotReviveOldPreviewTokens(t *testing.T) {
+	s, orch, owner, _ := previewAccessFleet(t)
+	ctx := context.Background()
+	firstOff := s.previewToken(ctx, "sb1", 3000)
+	if !opens(s, firstOff) {
+		t.Fatal("a fresh token does not open the preview — this test proves nothing")
+	}
+	for _, public := range []string{"true", "false"} {
+		if code := setPreviewAccess(t, orch, owner, `{"public":`+public+`}`); code != http.StatusOK {
+			t.Fatalf("flip to %s = %d", public, code)
+		}
+	}
+	if opens(s, firstOff) {
+		t.Error("a token minted before off -> on -> off opens the preview again")
+	}
+	if !opens(s, s.previewToken(ctx, "sb1", 3000)) {
+		t.Error("a token minted after the flips does not open the preview")
+	}
+	// Re-asserting the current state is not a flip and retracts nothing.
+	current := s.previewToken(ctx, "sb1", 3000)
+	if code := setPreviewAccess(t, orch, owner, `{"public":false}`); code != http.StatusOK {
+		t.Fatalf("no-op flip = %d", code)
+	}
+	if !opens(s, current) {
+		t.Error("setting public to what it already was retracted the owner's link")
+	}
+}

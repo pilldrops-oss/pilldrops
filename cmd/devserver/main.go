@@ -314,13 +314,18 @@ func rebrandPreview(r *http.Request, u string) string {
 var previewSecret []byte
 
 // previewToken derives a sandbox's stateless preview access token, so any
-// replica can validate it. vis and public are the sandbox's visibility and
-// public_preview as the response being rebranded reports them: the
-// orchestrator binds both into the token and re-reads them on every preview
-// request, so minting under any other values here would hand the caller a
-// link the gate refuses. "" is the default visibility, "org".
-func previewToken(id string, port int, vis string, public bool) string {
-	return previewtoken.Browser(previewSecret, id, port, sandbox.PreviewGeneration(vis, public))
+// replica can validate it, under gen: the orchestrator re-reads the sandbox's
+// generation on every preview request, so minting under any other value here
+// would hand the caller a link the gate refuses.
+func previewToken(id string, port int, gen string) string {
+	return previewtoken.Browser(previewSecret, id, port, gen)
+}
+
+// previewGenerationOf is the generation a rebranded sandbox body names.
+func previewGenerationOf(m map[string]any) string {
+	vis, _ := m["visibility"].(string)
+	public, _ := m["public_preview"].(bool)
+	return sandbox.PreviewGeneration(vis, public, 0)
 }
 
 // rebrandBody rewrites app_url/url fields in a proxied sandbox response
@@ -349,9 +354,7 @@ func rebrandBody(r *http.Request, body []byte) []byte {
 		}
 		// The token is bound to the declared port; a client probing another
 		// port mints its own via GET /v1/sandboxes/{id}/preview-token?port=N.
-		vis, _ := m["visibility"].(string)
-		public, _ := m["public_preview"].(bool)
-		tok := previewToken(id, port, vis, public)
+		tok := previewToken(id, port, previewGenerationOf(m))
 		if tok == "" {
 			return
 		}

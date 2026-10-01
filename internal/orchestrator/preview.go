@@ -70,7 +70,9 @@ func (s *Server) previewToken(ctx context.Context, id string, port int) string {
 // Sharing (private -> org) revokes too. It is the same event from the other
 // side, the share wipe already makes it a state change rather than a widening,
 // and one rule beats two. Turning a public preview off is the same event
-// again, so the public flag is part of the generation (sandbox.PreviewGeneration).
+// again, so the public flag is part of the generation too, and every flip of
+// either bumps a counter in it, so flipping back never revives an old token
+// (sandbox.PreviewGeneration).
 //
 // ok=false means the store could not be read. The caller refuses: this is the
 // same fail-closed rule isPublicPreview already applies, and a store outage
@@ -78,22 +80,27 @@ func (s *Server) previewToken(ctx context.Context, id string, port int) string {
 func (s *Server) previewGeneration(ctx context.Context, id string) (string, bool) {
 	st := s.st.Load()
 	if st == nil {
-		// Storeless: nothing records a visibility, so mint and verify agree on
-		// the default; the public flag is the in-memory fallback's.
-		return sandbox.PreviewGeneration("", s.isPublicPreview(ctx, id)), true
+		// Storeless: nothing records a visibility; public and its flips are
+		// this replica's in-memory fallback.
+		return sandbox.PreviewGeneration("", s.isPublicPreview(ctx, id), s.memFlips(id)), true
 	}
 	row, found, err := s.previewRow(ctx, id)
-	if err != nil {
-		s.log().ErrorContext(ctx, "preview generation lookup failed, refusing the preview",
-			"component", "orchestrator", "sandbox", id, "err", err)
-		return "", false
+	if err == nil {
+		var v any
+		v, err = s.pcache.get("gen:"+id, previewFresh, s.now(), func() (any, error) { return st.PreviewGeneration(ctx, id) })
+		if err == nil {
+			flips, _ := v.(int64)
+			vis := ""
+			if found {
+				// "" is a row from before visibility existed: the default.
+				vis = row.Visibility
+			}
+			return sandbox.PreviewGeneration(vis, s.isPublicPreview(ctx, id), flips), true
+		}
 	}
-	vis := ""
-	if found {
-		// "" is a row from before visibility existed: the default.
-		vis = row.Visibility
-	}
-	return sandbox.PreviewGeneration(vis, s.isPublicPreview(ctx, id)), true
+	s.log().ErrorContext(ctx, "preview generation lookup failed, refusing the preview",
+		"component", "orchestrator", "sandbox", id, "err", err)
+	return "", false
 }
 
 // previewHopTTL bounds the orchestrator-to-node preview credential so a ?ptok= captured from a log expires.

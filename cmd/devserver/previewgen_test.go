@@ -24,7 +24,7 @@ func TestRebrandMintsUnderThePublicGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	tok, _ := m["cdp_token"].(string)
-	if !previewtoken.BrowserValid(previewSecret, tok, "sb1", 6080, sandbox.PreviewGeneration("org", true)) {
+	if !previewtoken.BrowserValid(previewSecret, tok, "sb1", 6080, sandbox.PreviewGeneration("org", true, 0)) {
 		t.Errorf("token %q does not validate under the public generation", tok)
 	}
 }

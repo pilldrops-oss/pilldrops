@@ -27,6 +27,32 @@ func (s *Server) setPublicPreview(ctx context.Context, id string, public bool) e
 	return nil
 }
 
+// bumpPreviewGeneration counts one access flip, retracting every preview token
+// minted before it for good.
+func (s *Server) bumpPreviewGeneration(ctx context.Context, id string) error {
+	if st := s.st.Load(); st != nil {
+		if err := st.BumpPreviewGeneration(ctx, id); err != nil {
+			return err
+		}
+		s.pcache.drop("gen:" + id)
+		return nil
+	}
+	s.flipsMu.Lock()
+	defer s.flipsMu.Unlock()
+	if s.flips == nil {
+		s.flips = map[string]int64{}
+	}
+	s.flips[id]++
+	return nil
+}
+
+// memFlips is the storeless replica's flip count for id.
+func (s *Server) memFlips(id string) int64 {
+	s.flipsMu.Lock()
+	defer s.flipsMu.Unlock()
+	return s.flips[id]
+}
+
 // handlePreviewAccess turns a sandbox's tokenless preview on or off after
 // launch. Only its creator and operators may; anyone else gets 404, as on the
 // visibility flip, so the answer does not confirm whose machine it is.
@@ -64,6 +90,14 @@ func (s *Server) handlePreviewAccess(w http.ResponseWriter, r *http.Request) {
 	if err := s.setPublicPreview(r.Context(), id, *body.Public); err != nil {
 		writeErr(w, http.StatusServiceUnavailable, "could not record preview access: "+err.Error())
 		return
+	}
+	if was != *body.Public {
+		if err := s.bumpPreviewGeneration(r.Context(), id); err != nil {
+			// The flag already moved; old tokens still differ by its marker,
+			// but flipping back would revive them, so say it did not stick.
+			writeErr(w, http.StatusServiceUnavailable, "could not retract old preview links: "+err.Error())
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "public_preview": *body.Public, "was": was})
 }

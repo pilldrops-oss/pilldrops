@@ -77,6 +77,8 @@ type Server struct {
 	ui           *webui.Server               // the dashboard; nil when ORCHESTRATOR_UI=off
 	fb           *feedbackStore              // in-memory feedback inbox for the admin console
 	publicSB     sync.Map                    // sandbox id -> true when created public; no-store fallback only
+	flipsMu      sync.Mutex
+	flips        map[string]int64 // sandbox id -> preview access flips; no-store fallback only
 
 	// logger is the structured logger. Use the ...Context variants so
 	// request_id and trace_id are stamped from the context.

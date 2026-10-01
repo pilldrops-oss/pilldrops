@@ -314,6 +314,7 @@ func (s *Store) ForgetSandbox(ctx context.Context, id string) error {
 		s.DeleteSandboxConfig,
 		s.DeleteSandboxIntegrations,
 		s.DeleteAgentWebhooksForSandbox,
+		s.deletePreviewGeneration,
 	} {
 		_ = forget(ctx, id)
 	}
