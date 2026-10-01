@@ -376,22 +376,26 @@ func demux(r io.Reader, stdout, stderr io.Writer) error {
 
 // containerJSON is the subset of a container inspect this needs.
 type containerJSON struct {
-	ID     string `json:"Id"`
-	SizeRw int64  `json:"SizeRw"`
-	State  struct {
-		Running   bool `json:"Running"`
-		OOMKilled bool `json:"OOMKilled"`
-		ExitCode  int  `json:"ExitCode"`
-	} `json:"State"`
+	ID     string         `json:"Id"`
+	SizeRw int64          `json:"SizeRw"`
+	State  containerState `json:"State"`
 }
 
-// State reports whether the container still runs and whether it was OOM-killed.
-func (e *engine) State(ctx context.Context, cid string) (running, oomKilled bool, err error) {
+// containerState is the subset of a container's State this needs.
+type containerState struct {
+	Running    bool      `json:"Running"`
+	OOMKilled  bool      `json:"OOMKilled"`
+	ExitCode   int       `json:"ExitCode"`
+	FinishedAt time.Time `json:"FinishedAt"`
+}
+
+// State returns the container's run state.
+func (e *engine) State(ctx context.Context, cid string) (containerState, error) {
 	var c containerJSON
 	if err := e.get(ctx, "/containers/"+cid+"/json", &c); err != nil {
-		return false, false, err
+		return containerState{}, err
 	}
-	return c.State.Running, c.State.OOMKilled, nil
+	return c.State, nil
 }
 
 // InspectSize returns the container's writable-layer size in bytes. Expensive:

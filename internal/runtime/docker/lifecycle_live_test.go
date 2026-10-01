@@ -153,8 +153,14 @@ func TestLiveAliveSeesAContainerThatDied(t *testing.T) {
 	if _, _, code, err := dockerOut(ctx, "kill", inst.(*dockerInstance).cid); err != nil || code != 0 {
 		t.Fatalf("docker kill: %v %d", err, code)
 	}
+	old := deadConfirmAfter
+	deadConfirmAfter = 0
+	t.Cleanup(func() { deadConfirmAfter = old })
+	if !lv.Alive() {
+		t.Error("one stopped read already reads as dead")
+	}
 	if lv.Alive() {
-		t.Error("a killed container reads as alive")
+		t.Error("a killed container reads as alive on the second read")
 	}
 	if inst.(rt.OOMKilledReporter).OOMKilled() {
 		t.Error("a plain kill reads as an OOM kill")

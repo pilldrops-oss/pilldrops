@@ -59,6 +59,9 @@ type dockerInstance struct {
 	ports   map[int]string
 	// oomKilled is what the inspect that found the container dead said.
 	oomKilled atomic.Bool
+	// deadSince is the first of the consecutive reads that found it stopped.
+	deadMu    sync.Mutex
+	deadSince time.Time
 }
 
 func (i *dockerInstance) ID() string { return i.id }
@@ -282,27 +285,62 @@ const procList = `for d in /proc/[0-9]*; do p=${d#/proc/}; [ "$p" = $$ ] && cont
 // missing container answers alive: reaping on a dockerd hiccup would destroy
 // every sandbox on the node.
 func (i *dockerInstance) Alive() bool {
+	st, err := i.state()
+	if err != nil && !strings.Contains(err.Error(), "No such") { // engine: "container", CLI: "object"
+		return true
+	}
+	if err == nil && st.Running {
+		i.deadMu.Lock()
+		i.deadSince = time.Time{}
+		i.deadMu.Unlock()
+		return true
+	}
+	i.oomKilled.Store(st.OOMKilled)
+	return !i.confirmDead(time.Now(), st.FinishedAt, dockerdStarted())
+}
+
+func (i *dockerInstance) state() (containerState, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	var running, oom bool
-	var err error
 	if i.eng != nil {
-		running, oom, err = i.eng.State(ctx, i.cid)
-	} else {
-		var out, se string
-		var code int
-		out, se, code, err = dockerOut(ctx, "inspect", "-f", "{{.State.Running}} {{.State.OOMKilled}}", i.cid)
-		if err == nil && code != 0 {
-			err = errors.New(se)
-		}
-		f := strings.Fields(out)
-		running, oom = len(f) == 2 && f[0] == "true", len(f) == 2 && f[1] == "true"
+		return i.eng.State(ctx, i.cid)
+	}
+	out, se, code, err := dockerOut(ctx, "inspect", "-f",
+		"{{.State.Running}} {{.State.OOMKilled}} {{.State.FinishedAt}}", i.cid)
+	if err == nil && code != 0 {
+		err = errors.New(se)
 	}
 	if err != nil {
-		return !strings.Contains(err.Error(), "No such") // engine: "container", CLI: "object"
+		return containerState{}, err
 	}
-	i.oomKilled.Store(oom)
-	return running
+	var st containerState
+	if f := strings.Fields(out); len(f) == 3 {
+		st.Running, st.OOMKilled = f[0] == "true", f[1] == "true"
+		st.FinishedAt, _ = time.Parse(time.RFC3339Nano, f[2])
+	}
+	return st, nil
+}
+
+// deadConfirmAfter is how long a container must stay stopped, across two
+// reads, before it is reported dead; a var so tests can shrink it.
+var deadConfirmAfter = 5 * time.Second
+
+// confirmDead decides whether a container read as stopped at now is dead. One
+// stopped before the running dockerd started was stopped by a dockerd restart
+// without live-restore, which takes every container down at once: that is not
+// the sandbox dying, and is never reaped.
+func (i *dockerInstance) confirmDead(now, finishedAt, dockerdStart time.Time) bool {
+	i.deadMu.Lock()
+	defer i.deadMu.Unlock()
+	if !finishedAt.IsZero() && !dockerdStart.IsZero() && finishedAt.Before(dockerdStart) {
+		i.deadSince = time.Time{}
+		return false
+	}
+	if i.deadSince.IsZero() {
+		i.deadSince = now
+		return false
+	}
+	return now.Sub(i.deadSince) >= deadConfirmAfter
 }
 
 // OOMKilled implements rt.OOMKilledReporter.
