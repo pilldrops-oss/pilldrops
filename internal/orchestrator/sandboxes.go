@@ -307,6 +307,15 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			if st := s.st.Load(); st != nil {
 				_ = st.SetSandboxAttribution(r.Context(), created.ID, store.ClassifySource(req.Client), req.Client) //nolint:errcheck // best-effort: a failure here just means attribution shows up later, not never
 			}
+			// Persisted so every replica agrees; the in-memory map is the no-store
+			// fallback. Before the links are minted: the flag is part of the
+			// generation their tokens are bound to.
+			if req.Public {
+				if err := s.setPublicPreview(r.Context(), created.ID, true); err != nil {
+					s.log().ErrorContext(r.Context(), "could not persist public preview; the caller is about to be handed a link that will not work",
+						"component", "orchestrator", "sandbox", created.ID, "err", err)
+				}
+			}
 			// Rewrite the preview URL to come back through the orchestrator.
 			prev := created.AppURL
 			if prev == "" {
@@ -314,17 +323,8 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			}
 			to, viewer := s.previewLinks(r, prev)
 			rb = s.rewriteURL(r, rb, prev, to, viewer, node.ID)
-			// Persisted so every replica agrees; the in-memory map is the no-store fallback.
 			if req.Public {
-				if st := s.st.Load(); st != nil {
-					if err := st.SetPublicPreview(r.Context(), created.ID, true); err != nil {
-						s.log().ErrorContext(r.Context(), "could not persist public preview; the caller is about to be handed a link that will not work",
-							"component", "orchestrator", "sandbox", created.ID, "err", err)
-					}
-				} else {
-					s.publicSB.Store(created.ID, true)
-				}
-				fields := map[string]any{"public": true}
+				fields := map[string]any{"public": true, "public_preview": true}
 				if port := mainPort(req); rt.IsPlatformPort(port) {
 					fields["warning"] = fmt.Sprintf("public: true does not share this sandbox's preview: port %d is a "+
 						"terminal or desktop port, which gives shell access, so it always needs an access token "+
@@ -547,9 +547,11 @@ func (s *Server) handleSandboxGet(w http.ResponseWriter, r *http.Request) {
 			prev = doc.URL
 		}
 		body = s.pointLinksHere(r, body, prev, node.ID)
+		extra := map[string]any{"public_preview": s.isPublicPreview(r.Context(), id)}
 		if fw := s.forwardsFor(r, id); fw != nil {
-			body = injectJSONFields(body, map[string]any{"forwards": fw})
+			extra["forwards"] = fw
 		}
+		body = injectJSONFields(body, extra)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body) //nolint:errcheck // best-effort: headers are committed
 		return

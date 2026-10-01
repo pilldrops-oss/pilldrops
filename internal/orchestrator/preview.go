@@ -69,7 +69,8 @@ func (s *Server) previewToken(ctx context.Context, id string, port int) string {
 //
 // Sharing (private -> org) revokes too. It is the same event from the other
 // side, the share wipe already makes it a state change rather than a widening,
-// and one rule beats two.
+// and one rule beats two. Turning a public preview off is the same event
+// again, so the public flag is part of the generation (sandbox.PreviewGeneration).
 //
 // ok=false means the store could not be read. The caller refuses: this is the
 // same fail-closed rule isPublicPreview already applies, and a store outage
@@ -78,8 +79,8 @@ func (s *Server) previewGeneration(ctx context.Context, id string) (string, bool
 	st := s.st.Load()
 	if st == nil {
 		// Storeless: nothing records a visibility, so mint and verify agree on
-		// the default and the gate is exactly the token check it always was.
-		return sandbox.VisibilityOrg, true
+		// the default; the public flag is the in-memory fallback's.
+		return sandbox.PreviewGeneration("", s.isPublicPreview(ctx, id)), true
 	}
 	row, found, err := s.previewRow(ctx, id)
 	if err != nil {
@@ -87,11 +88,12 @@ func (s *Server) previewGeneration(ctx context.Context, id string) (string, bool
 			"component", "orchestrator", "sandbox", id, "err", err)
 		return "", false
 	}
-	if !found || row.Visibility == "" {
-		// No row, or a row from before visibility existed: the default.
-		return sandbox.VisibilityOrg, true
+	vis := ""
+	if found {
+		// "" is a row from before visibility existed: the default.
+		vis = row.Visibility
 	}
-	return row.Visibility, true
+	return sandbox.PreviewGeneration(vis, s.isPublicPreview(ctx, id)), true
 }
 
 // previewHopTTL bounds the orchestrator-to-node preview credential so a ?ptok= captured from a log expires.

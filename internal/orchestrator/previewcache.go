@@ -59,3 +59,11 @@ func (c *staleCache) get(key string, fresh time.Duration, now time.Time, load fu
 	c.mu.Unlock()
 	return v, nil
 }
+
+// drop forgets key on this replica, so a change made here is not served stale
+// by it; other replicas still wait out previewFresh.
+func (c *staleCache) drop(key string) {
+	c.mu.Lock()
+	delete(c.m, key)
+	c.mu.Unlock()
+}

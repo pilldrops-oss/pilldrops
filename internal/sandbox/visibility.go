@@ -95,3 +95,18 @@ func CreatedByCaller(createdBy, callerKeyID string) bool {
 func ReachableAnonymously(visibility, createdBy string) bool {
 	return Visible("", visibility, createdBy, "", false)
 }
+
+// PreviewGeneration is the revocation generation a browser preview token is
+// bound to: the visibility, marked when the preview is public. Either flip
+// changes it, so turning a public preview off retracts the links and cookies
+// handed out while it was on, exactly as a visibility flip does. The minting
+// portal and the verifying orchestrator both call this so they cannot drift.
+func PreviewGeneration(visibility string, public bool) string {
+	if visibility == "" {
+		visibility = VisibilityOrg
+	}
+	if public {
+		return visibility + "+public"
+	}
+	return visibility
+}

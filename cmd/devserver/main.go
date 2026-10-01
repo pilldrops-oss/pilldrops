@@ -314,15 +314,13 @@ func rebrandPreview(r *http.Request, u string) string {
 var previewSecret []byte
 
 // previewToken derives a sandbox's stateless preview access token, so any
-// replica can validate it. vis is the sandbox's visibility as the response
-// being rebranded reports it: the orchestrator binds it into the token and
-// re-reads it on every preview request, so minting under any other value here
-// would hand the caller a link the gate refuses. "" is the default, "org".
-func previewToken(id string, port int, vis string) string {
-	if vis == "" {
-		vis = sandbox.VisibilityOrg
-	}
-	return previewtoken.Browser(previewSecret, id, port, vis)
+// replica can validate it. vis and public are the sandbox's visibility and
+// public_preview as the response being rebranded reports them: the
+// orchestrator binds both into the token and re-reads them on every preview
+// request, so minting under any other values here would hand the caller a
+// link the gate refuses. "" is the default visibility, "org".
+func previewToken(id string, port int, vis string, public bool) string {
+	return previewtoken.Browser(previewSecret, id, port, sandbox.PreviewGeneration(vis, public))
 }
 
 // rebrandBody rewrites app_url/url fields in a proxied sandbox response
@@ -352,7 +350,8 @@ func rebrandBody(r *http.Request, body []byte) []byte {
 		// The token is bound to the declared port; a client probing another
 		// port mints its own via GET /v1/sandboxes/{id}/preview-token?port=N.
 		vis, _ := m["visibility"].(string)
-		tok := previewToken(id, port, vis)
+		public, _ := m["public_preview"].(bool)
+		tok := previewToken(id, port, vis, public)
 		if tok == "" {
 			return
 		}
@@ -2852,7 +2851,7 @@ func main() {
 			"/v1/cron", "/v1/cron/{id}", "/v1/cron/{id}/toggle", "/v1/cron/{id}/run",
 			// The node probes what the preview would actually serve.
 			"/v1/sandboxes/{id}/preview-status",
-			"/v1/sandboxes/{id}/fork", "/v1/sandboxes/{id}/visibility",
+			"/v1/sandboxes/{id}/fork", "/v1/sandboxes/{id}/visibility", "/v1/sandboxes/{id}/preview-access",
 			"/v1/domains", "/v1/domains/{host}",
 		} {
 			r.Get(pat, fleetPassthrough)
