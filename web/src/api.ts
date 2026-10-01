@@ -221,6 +221,15 @@ export type VisibilityResp = {
 export const setSandboxVisibility = (id: string, visibility: 'org' | 'private') =>
   request<VisibilityResp>('POST', `/v1/sandboxes/${id}/visibility`, { visibility })
 
+// PreviewAccessResp says what the flip did; `was` is the value before this call.
+export type PreviewAccessResp = { id: string; public_preview: boolean; was: boolean }
+
+// setPreviewAccess flips whether the app preview needs a token. Only the sandbox's
+// creator or an operator may call it; anyone else gets 404, same as the visibility
+// flip. The terminal (7681) and desktop (6080) ports stay token-gated either way.
+export const setPreviewAccess = (id: string, pub: boolean) =>
+  request<PreviewAccessResp>('POST', `/v1/sandboxes/${id}/preview-access`, { public: pub })
+
 export const refreshSandbox = (id: string) =>
   request<StatusResp>('POST', `/v1/sandboxes/${id}/refresh`, {})
 

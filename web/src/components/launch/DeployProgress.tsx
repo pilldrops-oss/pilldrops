@@ -320,6 +320,7 @@ function DeployReady({
           {!dead && expiryText && <div className="dp-expiry">{expiryText}</div>}
         </div>
       </div>
+      {result.warning && <p className="lm-hint pa-warn">{result.warning}</p>}
       {!isReady && !isIndeterminate && previewOutcome && (
         <PreviewDiagnosis
           outcome={previewOutcome}

@@ -282,6 +282,8 @@ export interface CreateSandboxResp {
   /** "cold" or "snapshot"; reported by create only, not by the detail GET. */
   boot_type?: string
   boot_ms?: number
+  /** Set when `public: true` would not do what was asked (e.g. a desktop/terminal port). */
+  warning?: string
 }
 
 export interface ExecResp {
@@ -427,6 +429,12 @@ export interface SandboxDetail {
   url?: string
   /** Preview URL on the desktop port; present when the sandbox has a desktop. */
   desktop_url?: string
+  /**
+   * Whether the preview is reachable without a token. Absent on a server with
+   * no public-preview concept (a node with no orchestrator in front) — treat
+   * that as "the control is not available", not as false.
+   */
+  public_preview?: boolean
 }
 
 export interface FunctionInfo {

@@ -104,4 +104,19 @@ describe('sandbox detail (U4)', () => {
     expect(screen.getByText(`${window.location.origin}/preview/sb1/8000/`)).toBeInTheDocument()
     expect(screen.queryByText(/localtest\.me/)).toBeNull()
   })
+
+  it('the ready screen shows a create-time warning (B24: public on a terminal/desktop port)', () => {
+    render(
+      <DeployProgress
+        steps={[]}
+        state="done"
+        onReset={() => {}}
+        result={{
+          id: 'sb1', template: 'desktop', status: 'running', created_at: '', expires_at: '',
+          warning: 'public: true does not share this sandbox’s preview: port 6080 needs a token',
+        }}
+      />,
+    )
+    expect(screen.getByText(/does not share this sandbox.s preview/)).toBeInTheDocument()
+  })
 })

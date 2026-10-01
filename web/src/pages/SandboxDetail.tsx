@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, setSandboxSlug, slugUrl, setSandboxVisibility, absolutePreviewUrl, ApiError, IS_LOCAL_RUNTIME } from '../api'
+import { getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, setSandboxSlug, slugUrl, setSandboxVisibility, setPreviewAccess, absolutePreviewUrl, ApiError, IS_LOCAL_RUNTIME } from '../api'
 import UnsafeEmbedNotice from '../components/UnsafeEmbedNotice'
 import { useConfirm } from '../components/ConfirmModal'
 import { useToast } from '../components/Toast'
@@ -10,7 +10,7 @@ import FileBrowser from '../components/FileBrowser'
 import type { SandboxDetail as SandboxDetailType, Template, SandboxMetrics, PortStatus } from '../types'
 import { statusPill } from './Sandboxes'
 import { TemplateIcon } from '../components/templateIcons'
-import { usePreviewLink } from '../lib/previewToken'
+import { usePreviewLink, forgetPreviewTokens } from '../lib/previewToken'
 import { previewPortOf, withNoVncResize } from '../lib/previewPort'
 import SandboxTerminal from '../components/SandboxTerminal'
 
@@ -101,6 +101,7 @@ function quickStart(template: string): { cmds: QuickCmd[] } {
 }
 
 const ENVD_TERMINAL_PORT = 7681
+const ENVD_DESKTOP_PORT = 6080
 
 function QuickCommands({ template, onRun }: { template: string; onRun?: (cmd: string) => void }) {
   const { cmds } = quickStart(template)
@@ -756,6 +757,28 @@ export default function SandboxDetail() {
     })
   }, [id, isPrivate, doAction, confirmDialog, toast])
 
+  const isPublicPreview = !!sandbox?.public_preview
+  // Only the creator or an operator may flip this — everyone else gets 404,
+  // same as the visibility flip. The web has no cheaper way to tell who is
+  // who, so it shows the control and lets a 404 from the real attempt hide it.
+  const [previewAccessHidden, setPreviewAccessHidden] = useState(false)
+  const previewAccessToggle = useCallback(async (next: boolean) => {
+    if (!id) return
+    setBusy(true)
+    try {
+      await setPreviewAccess(id, next)
+      // The flip moves the token's generation, retracting links minted under
+      // the old one; the cache must forget them too, or it keeps serving one.
+      forgetPreviewTokens(id)
+      await loadSandbox()
+      toast.success(next ? 'Preview is now public' : 'Preview now needs a token')
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) setPreviewAccessHidden(true)
+      else toast.error(errText(e))
+    }
+    setBusy(false)
+  }, [id, loadSandbox, toast])
+
   if (!id) return null
 
   if (loading && !sandbox) {
@@ -866,6 +889,27 @@ export default function SandboxDetail() {
               <option value="private">Only my key</option>
             </select>
           </label>
+          {!previewAccessHidden && sb.public_preview !== undefined && (
+            <label
+              className="detail-access"
+              title={`Whether the app preview is reachable without a token. Ports ${ENVD_TERMINAL_PORT} `
+                + `(terminal) and ${ENVD_DESKTOP_PORT} (desktop) always need one regardless of this setting.`}
+            >
+              Preview
+              <select
+                className="sel"
+                disabled={busy}
+                value={isPublicPreview ? 'public' : 'token'}
+                onChange={e => {
+                  const next = e.target.value === 'public'
+                  if (next !== isPublicPreview) void previewAccessToggle(next)
+                }}
+              >
+                <option value="public">Public</option>
+                <option value="token">Token only</option>
+              </select>
+            </label>
+          )}
           </>}
           <button
             className="btn"
