@@ -16,6 +16,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/auth/previewtoken"
 	"github.com/pilldrops-oss/pilldrops/internal/httpx"
 	"github.com/pilldrops-oss/pilldrops/internal/proxy"
+	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
@@ -145,7 +146,10 @@ func (s *Server) authorizePreview(w http.ResponseWriter, r *http.Request, id str
 		http.Error(w, "sandbox not found", http.StatusNotFound)
 		return false
 	}
-	if s.isPublicPreview(r.Context(), id) {
+	// Public shares the app, never the platform's own ports: the node hands
+	// the terminal hop envd's shell credential, so a tokenless 7681 on a
+	// public sandbox was an anonymous shell.
+	if !rt.IsPlatformPort(port) && s.isPublicPreview(r.Context(), id) {
 		return true
 	}
 	if s.apiKey == "" {

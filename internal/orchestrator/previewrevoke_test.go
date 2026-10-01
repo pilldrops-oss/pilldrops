@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
+	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
@@ -121,5 +123,33 @@ func TestEmptyVisibilityIsTheOrgGeneration(t *testing.T) {
 	}
 	if !opens(s, s.previewToken(ctx, "sb1", 3000)) {
 		t.Error("a pre-migration row cannot be previewed at all")
+	}
+}
+
+// A public preview opened every port without a token, the terminal and the
+// desktop included, and the node hands the terminal hop envd's shell
+// credential: anyone with the URL of a public sandbox had a shell on it.
+func TestPublicPreviewDoesNotOpenPlatformPorts(t *testing.T) {
+	s, st := revokeServer(t, sandbox.VisibilityOrg)
+	if err := st.SetPublicPreview(t.Context(), "sb1", true); err != nil {
+		t.Fatalf("set public: %v", err)
+	}
+	gate := func(port int, query string) bool {
+		path := "/preview/sb1/" + strconv.Itoa(port) + "/" + query
+		return s.authorizePreview(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil), "sb1", port)
+	}
+	if !gate(3000, "") {
+		t.Fatal("a public sandbox's app port needs a token — this test proves nothing")
+	}
+	for _, port := range []int{rt.TerminalPort, rt.DesktopPort} {
+		if gate(port, "") {
+			t.Errorf("port %d of a public sandbox opens without a token", port)
+		}
+		if gate(port, "?token="+s.previewToken(t.Context(), "sb1", 3000)) {
+			t.Errorf("an app-port token opens port %d", port)
+		}
+		if !gate(port, "?token="+s.previewToken(t.Context(), "sb1", port)) {
+			t.Errorf("the owner's token for port %d does not open it", port)
+		}
 	}
 }
