@@ -18,9 +18,9 @@ import (
 
 var (
 	host = flag.String("host", "http://localhost:18080", "server base URL")
-	key  = flag.String("key", os.Getenv("PILLDROPS_API_KEY"), "API key")
+	key  = flag.String("key", "", "API key (default $PILLDROPS_API_KEY)")
 	// GET /v1/host is node-wide, so a tenant key is refused on it.
-	operatorKey = flag.String("operator-key", os.Getenv("PILLDROPS_OPERATOR_KEY"), "operator key for host stats (GET /v1/host); defaults to -key")
+	operatorKey = flag.String("operator-key", "", "operator key for host stats (GET /v1/host) (default $PILLDROPS_OPERATOR_KEY, then -key)")
 	template    = flag.String("template", "base", "template to create")
 	mode        = flag.String("mode", "ramp", "ramp | churn | invoke | latency")
 	step        = flag.Int("step", 5, "ramp: sandboxes added per stage")
@@ -132,8 +132,21 @@ func (t *tracker) all() []string {
 	return slices.Collect(maps.Keys(t.ids))
 }
 
+// keysFromEnv fills the keys left unset on the command line from the
+// environment. After flag.Parse rather than as flag defaults, so -help never
+// prints a secret.
+func keysFromEnv() {
+	if *key == "" {
+		*key = os.Getenv("PILLDROPS_API_KEY")
+	}
+	if *operatorKey == "" {
+		*operatorKey = os.Getenv("PILLDROPS_OPERATOR_KEY")
+	}
+}
+
 func main() {
 	flag.Parse()
+	keysFromEnv()
 	if *key == "" {
 		fmt.Fprintln(os.Stderr, "set -key or PILLDROPS_API_KEY")
 		os.Exit(2)
