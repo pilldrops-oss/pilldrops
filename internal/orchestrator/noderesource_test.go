@@ -36,7 +36,7 @@ func TestNodeResourcesAreReachableThroughTheControlPlane(t *testing.T) {
 	// /v1/projects is absent on purpose: the control plane answers it from
 	// the shared store instead of forwarding.
 	for _, path := range []string{
-		"/v1/keys", "/v1/templates", "/v1/cron", "/v1/functions",
+		"/v1/keys", "/v1/templates", "/v1/cron",
 		"/v1/integrations", "/v1/host",
 	} {
 		gotPath, gotMethod = "", ""

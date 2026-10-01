@@ -22,7 +22,7 @@ var (
 	// GET /v1/host is node-wide, so a tenant key is refused on it.
 	operatorKey = flag.String("operator-key", "", "operator key for host stats (GET /v1/host) (default $PILLDROPS_OPERATOR_KEY, then -key)")
 	template    = flag.String("template", "base", "template to create")
-	mode        = flag.String("mode", "ramp", "ramp | churn | invoke | latency")
+	mode        = flag.String("mode", "ramp", "ramp | churn | latency")
 	step        = flag.Int("step", 5, "ramp: sandboxes added per stage")
 	interval    = flag.Int("interval", 4, "ramp: seconds per stage")
 	maxN        = flag.Int("max", 300, "ramp: hard stop count")
@@ -30,8 +30,8 @@ var (
 	loadMax     = flag.Float64("load-max", 0, "ramp: stop if 1-min load average exceeds (0 = off)")
 	start       = flag.String("start", "", "persistent workload command run in each sandbox (real load, not an idle pod)")
 	memMB       = flag.Int("mem", 0, "memory_mb per sandbox (0 = template default); small values pack more per node")
-	conc        = flag.Int("c", 10, "churn/invoke: concurrency")
-	total       = flag.Int("n", 200, "churn/invoke: total requests; latency: samples to take")
+	conc        = flag.Int("c", 10, "churn: concurrency")
+	total       = flag.Int("n", 200, "churn: total requests; latency: samples to take")
 
 	// latency mode. Runtime, runner class and commit have no safe default, so they are required.
 	cacheState  = flag.String("cache", "hot", "latency: cold | warm | hot — the template cache state to establish before sampling")
@@ -44,8 +44,6 @@ var (
 	allowDropCaches = flag.Bool("allow-drop-caches", false, "latency: consent to dropping the host page cache for -cache warm (affects every process on the box; only meaningful when run on the node)")
 	readyTimeout    = flag.Duration("ready-timeout", 60*time.Second, "latency: give up on a sandbox that never becomes usable, and record it as a failure rather than a slow sample")
 	execCmd         = flag.String("exec", "", "churn: optional command per sandbox")
-	fnName          = flag.String("fn", "", "invoke: function name to load-test")
-	fnPath          = flag.String("path", "/api/hello", "invoke: handler path to hit")
 	keep            = flag.Bool("keep", false, "do not destroy created sandboxes on exit")
 )
 
@@ -178,8 +176,6 @@ func main() {
 		runRamp(cl, tr)
 	case "churn":
 		runChurn(cl, tr)
-	case "invoke":
-		runInvoke(cl) // hits an existing function; nothing to clean up
 	case "latency":
 		runLatency(cl, tr)
 	default:
@@ -261,47 +257,6 @@ func runRamp(cl client, tr *tracker) {
 		time.Sleep(time.Duration(*interval) * time.Second)
 	}
 	fmt.Printf("\nreached -max %d with no ceiling hit\n", *maxN)
-}
-
-// runInvoke hits a deployed function's handler at fixed concurrency and reports throughput and latency.
-func runInvoke(cl client) {
-	if *fnName == "" {
-		fmt.Fprintln(os.Stderr, "invoke mode needs -fn <function>")
-		os.Exit(2)
-	}
-	path := "/v1/functions/" + *fnName + "/invoke" + *fnPath
-	var mu sync.Mutex
-	var lats []float64
-	ct := tally{}
-	jobs := make(chan int, *total)
-	for i := 0; i < *total; i++ {
-		jobs <- i
-	}
-	close(jobs)
-	start := time.Now()
-	var wg sync.WaitGroup
-	for w := 0; w < *conc; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for range jobs {
-				t := time.Now()
-				code, _ := cl.req("GET", path, "")
-				d := time.Since(t)
-				mu.Lock()
-				ct.add(code)
-				lats = append(lats, float64(d.Milliseconds()))
-				mu.Unlock()
-			}
-		}()
-	}
-	wg.Wait()
-	elapsed := time.Since(start).Seconds()
-	fmt.Printf("\ninvoke %s  (c=%d, n=%d)\n", path, *conc, *total)
-	fmt.Printf("throughput: %.1f req/sec   in %.1fs\n", float64(*total)/elapsed, elapsed)
-	fmt.Printf("success:    %d/%d   status: %v\n", ct.ok, *total, ct.byStatus)
-	fmt.Printf("latency ms: p50=%.0f p95=%.0f p99=%.0f max=%.0f\n",
-		percentile(lats, 50), percentile(lats, 95), percentile(lats, 99), percentile(lats, 100))
 }
 
 // runChurn runs create, exec, destroy cycles at fixed concurrency for n total.

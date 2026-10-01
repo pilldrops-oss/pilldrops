@@ -12,9 +12,6 @@ Usage:
   pilldrops sandbox info <id>
   pilldrops sandbox expose <id> 5432 [--tcp] [--udp]   # publish a guest port on a raw public endpoint
   pilldrops sandbox forwards <id> | unexpose <id> 5432
-  pilldrops function deploy <name> --dir ./fn      # serverless function → invocable HTTP endpoint
-  pilldrops function invoke <name> '{"n": 1}'
-  pilldrops function list | logs <name> | metrics <name> | code <name> | delete <name>
   pilldrops template list
   pilldrops template create <name> --dockerfile <path>
   pilldrops template build <id>
@@ -609,134 +606,6 @@ def cmd_ai(args):
         )
 
 
-# ─── Serverless functions ────────────────────────────────────────────────────
-
-def cmd_func_deploy(args):
-    """Deploy (or update) a serverless function from a directory of handler files."""
-    root = os.path.abspath(args.dir)
-    if not os.path.isdir(root):
-        print(f"{R}not a directory: {args.dir}{N}"); sys.exit(1)
-    files = _collect_files(root)
-    if not files:
-        print(f"{R}no files found in {args.dir}{N}"); sys.exit(1)
-    body = {"name": args.name, "template": args.template, "files": files}
-    if args.start:
-        body["start"] = args.start
-    if args.port:
-        body["port"] = args.port
-    if args.cpu:
-        body["vcpu"] = args.cpu
-    if args.memory:
-        body["memory_mb"] = args.memory
-    if args.max_replicas:
-        body["max_replicas"] = args.max_replicas
-    if args.env:
-        env = {}
-        for kv in args.env:
-            if "=" not in kv:
-                print(f"{R}--env must be KEY=VALUE: {kv}{N}"); sys.exit(1)
-            k, v = kv.split("=", 1)
-            env[k] = v
-        body["env"] = env
-    r = api("post", "/v1/functions", body, raw=True)
-    if r.status_code == 409:  # exists → update in place (PUT)
-        r = requests.put(f"{BASE}/v1/functions/{args.name}", json=body, headers=_auth_headers(), timeout=30)
-        if not r.ok:
-            print(f"{R}Error {r.status_code}: {r.text}{N}", file=sys.stderr); sys.exit(1)
-        print(f"{G}Function updated: {C}{args.name}{N}")
-    elif r.ok:
-        d = r.json()
-        print(f"{G}Function deployed: {C}{d['name']}{N} ({d.get('template', '?')}, port {d.get('port', '?')}, {d.get('vcpu','?')} vCPU / {d.get('memory_mb','?')} MB, ≤{d.get('max_replicas') or 'auto'} replicas)")
-    else:
-        print(f"{R}Error {r.status_code}: {r.text}{N}", file=sys.stderr); sys.exit(1)
-    print(f"  {M}invoke: pilldrops function invoke {args.name} '{{\"hello\":\"world\"}}'{N}")
-
-
-def cmd_func_list(args):
-    d = api("get", "/v1/functions")
-    fns = d.get("functions", []) if isinstance(d, dict) else (d or [])
-    if not fns:
-        print(f"{M}No functions{N}"); return
-    print(f"{B}{'NAME':<20} {'TEMPLATE':<15} {'PORT':<6} {'INVOKES':<8} {'SANDBOX'}{N}")
-    for f in fns:
-        print(f"{C}{f['name']:<20}{N} {f.get('template', '?'):<15} {str(f.get('port', '')):<6} "
-              f"{str(f.get('invokes', 0)):<8} {f.get('sandbox_id') or '-'}")
-
-
-def cmd_func_get(args):
-    d = api("get", f"/v1/functions/{args.name}")
-    for k, v in d.items():
-        print(f"  {k:<16} {v}")
-
-
-def cmd_func_invoke(args):
-    path = ("/" + args.path.lstrip("/")) if args.path else ""
-    url = f"{BASE}/v1/functions/{args.name}/invoke{path}"
-    payload = sys.stdin.read() if args.payload == "-" else args.payload
-    headers = _auth_headers()
-    method = args.method.lower()
-    if payload is not None:
-        headers["Content-Type"] = "application/json"
-        r = getattr(requests, method)(url, data=payload.encode(), headers=headers, timeout=60)
-    else:
-        r = getattr(requests, method)(url, headers=headers, timeout=60)
-    meta = []
-    if r.headers.get("X-Sandboxd-Cold-Start") is not None:
-        meta.append(f"cold={r.headers['X-Sandboxd-Cold-Start']}")
-    if r.headers.get("X-Sandboxd-Duration-Ms") is not None:
-        meta.append(f"{r.headers['X-Sandboxd-Duration-Ms']}ms")
-    if meta:
-        print(f"{M}[{' '.join(meta)}]{N}", file=sys.stderr)
-    sys.stdout.write(r.text)
-    if r.text and not r.text.endswith("\n"):
-        sys.stdout.write("\n")
-    sys.exit(0 if r.ok else 1)
-
-
-def cmd_func_delete(args):
-    api("delete", f"/v1/functions/{args.name}")
-    print(f"{G}Deleted function {args.name}{N}")
-
-
-def cmd_func_logs(args):
-    d = api("get", f"/v1/functions/{args.name}/logs")
-    if isinstance(d, dict) and "lines" in d:
-        if not d["lines"]:
-            print(f"{M}{d.get('note', 'No logs')}{N}"); return
-        for ln in d["lines"]:
-            print(ln)
-    elif isinstance(d, list):
-        for e in d:
-            if isinstance(e, dict):
-                print(f"  {str(e.get('timestamp', ''))[:19]}  exit={e.get('exit_code', '?')}  {str(e.get('cmd', ''))[:60]}")
-            else:
-                print(e)
-    else:
-        print(json.dumps(d, indent=2))
-
-
-def cmd_func_code(args):
-    d = api("get", f"/v1/functions/{args.name}/code")
-    files = d.get("files", []) if isinstance(d, dict) else []
-    if not files:
-        print(f"{M}No files{N}"); return
-    for f in files:
-        if args.show:
-            print(f"{B}=== {f['path']} ==={N}")
-            print(f.get("content", ""))
-        else:
-            print(f"  {f['path']:<30} {len(f.get('content', ''))} bytes")
-
-
-def cmd_func_metrics(args):
-    d = api("get", f"/v1/functions/{args.name}/metrics")
-    if isinstance(d, dict):
-        for k, v in d.items():
-            print(f"  {k:<18} {v}")
-    else:
-        print(json.dumps(d, indent=2))
-
-
 def main():
     p = argparse.ArgumentParser(prog="pilldrops", description="Sandbox Platform CLI")
     sub = p.add_subparsers(dest="group")
@@ -827,27 +696,6 @@ def main():
     ai.add_argument("--retries", type=int, default=3, help="self-heal attempts on failure")
     ai.add_argument("--no-heal", action="store_true", help="don't auto-fix failures")
 
-    # function — serverless functions (deploy code → invocable HTTP endpoint)
-    fn = sub.add_parser("function", help="Manage serverless functions")
-    fn_sub = fn.add_subparsers(dest="action")
-    fd = fn_sub.add_parser("deploy")
-    fd.add_argument("name"); fd.add_argument("--dir", default=".")
-    fd.add_argument("--template", default="python-3.11"); fd.add_argument("--start", default=None)
-    fd.add_argument("--port", type=int, default=0)
-    fd.add_argument("--cpu", type=int, default=0, help="vCPUs for the function sandbox (clamped to plan; 0 = template default)")
-    fd.add_argument("--memory", type=int, default=0, help="RAM in MB (clamped to plan; 0 = template default)")
-    fd.add_argument("--max-replicas", type=int, default=0, dest="max_replicas", help="autoscaling burst ceiling (clamped to plan; 0 = default)")
-    fd.add_argument("--env", action="append", default=[], help="KEY=VALUE (repeatable)")
-    fn_sub.add_parser("list")
-    fn_sub.add_parser("get").add_argument("name")
-    fi = fn_sub.add_parser("invoke")
-    fi.add_argument("name"); fi.add_argument("payload", nargs="?", default=None)
-    fi.add_argument("--method", default="POST"); fi.add_argument("--path", default=None)
-    fn_sub.add_parser("delete").add_argument("name")
-    fn_sub.add_parser("logs").add_argument("name")
-    fc = fn_sub.add_parser("code"); fc.add_argument("name"); fc.add_argument("--show", action="store_true")
-    fn_sub.add_parser("metrics").add_argument("name")
-
     args = p.parse_args()
     if not args.group: p.print_help(); return
 
@@ -872,10 +720,6 @@ def main():
         ("status",None): cmd_status,
         ("deploy",None): cmd_deploy,
         ("ai",None): cmd_ai,
-        ("function","deploy"): cmd_func_deploy, ("function","list"): cmd_func_list,
-        ("function","get"): cmd_func_get, ("function","invoke"): cmd_func_invoke,
-        ("function","delete"): cmd_func_delete, ("function","logs"): cmd_func_logs,
-        ("function","code"): cmd_func_code, ("function","metrics"): cmd_func_metrics,
     }
     fn = cmds.get((args.group, getattr(args, "action", None)))
     if fn: fn(args)

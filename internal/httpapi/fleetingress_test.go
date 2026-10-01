@@ -39,7 +39,6 @@ func newClusteredTestServer(t *testing.T) (srv *httptest.Server, st *store.Store
 		IdleTimeout: time.Hour, HardTTL: time.Hour,
 	})
 	s = New(d, st)
-	attachTestFunctions(s, d, st, dir)
 	s.SetOrgOverrideSecret([]byte(testOrgOverrideSecret))
 	s.SetCluster("http://orchestrator.invalid", "orch-key")
 	srv = httptest.NewServer(s.Routes())

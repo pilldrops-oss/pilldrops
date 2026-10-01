@@ -27,10 +27,8 @@ type metrics struct {
 	authFailures atomic.Int64
 
 	// mu guards only the maps and the histogram, which cannot be atomics.
-	mu             sync.Mutex
-	requests       map[string]int64 // "METHOD STATUS" -> count
-	funcInvokes    map[string]int64 // function name -> invoke count
-	funcColdStarts map[string]int64 // function name -> cold-start count
+	mu       sync.Mutex
+	requests map[string]int64 // "METHOD STATUS" -> count
 
 	// Request-latency histogram (seconds). latCounts[i] is the cumulative count
 	// of observations <= latBuckets[i]; latCount is the total (the +Inf bucket).
@@ -42,12 +40,10 @@ type metrics struct {
 
 func newMetrics() *metrics {
 	return &metrics{
-		start:          time.Now(),
-		requests:       make(map[string]int64),
-		funcInvokes:    make(map[string]int64),
-		funcColdStarts: make(map[string]int64),
-		latBuckets:     []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
-		latCounts:      make([]int64, 11),
+		start:      time.Now(),
+		requests:   make(map[string]int64),
+		latBuckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+		latCounts:  make([]int64, 11),
 	}
 }
 
@@ -93,54 +89,6 @@ func (m *metrics) recordRequest(method string, status int) {
 	m.mu.Lock()
 	m.requests[key]++
 	m.mu.Unlock()
-}
-
-func (m *metrics) incFunctionInvoke(name string) {
-	m.mu.Lock()
-	m.funcInvokes[boundedLabel(m.funcInvokes, name)]++
-	m.mu.Unlock()
-}
-
-func (m *metrics) incFunctionColdStart(name string) {
-	m.mu.Lock()
-	m.funcColdStarts[boundedLabel(m.funcColdStarts, name)]++
-	m.mu.Unlock()
-}
-
-// maxFunctionLabels caps distinct function-name series. Names are customer
-// chosen, so without a cap the map and the scrape cardinality are unbounded.
-const maxFunctionLabels = 500
-
-// otherLabel collects everything past the cap so the total stays right.
-const otherLabel = "__other__"
-
-// boundedLabel returns name while there is room or it is already tracked,
-// otherwise otherLabel. Callers must hold the metrics mutex.
-func boundedLabel(m map[string]int64, name string) string {
-	if _, known := m[name]; known {
-		return name
-	}
-	if len(m) >= maxFunctionLabels {
-		return otherLabel
-	}
-	return name
-}
-
-// writeFunctionCounters appends the per-function counters in Prometheus format.
-func (m *metrics) writeFunctionCounters(b *strings.Builder) {
-	m.mu.Lock()
-	inv := maps.Clone(m.funcInvokes)
-	cold := maps.Clone(m.funcColdStarts)
-	m.mu.Unlock()
-
-	fmt.Fprintf(b, "# HELP sandboxd_function_invokes_total Function invocations by name.\n# TYPE sandboxd_function_invokes_total counter\n")
-	for _, k := range sortedKeys(inv) {
-		fmt.Fprintf(b, "sandboxd_function_invokes_total{name=%q} %d\n", k, inv[k])
-	}
-	fmt.Fprintf(b, "# HELP sandboxd_function_cold_starts_total Function cold starts by name.\n# TYPE sandboxd_function_cold_starts_total counter\n")
-	for _, k := range sortedKeys(cold) {
-		fmt.Fprintf(b, "sandboxd_function_cold_starts_total{name=%q} %d\n", k, cold[k])
-	}
 }
 
 // statusRecorder captures the response status; 200 unless the handler writes another.
@@ -235,7 +183,6 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	m.writeLatencyHistogram(&b)
-	m.writeFunctionCounters(&b)
 	s.writeDaemonMetrics(&b)
 	s.writeStoreMetrics(&b)
 	writeRuntimeMetrics(&b)

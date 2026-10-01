@@ -22,7 +22,6 @@ export default function UserDetail() {
   const u = d.user
   const active = d.active ?? []
   const history = d.history ?? []
-  const functions = d.functions ?? []
   const events = d.events ?? []
   const audit = d.audit ?? []
   return (
@@ -57,11 +56,6 @@ export default function UserDetail() {
       <Section title={`History (${history.length})`}>
         <Table head={['ID', 'Template', 'Exit', 'Cost', 'Destroyed']}
           rows={history.map(h => [<Link key={h.id} to={`/sandboxes/${encodeURIComponent(h.id)}`}>{h.id}</Link>, h.template, h.exit_state, ts(h.destroyed_at)])} />
-      </Section>
-
-      <Section title={`Functions (${functions.length})`}>
-        <Table head={['Name', 'Template', 'Invokes', 'Cold starts']}
-          rows={functions.map(f => [f.Name, f.Template, String(f.Invokes), String(f.ColdStarts)])} />
       </Section>
 
       <Section title={`Activity (${events.length})`}>

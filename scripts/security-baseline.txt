@@ -105,7 +105,6 @@ gosec|G301|cmd/envd/main.go
 gosec|G301|cmd/pilldrops-bench/result.go
 gosec|G301|internal/artifact/cache/cache.go
 gosec|G301|internal/artifact/fs.go
-gosec|G301|internal/extras/functions/registry.go
 gosec|G301|internal/nodeboot/templatefetch.go
 gosec|G301|internal/nodetls/nodetls.go
 gosec|G301|internal/runtime/docker/boot.go
@@ -133,8 +132,6 @@ gosec|G304|cmd/envd/env.go
 gosec|G304|cmd/envd/main.go
 gosec|G304|cmd/pilldrops-join/main.go
 gosec|G304|internal/artifact/fs.go
-gosec|G304|internal/extras/functions/ensure.go
-gosec|G304|internal/extras/functions/registry.go
 gosec|G304|internal/httpapi/imagebuild.go
 gosec|G304|internal/nodetls/nodetls.go
 gosec|G304|internal/runtime/docker/engine.go
@@ -157,7 +154,6 @@ gosec|G304|internal/vm/storage.go
 gosec|G306|cmd/devserver/main.go
 gosec|G306|cmd/envd/env.go
 gosec|G306|cmd/pilldrops-bench/result.go
-gosec|G306|internal/extras/functions/registry.go
 gosec|G306|internal/nodetls/nodetls.go
 gosec|G306|internal/runtime/docker/boot.go
 gosec|G306|internal/runtime/process/fs.go

@@ -93,7 +93,6 @@ internal/
   egress/, egressproxy/   outbound policy
   store/           SQLite / Postgres, versioned migrations
   proxy/           preview reverse proxy
-  extras/          optional features (functions); the engine never imports them
 templates/         sandbox image recipes
 web/               dashboard source
 cli/               older Python CLI (the maintained CLI is pilldrops-oss/pilldrops-cli)

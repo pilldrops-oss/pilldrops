@@ -14,13 +14,6 @@ import type {
   SandboxLogsResp,
   CronJob,
   PreviewStatus,
-  FunctionInfo,
-  RegisterFunctionReq,
-  UpdateFunctionReq,
-  InvokeResult,
-  FunctionMetrics,
-  FunctionCode,
-  InvokeOptions,
   LimitsInfo,
   VaultSecret,
   CustomDomain,
@@ -390,55 +383,6 @@ export const getLaunchStats = (templates: string[]) =>
 // launches that actually served.
 export const postLaunchSample = (template: string, ms: number) =>
   request<void>('POST', '/v1/launch-stats', { template, ms })
-
-export const listFunctions = () =>
-  request<{ functions: FunctionInfo[] }>('GET', '/v1/functions', undefined)
-
-export const getFunction = (name: string) =>
-  request<FunctionInfo>('GET', `/v1/functions/${name}`, undefined)
-
-export const registerFunction = (body: RegisterFunctionReq) =>
-  request<FunctionInfo>('POST', '/v1/functions', body)
-
-export const deleteFunction = (name: string) =>
-  request<void>('DELETE', `/v1/functions/${name}`, undefined)
-
-export const getFunctionLogs = (name: string) =>
-  request<SandboxLogsResp>('GET', `/v1/functions/${name}/logs`, undefined)
-
-export const updateFunction = (name: string, body: UpdateFunctionReq) =>
-  request<StatusResp>('PUT', `/v1/functions/${name}`, body)
-
-export const getFunctionCode = (name: string) =>
-  request<FunctionCode>('GET', `/v1/functions/${name}/code`, undefined)
-
-export const getFunctionMetrics = (name: string) =>
-  request<FunctionMetrics>('GET', `/v1/functions/${name}/metrics`, undefined)
-
-export async function invokeFunction(name: string, opts: InvokeOptions = {}): Promise<InvokeResult> {
-  const method = opts.method ?? 'POST'
-  let path = opts.path ?? ''
-  if (path && !path.startsWith('/')) path = `/${path}`
-  const headers: Record<string, string> = {
-    ...bearerHeader(await bearerToken()),
-    ...(opts.headers ?? {}),
-  }
-  const res = await fetch(`/v1/functions/${name}/invoke${path}`, {
-    method,
-    headers,
-    body: method === 'GET' || method === 'HEAD' ? undefined : (opts.body ?? ''),
-  })
-  const text = await res.text()
-  const respHeaders: Record<string, string> = {}
-  res.headers.forEach((v, k) => { respHeaders[k] = v })
-  return {
-    status: res.status,
-    body: text,
-    cold_start: res.headers.get('X-Sandboxd-Cold-Start') === 'true',
-    duration_ms: Number(res.headers.get('X-Sandboxd-Duration-Ms') ?? 0),
-    headers: respHeaders,
-  }
-}
 
 export const listSecrets = () => request<VaultSecret[]>('GET', '/v1/secrets', undefined)
 // auto_inject is omitted to keep the current setting on a rotation; the server

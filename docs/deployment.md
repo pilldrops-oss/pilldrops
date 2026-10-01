@@ -955,7 +955,7 @@ analytics tag into them; both are off unless set.
 
 | variable | control plane | node | protects |
 |---|:--:|:--:|---|
-| `SANDBOXD_SECRET_KEY` | yes | yes | sandbox env, function env, webhook secrets |
+| `SANDBOXD_SECRET_KEY` | yes | yes | sandbox env, webhook secrets |
 | `VAULT_SECRET_KEY` | **yes** | **never** | `vault_secrets` — tenants' provider API keys |
 
 `VAULT_SECRET_KEY` is the one at-rest key the control plane keeps to itself, and

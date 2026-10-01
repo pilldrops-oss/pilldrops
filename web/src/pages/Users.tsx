@@ -42,7 +42,7 @@ export default function Users() {
           <thead>
             <tr>
               <th>Email</th><th>Last seen</th><th>Logins</th><th>Active</th>
-              <th>Created</th><th>Functions</th><th>Plan</th>
+              <th>Created</th><th>Plan</th>
             </tr>
           </thead>
           <tbody>
@@ -60,7 +60,6 @@ export default function Users() {
                 <td>{u.login_count}</td>
                 <td>{u.active_sandboxes}</td>
                 <td>{u.total_created}</td>
-                <td>{u.functions}</td>
                 <td>{u.plan || 'free'}</td>
               </tr>
             ))}

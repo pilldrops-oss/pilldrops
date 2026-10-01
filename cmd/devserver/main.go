@@ -2864,9 +2864,6 @@ func main() {
 			r.Delete(pat, fleetPassthrough)
 		}
 
-		// Deploying needs the fleet; the local GET stub below lists none.
-		r.Post("/v1/functions", fleetPassthrough)
-
 		// Long-lived server on an existing sandbox; explicit route so the proxy engages.
 		r.Post("/v1/sandboxes/{id}/start", func(w http.ResponseWriter, r *http.Request) {
 			fleetProxy(w, r, func(w http.ResponseWriter) {
@@ -3011,11 +3008,7 @@ func main() {
 			fleetProxy(w, r, func(w http.ResponseWriter) { http.Error(w, `{"error":"not found"}`, http.StatusNotFound) })
 		})
 
-		// Stubs so the SPA's Functions page and host widget work on the local backend.
-		r.Get("/v1/functions", func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			writeBytes(w, []byte(`{"functions":[]}`))
-		})
+		// Stub so the SPA's host widget works on the local backend.
 		r.Get("/v1/host", hostStub(mgr, devKey))
 
 		// After the fleet-passthrough /metrics stub above: chi lets the last

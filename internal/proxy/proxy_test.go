@@ -183,7 +183,7 @@ func TestForwardProxiesToTarget(t *testing.T) {
 	target := strings.TrimPrefix(upstream.URL, "http://")
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/v1/functions/f/invoke/hi", nil)
+	req := httptest.NewRequest("POST", "/v1/sandboxes/sb/forward/hi", nil)
 	Forward(rec, req, target, "/hi", "upstream down")
 
 	if rec.Code != 201 || rec.Body.String() != "path=/hi method=POST" {

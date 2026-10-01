@@ -73,24 +73,6 @@ check orchestrator "the node-local operator dashboard" 'dashboard'
 # cmd/sandboxd-fleet is the lean node agent: no embedded SPA, no operator dashboard.
 check sandboxd-fleet "dashboard or embedded-UI packages" 'webui|dashboard'
 
-# Optional features live under internal/extras. Only internal/httpapi and
-# internal/nodeboot, the two packages that wire routes and boot features, may
-# link them (functionroutes.go and api.go do the linking). Every other
-# internal package is engine.
-extras_ok=1
-for pkg in $(CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go list ./internal/... \
-    | sed 's#github.com/pilldrops-oss/pilldrops/internal/##' \
-    | grep -Ev '^(extras|httpapi|nodeboot)(/|$)'); do
-  bad=$(CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go list -deps "./internal/${pkg}" \
-        | grep -E 'github.com/pilldrops-oss/pilldrops/internal/extras(/|$)' || true)
-  if [ -n "$bad" ]; then
-    echo "::error::internal/${pkg} is engine and must not depend on internal/extras:"
-    echo "$bad" | sed 's/^/    /'
-    fail=1; extras_ok=0
-  fi
-done
-[ "$extras_ok" -eq 1 ] && echo "  ok  engine packages: no internal/extras"
-
 # cmd/envd ships inside a customer's sandbox; of internal/auth only sbtoken
 # (a random token, hash-only) may cross that line.
 for bin in envd; do

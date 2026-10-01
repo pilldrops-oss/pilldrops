@@ -41,7 +41,7 @@ func registeredRoutes(t *testing.T) []string {
 // TestEveryRouteSurvivedTheSplit pins the total declared in source, ignoring
 // build tags. Exact rather than a floor so an added route forces a decision on where it goes.
 func TestEveryRouteSurvivedTheSplit(t *testing.T) {
-	const want = 94 // -44: agent, chat, integration and channels routes removed
+	const want = 86 // -8: functions moved to the cloud product
 	got := registeredRoutes(t)
 	if len(got) != want {
 		t.Errorf("the node registers %d routes, expected %d.\n\n"+
@@ -65,8 +65,6 @@ func TestNoRouteIsRegisteredTwice(t *testing.T) {
 
 // rawPatterns are mounted without s.instrument and so are absent from registeredRoutes.
 var rawPatterns = []string{
-	"/v1/functions/{name}/invoke",
-	"/v1/functions/{name}/invoke/{path...}",
 	"/preview/",
 }
 
@@ -127,7 +125,6 @@ func routesInFile(t *testing.T, name string) []string {
 var featureRegistrars = []string{
 	"imageroutes.go",
 	"opsroutes.go",
-	"functionroutes.go",
 	"cronroutes.go",
 	"checkpoints.go",
 }
@@ -172,9 +169,7 @@ var rawCallRe = regexp.MustCompile(`raw\("([^"]+)"`)
 // are invisible to registeredRoutes and skip the request middleware.
 func TestRawRegistrationsArePinned(t *testing.T) {
 	want := map[string]bool{
-		"/v1/functions/{name}/invoke":           true,
-		"/v1/functions/{name}/invoke/{path...}": true,
-		"/preview/":                             true,
+		"/preview/": true,
 		// The L4 port-forward tunnel: the connection is hijacked and spliced, so
 		// a body cap would cap the customer's own stream and a server span would
 		// stay open for the life of a database session. Gated by the preview

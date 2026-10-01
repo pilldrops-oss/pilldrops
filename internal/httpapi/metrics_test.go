@@ -137,20 +137,3 @@ func TestCreateResourceSelection(t *testing.T) {
 		t.Fatalf("clamped vcpu = %v, want 16", m3["vcpu"])
 	}
 }
-
-func TestFunctionCountersExposed(t *testing.T) {
-	m := newMetrics()
-	m.incFunctionInvoke("hello")
-	m.incFunctionInvoke("hello")
-	m.incFunctionColdStart("hello")
-
-	var b strings.Builder
-	m.writeFunctionCounters(&b)
-	out := b.String()
-	if !strings.Contains(out, `sandboxd_function_invokes_total{name="hello"} 2`) {
-		t.Fatalf("invokes missing: %s", out)
-	}
-	if !strings.Contains(out, `sandboxd_function_cold_starts_total{name="hello"} 1`) {
-		t.Fatalf("cold starts missing: %s", out)
-	}
-}
