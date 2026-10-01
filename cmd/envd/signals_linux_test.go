@@ -17,6 +17,11 @@ import (
 // server as a background job of sh, which starts it with SIGINT and SIGQUIT
 // ignored, and the reaper as PID 1.
 func TestMain(m *testing.M) {
+	if os.Getenv("ENVD_FOREGROUND_HELPER") == "1" {
+		unignoreInterrupt()
+		time.Sleep(10 * time.Second)
+		os.Exit(0)
+	}
 	if os.Getenv("ENVD_REAP_HELPER") == "1" {
 		reapForever()
 	}
@@ -136,5 +141,31 @@ func TestReaperSurvivesTerminatingSignals(t *testing.T) {
 			t.Fatalf("the reaper exited on %v: %v", sig, err)
 		case <-time.After(100 * time.Millisecond):
 		}
+	}
+}
+
+// Run in the foreground, as in local dev, Ctrl-C must still stop envd.
+func TestForegroundEnvdStopsOnInterrupt(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	envd := exec.Command(self)
+	envd.Env = append(os.Environ(), "ENVD_FOREGROUND_HELPER=1")
+	if err := envd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- envd.Wait() }()
+	t.Cleanup(func() { _ = envd.Process.Kill() })
+
+	time.Sleep(200 * time.Millisecond)
+	if err := envd.Process.Signal(syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a foreground envd ignored Ctrl-C")
 	}
 }

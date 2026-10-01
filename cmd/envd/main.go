@@ -112,8 +112,12 @@ func main() {
 // an inherited SIG_IGN for SIGINT (it already handles SIGQUIT itself), and a
 // handled signal is reset to SIG_DFL by exec, so catching it here is enough.
 // The buffered channel is never read: a stray SIGINT to envd itself is dropped.
+// Started in the foreground (local dev), SIGINT was never ignored: the Go
+// runtime's handler already resets for children, and Ctrl-C still stops envd.
 func unignoreInterrupt() {
-	signal.Notify(make(chan os.Signal, 1), syscall.SIGINT)
+	if signal.Ignored(syscall.SIGINT) {
+		signal.Notify(make(chan os.Signal, 1), syscall.SIGINT)
+	}
 }
 
 // envdListenAddr decides whether envd may bind its control-plane port and why.
