@@ -599,21 +599,6 @@ export interface HistoryRecord {
   logs?: string
 }
 
-export interface CronJob {
-  id: string
-  sandbox_id: string
-  name: string
-  schedule: string
-  timezone: string
-  command: string
-  enabled: boolean
-  next_run_at: number
-  last_run_at: number
-  /** "ok" | "failed" (non-zero exit) | "error" (machine unreachable). */
-  last_status: string
-  last_output: string
-}
-
 /**
  * PreviewState is GET /v1/sandboxes/:id/preview-status. 'starting' means the
  * app has not bound its port yet; 'unknown' means readiness could not be

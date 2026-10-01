@@ -11,9 +11,10 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
-// Functions moved to the cloud product. The control plane must keep no handler
-// of its own for them: each path reaches the node untouched and the node's 404
-// (pinned by httpapi's TestMovedFeatureRoutesAreNotServed) comes back as is.
+// Functions and the /v1/cron jobs API moved to the cloud product. The control
+// plane must keep no handler of its own for them: each path reaches the node
+// untouched and the node's 404 (pinned by httpapi's
+// TestMovedFeatureRoutesAreNotServed) comes back as is.
 func TestMovedFeatureRoutesAreNotServedThroughTheControlPlane(t *testing.T) {
 	var gotPath string
 	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,6 +44,11 @@ func TestMovedFeatureRoutesAreNotServedThroughTheControlPlane(t *testing.T) {
 		{"GET", "/v1/functions/hello"},
 		{"POST", "/v1/functions/hello/invoke"},
 		{"GET", "/v1/fn/hello"},
+		{"GET", "/v1/cron"},
+		{"POST", "/v1/cron"},
+		{"POST", "/v1/cron/cron_1/run"},
+		{"POST", "/v1/cron/cron_1/toggle"},
+		{"DELETE", "/v1/cron/cron_1"},
 	} {
 		gotPath = ""
 		req, _ := http.NewRequest(rq.method, cp.URL+rq.path, strings.NewReader("{}"))

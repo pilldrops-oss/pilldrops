@@ -12,7 +12,6 @@ import type {
   FilesystemListResp,
   SandboxDetail,
   SandboxLogsResp,
-  CronJob,
   PreviewStatus,
   LimitsInfo,
   VaultSecret,
@@ -530,29 +529,3 @@ export const recordRun = (id: string, body: { plan_snapshot?: string; services?:
 
 export const endRun = (projectID: string, runID: string) =>
   request<void>('PATCH', `/v1/projects/${encodeURIComponent(projectID)}/runs/${encodeURIComponent(runID)}`)
-
-export async function listCronJobs(): Promise<{ jobs: CronJob[] }> {
-  return request('GET', '/v1/cron')
-}
-
-export async function createCronJob(job: {
-  sandbox_id: string
-  schedule: string
-  command: string
-  name?: string
-  timezone?: string
-}): Promise<CronJob> {
-  return request('POST', '/v1/cron', job)
-}
-
-export async function runCronJobNow(id: string): Promise<{ status: string; exit_code: number; output: string }> {
-  return request('POST', `/v1/cron/${encodeURIComponent(id)}/run`)
-}
-
-export async function toggleCronJob(id: string, enabled: boolean): Promise<unknown> {
-  return request('POST', `/v1/cron/${encodeURIComponent(id)}/toggle`, { enabled })
-}
-
-export async function deleteCronJob(id: string): Promise<unknown> {
-  return request('DELETE', `/v1/cron/${encodeURIComponent(id)}`)
-}

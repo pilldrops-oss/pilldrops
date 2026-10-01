@@ -53,101 +53,99 @@ func (f *fakeStore) runs() []recordedRun {
 	return append([]recordedRun(nil), f.recorded...)
 }
 
-// fakeRunner records the commands the sweeper asked a sandbox to run.
+// fakeRunner records the captures the sweeper asked for.
 type fakeRunner struct {
-	mu   sync.Mutex
-	got  []string
-	out  string
-	code int
-	err  error
+	mu     sync.Mutex
+	backed []string
+	id     string
+	err    error
 }
 
-func (r *fakeRunner) RunInSandbox(ctx context.Context, orgID, sandboxID, cmd string) (string, int, error) {
+func (r *fakeRunner) RunBackup(_ context.Context, orgID, sandboxID string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.got = append(r.got, orgID+"/"+sandboxID+": "+cmd)
-	return r.out, r.code, r.err
+	r.backed = append(r.backed, orgID+"/"+sandboxID)
+	return r.id, r.err
 }
 
-func (r *fakeRunner) commands() []string {
+func (r *fakeRunner) captures() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]string(nil), r.got...)
+	return append([]string(nil), r.backed...)
 }
 
-func job(id, sched, cmd string, next int64) store.CronJob {
-	return store.CronJob{ID: id, OrgID: "org1", SandboxID: "sb1", Schedule: sched, Command: cmd,
-		Enabled: true, NextRunAt: next, Timezone: "UTC"}
+func job(id, sched string, next int64) store.CronJob {
+	return store.CronJob{ID: id, OrgID: "org1", SandboxID: "sb1", Schedule: sched, Command: store.CronKindBackup,
+		Kind: store.CronKindBackup, Enabled: true, NextRunAt: next, Timezone: "UTC"}
 }
 
-func TestSweepRunsDueJob(t *testing.T) {
-	st := &fakeStore{due: []store.CronJob{job("cron_a", "0 9 * * *", "npm test", 100)}}
-	rn := &fakeRunner{out: "3 passed", code: 0}
-	s := NewSweeper(st, rn, nil)
+func TestSweepCapturesADueBackup(t *testing.T) {
+	st := &fakeStore{due: []store.CronJob{job("cron_a", "0 3 * * *", 100)}}
+	rn := &fakeRunner{id: "bkp_123"}
+	NewSweeper(st, rn, nil).SweepOnce(context.Background(), at("2026-08-02 03:00"))
 
-	s.SweepOnce(context.Background(), at("2026-08-02 09:00"))
-
-	if got := rn.commands(); len(got) != 1 || !strings.Contains(got[0], "org1/sb1: npm test") {
-		t.Fatalf("commands = %v, want the job's command in its sandbox", got)
+	if got := rn.captures(); len(got) != 1 || got[0] != "org1/sb1" {
+		t.Fatalf("captures = %v, want one for org1/sb1", got)
 	}
 	runs := st.runs()
-	if len(runs) != 1 || runs[0].status != "ok" || runs[0].output != "3 passed" {
-		t.Errorf("recorded = %+v, want one ok run carrying the output", runs)
+	if len(runs) != 1 || runs[0].status != "ok" || !strings.Contains(runs[0].output, "bkp_123") {
+		t.Errorf("recorded = %+v, want one ok run naming the backup id", runs)
+	}
+}
+
+func TestANonBackupRowIsNeitherClaimedNorRun(t *testing.T) {
+	shell := job("cron_shell", "* * * * *", 100)
+	shell.Kind, shell.Command = "shell", "rm -rf /data"
+	st := &fakeStore{due: []store.CronJob{shell}}
+	rn := &fakeRunner{}
+	NewSweeper(st, rn, nil).SweepOnce(context.Background(), at("2026-08-02 09:00"))
+
+	if got := rn.captures(); len(got) != 0 {
+		t.Errorf("captured %v for a shell row", got)
+	}
+	if runs := st.runs(); len(runs) != 0 {
+		t.Errorf("recorded %+v for a shell row", runs)
 	}
 }
 
 func TestLosingTheClaimDoesNotRun(t *testing.T) {
 	st := &fakeStore{
-		due:    []store.CronJob{job("cron_a", "0 9 * * *", "send-invoices", 100)},
+		due:    []store.CronJob{job("cron_a", "0 9 * * *", 100)},
 		claims: map[string]bool{"cron_a": false},
 	}
 	rn := &fakeRunner{}
 	NewSweeper(st, rn, nil).SweepOnce(context.Background(), at("2026-08-02 09:00"))
 
-	if got := rn.commands(); len(got) != 0 {
-		t.Errorf("ran %v after losing the claim — the job fires twice across replicas", got)
+	if got := rn.captures(); len(got) != 0 {
+		t.Errorf("captured %v after losing the claim — the job fires twice across replicas", got)
 	}
 	if runs := st.runs(); len(runs) != 0 {
 		t.Errorf("recorded %+v after losing the claim", runs)
 	}
 }
 
-func TestNonZeroExitIsRecordedAndKeepsSchedule(t *testing.T) {
-	st := &fakeStore{due: []store.CronJob{job("cron_a", "*/5 * * * *", "false", 100)}}
-	rn := &fakeRunner{out: "boom", code: 1}
-	NewSweeper(st, rn, nil).SweepOnce(context.Background(), at("2026-08-02 09:00"))
+func TestBackupFailureIsRecordedAndKeepsSchedule(t *testing.T) {
+	st := &fakeStore{due: []store.CronJob{job("cron_a", "0 3 * * *", 100)}}
+	rn := &fakeRunner{err: fmt.Errorf("object store is down")}
+	NewSweeper(st, rn, nil).SweepOnce(context.Background(), at("2026-08-02 03:00"))
 
 	runs := st.runs()
-	if len(runs) != 1 || runs[0].status != "failed" {
-		t.Errorf("recorded = %+v, want status failed", runs)
+	if len(runs) != 1 || runs[0].status != "error" || !strings.Contains(runs[0].output, "object store") {
+		t.Errorf("recorded = %+v, want an error naming the cause", runs)
 	}
 	if len(st.claimed) != 1 {
-		t.Errorf("job was not rescheduled after a failing command")
-	}
-}
-
-func TestUnreachableSandboxRecordsError(t *testing.T) {
-	st := &fakeStore{due: []store.CronJob{job("cron_a", "*/5 * * * *", "echo hi", 100)}}
-	rn := &fakeRunner{err: fmt.Errorf("sandbox not found")}
-	NewSweeper(st, rn, nil).SweepOnce(context.Background(), at("2026-08-02 09:00"))
-
-	runs := st.runs()
-	if len(runs) != 1 || runs[0].status != "error" {
-		t.Errorf("recorded = %+v, want status error (not 'failed')", runs)
-	}
-	if !strings.Contains(runs[0].output, "sandbox not found") {
-		t.Errorf("output %q does not say why it could not run", runs[0].output)
+		t.Errorf("job was not rescheduled after a failed capture")
 	}
 }
 
 // next_run_at 0 is the dormant marker DueCronJobs filters on.
 func TestUnparseableScheduleIsParkedNotRetried(t *testing.T) {
-	st := &fakeStore{due: []store.CronJob{job("cron_bad", "not a schedule", "echo hi", 100)}}
+	st := &fakeStore{due: []store.CronJob{job("cron_bad", "not a schedule", 100)}}
 	rn := &fakeRunner{}
 	NewSweeper(st, rn, nil).SweepOnce(context.Background(), at("2026-08-02 09:00"))
 
-	if got := rn.commands(); len(got) != 0 {
-		t.Errorf("ran %v for an unparseable schedule", got)
+	if got := rn.captures(); len(got) != 0 {
+		t.Errorf("captured %v for an unparseable schedule", got)
 	}
 	runs := st.runs()
 	if len(runs) != 1 || runs[0].status != "error" {
@@ -157,20 +155,20 @@ func TestUnparseableScheduleIsParkedNotRetried(t *testing.T) {
 
 func TestOneBadJobDoesNotBlockTheRest(t *testing.T) {
 	st := &fakeStore{due: []store.CronJob{
-		job("cron_bad", "nonsense", "no", 100),
-		job("cron_ok", "0 9 * * *", "yes", 100),
+		job("cron_bad", "nonsense", 100),
+		job("cron_ok", "0 9 * * *", 100),
 	}}
-	rn := &fakeRunner{out: "done"}
+	rn := &fakeRunner{}
 	NewSweeper(st, rn, nil).SweepOnce(context.Background(), at("2026-08-02 09:00"))
 
-	if got := rn.commands(); len(got) != 1 || !strings.Contains(got[0], "yes") {
-		t.Errorf("commands = %v, want the healthy job to still run", got)
+	if got := rn.captures(); len(got) != 1 {
+		t.Errorf("captures = %v, want the healthy job to still run", got)
 	}
 }
 
 func TestNextRunDoesNotDrift(t *testing.T) {
 	var claimedNext int64
-	st := &fakeStore{due: []store.CronJob{job("cron_a", "0 9 * * *", "x", at("2026-08-02 09:00").Unix())}}
+	st := &fakeStore{due: []store.CronJob{job("cron_a", "0 9 * * *", at("2026-08-02 09:00").Unix())}}
 	st.claims = map[string]bool{}
 	rn := &fakeRunner{}
 	s := NewSweeper(st, rn, func(id string, next int64) { claimedNext = next })
@@ -196,7 +194,7 @@ func TestScheduleIsEvaluatedInTheJobsTimezone(t *testing.T) {
 		{"America/New_York", "2026-08-02 13:00"}, // 09:00Z = 05:00 EDT, before 9am → today 09:00 EDT
 	} {
 		var claimedNext int64
-		j := job("cron_tz", "0 9 * * *", "x", at("2026-08-02 09:00").Unix())
+		j := job("cron_tz", "0 9 * * *", at("2026-08-02 09:00").Unix())
 		j.Timezone = tc.tz
 		st := &fakeStore{due: []store.CronJob{j}, claims: map[string]bool{}}
 		s := NewSweeper(st, &fakeRunner{}, func(id string, next int64) { claimedNext = next })
@@ -210,7 +208,7 @@ func TestScheduleIsEvaluatedInTheJobsTimezone(t *testing.T) {
 
 func TestUnknownTimezoneFallsBackToUTCNotLocal(t *testing.T) {
 	var claimedNext int64
-	j := job("cron_tz", "0 9 * * *", "x", at("2026-08-02 09:00").Unix())
+	j := job("cron_tz", "0 9 * * *", at("2026-08-02 09:00").Unix())
 	j.Timezone = "Mars/Olympus_Mons"
 	st := &fakeStore{due: []store.CronJob{j}, claims: map[string]bool{}}
 	NewSweeper(st, &fakeRunner{}, func(id string, next int64) { claimedNext = next }).

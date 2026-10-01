@@ -286,7 +286,7 @@ func TestBooleanFlagsRoundTrip(t *testing.T) {
 	}
 
 	job, err := s.CreateCronJob(ctx, CronJob{
-		OrgID: "org-b", SandboxID: "sb-1", Schedule: "* * * * *", Command: "echo hi",
+		OrgID: "org-b", SandboxID: "sb-1", Schedule: "* * * * *", Kind: CronKindBackup,
 	}, time.Now().Unix()-1)
 	if err != nil {
 		t.Fatalf("create cron: %v", err)
