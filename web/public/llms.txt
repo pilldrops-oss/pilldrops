@@ -54,6 +54,9 @@
 - GET|POST /v1/sandboxes/{id}/files?path= — read / write files
 - POST /v1/sandboxes/{id}/pause · /resume · /timeout · /start · /fork · /move — lifecycle
 - GET /v1/sandboxes/{id}/logs · /metrics — debugging
+- POST|GET /v1/sandboxes/{id}/backups · POST …/backups/{bkp}/restore — disk backups (node
+  needs an object store); schedule them with POST /v1/sandboxes/{id}/config
+  {"backups": {"period": "24h", "retention": "7d"}}
 - GET /v1/templates · /v1/usage · /v1/history — catalog, metered usage, past sandboxes
 - Machine spec: /openapi.json
 

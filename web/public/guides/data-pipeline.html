@@ -182,7 +182,6 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
     <a href="/guides/evals">Evals & RL at scale</a>
     <h4>Apps &amp; infra</h4>
     <a href="/guides/app-preview">Full-stack app previews</a>
-    <a href="/guides/functions">Agent tools as functions</a>
     <a href="/guides/untrusted-code">Untrusted user code</a>
     <a href="/guides/ci-tests">CI for AI-written code</a>
     <a href="/guides/data-pipeline" class="cur" aria-current="page">Data jobs & ETL</a>
@@ -191,7 +190,7 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
 
   <main class="doc">
     <section class="guide" id="guide-data-pipeline">
-      <p class="gkick">Guide 11 · disposable compute</p>
+      <p class="gkick">Guide 10 · disposable compute</p>
       <h1 class="disp">Data jobs &amp; ETL without a job cluster</h1>
       <p class="gwhat">Nightly transforms, one-off backfills, agent-triggered data pulls: boot a
         sandbox sized for the job, run it, download the output, destroy it. No queue, no cluster,
@@ -212,8 +211,7 @@ sb.<span class="fn">kill</span>()</pre>
       </div></div>
       <div class="step"><span class="n">3</span><div>
         <h3>Trigger it however you like</h3>
-        <p>Cron, a webhook, or an agent decision — it's one API call. For high-frequency small jobs,
-          wrap the transform as a <a href="#guide-functions" style="color:var(--phos)">function</a> instead.</p>
+        <p>Cron, a webhook, or an agent decision — it's one API call.</p>
       </div></div>
       <div class="gfoot"><span class="cost">an 8 vCPU · 16 GB hour ≈ $0.66 — only while it runs</span> ·
         <a href="/#calculator">cost calculator</a></div>
@@ -226,7 +224,7 @@ sb.<span class="fn">kill</span>()</pre>
 </div>
     <div style="margin-top:44px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
       <a class="btn" href="/dashboard">Start free — $5 credits</a>
-      <a href="/guides" style="color:var(--phos);font-size:14px">Browse all 12 guides →</a>
+      <a href="/guides" style="color:var(--phos);font-size:14px">Browse all 11 guides →</a>
     </div>
   </main>
 </div>

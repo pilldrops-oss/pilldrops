@@ -1102,6 +1102,12 @@ The floor is 15 minutes, measured from two consecutive fires, so `"5m"` and
 `"*/5 * * * *"` are refused identically. `retention` needs a period. The
 deployment default is `BACKUPS_RETAIN_DAYS` (7; `0` keeps them forever).
 
+Backup schedules are the only jobs the engine schedules. Each node sweeps the
+schedules of its own sandboxes once a minute, a conditional claim makes each
+fire run once, and destroying a sandbox deletes its schedule. There is no API for
+scheduling arbitrary commands: `/v1/cron` answers 404, and a non-backup row left
+in `cron_jobs` by an older version is never selected or run.
+
 `retention` is stored on the sandbox, so it survives a node restart and comes
 back on the config `GET` alongside the schedule. There is no org-level default
 between the sandbox and `BACKUPS_RETAIN_DAYS`: a sandbox sets its own or takes

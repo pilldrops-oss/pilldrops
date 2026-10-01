@@ -29,14 +29,13 @@ GUIDES = {
     "long-running":       ("Long-running agents",          "python-3.11"),
     "evals":              ("Evals & RL at scale",          "python-3.11"),
     "app-preview":        ("Full-stack app previews",      "node"),
-    "functions":          ("Agent tools as functions",     "python-3.11"),
     "untrusted-code":     ("Untrusted user code",          "python-3.11"),
     "ci-tests":           ("CI for AI-written code",       "python-3.11"),
     "data-pipeline":      ("Data jobs & ETL",              "python-3.11"),
     "custom-images":      ("Custom images",                None),
 }
 WORKLOADS = ["code-interpreter", "coding-agents", "browser-automation", "computer-use", "long-running", "evals"]
-INFRA = ["app-preview", "functions", "untrusted-code", "ci-tests", "data-pipeline", "custom-images"]
+INFRA = ["app-preview", "untrusted-code", "ci-tests", "data-pipeline", "custom-images"]
 ORDER = WORKLOADS + INFRA
 
 hub = HUB.read_text(encoding="utf-8")
@@ -169,7 +168,7 @@ for slug in ORDER:
 {chr(10).join(related)}
     <div style="margin-top:44px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
       <a class="btn" href="/dashboard">Start free — $5 credits</a>
-      <a href="/guides" style="color:var(--phos);font-size:14px">Browse all 12 guides →</a>
+      <a href="/guides" style="color:var(--phos);font-size:14px">Browse all {len(ORDER)} guides →</a>
     </div>
   </main>
 </div>

@@ -35,7 +35,7 @@ var PublicPages = []string{
 	// Generated from the /guides hub by web/scripts/gen_guide_pages.py.
 	"guides/code-interpreter", "guides/coding-agents", "guides/browser-automation",
 	"guides/computer-use", "guides/long-running", "guides/evals",
-	"guides/app-preview", "guides/functions", "guides/untrusted-code",
+	"guides/app-preview", "guides/untrusted-code",
 	"guides/ci-tests", "guides/data-pipeline", "guides/custom-images",
 }
 
