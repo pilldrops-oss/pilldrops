@@ -217,6 +217,23 @@ func (vs *VaultStore) AutoInject(owner string) map[string]string {
 	return out
 }
 
+// SetAutoInject flips auto-injection without touching the value; false means
+// owner has no such secret.
+func (vs *VaultStore) SetAutoInject(owner, name string, autoInject bool) bool {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	s, ok := vs.secrets[vaultKey(owner, name)]
+	if !ok {
+		return false
+	}
+	s.AutoInject = autoInject
+	s.UpdatedAt = time.Now().Format(time.RFC3339)
+	if err := vs.save(); err != nil {
+		log.Printf("vault: persisting auto_inject failed: %v", err)
+	}
+	return true
+}
+
 func (vs *VaultStore) Delete(owner, name string) bool {
 	vs.mu.Lock()
 	defer vs.mu.Unlock()
@@ -265,19 +282,44 @@ func registerVaultRoutes(r chi.Router, vault *VaultStore, ownerID func(*http.Req
 			Name       string `json:"name"`
 			Value      string `json:"value"`
 			Secret     *bool  `json:"secret"`
-			AutoInject bool   `json:"auto_inject"`
+			AutoInject *bool  `json:"auto_inject"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
 			return
 		}
-		s, err := vault.Put(ownerID(r), body.Name, body.Value, body.Secret == nil || *body.Secret, body.AutoInject)
+		// A rotation that does not mention auto_inject keeps it.
+		autoInject := body.AutoInject != nil && *body.AutoInject
+		if body.AutoInject == nil {
+			for _, v := range vault.List(ownerID(r)) {
+				if v.Name == body.Name {
+					autoInject = v.AutoInject
+				}
+			}
+		}
+		s, err := vault.Put(ownerID(r), body.Name, body.Value, body.Secret == nil || *body.Secret, autoInject)
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		writeJSON(w, s)
+	})
+	r.Patch("/v1/secrets/{name}", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			AutoInject *bool `json:"auto_inject"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.AutoInject == nil {
+			http.Error(w, `{"error":"auto_inject is required: true or false"}`, http.StatusBadRequest)
+			return
+		}
+		name := chi.URLParam(r, "name")
+		if !vault.SetAutoInject(ownerID(r), name, *body.AutoInject) {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, map[string]any{"name": name, "auto_inject": *body.AutoInject})
 	})
 	r.Delete("/v1/secrets/{name}", func(w http.ResponseWriter, r *http.Request) {
 		if !vault.Delete(ownerID(r), chi.URLParam(r, "name")) {

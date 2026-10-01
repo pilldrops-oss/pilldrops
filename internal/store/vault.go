@@ -219,6 +219,24 @@ func (s *Store) SetSecretScope(ctx context.Context, orgID, name, scope string) (
 	return n > 0, err
 }
 
+// SetSecretAutoInject turns auto-injection on or off without touching the
+// value, so a caller never has to re-type a credential to flip it.
+// ok=false means no such secret.
+func (s *Store) SetSecretAutoInject(ctx context.Context, orgID, name string, autoInject bool) (bool, error) {
+	auto := 0
+	if autoInject {
+		auto = 1
+	}
+	res, err := s.exec(ctx,
+		`UPDATE vault_secrets SET auto_inject = ?, updated_at = ? WHERE org_id = ? AND name = ?`,
+		auto, time.Now().Unix(), orgID, name)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // DeleteSecret removes a secret, reporting whether one existed.
 func (s *Store) DeleteSecret(ctx context.Context, orgID, name string) (bool, error) {
 	res, err := s.exec(ctx, `DELETE FROM vault_secrets WHERE org_id = ? AND name = ?`, orgID, name)

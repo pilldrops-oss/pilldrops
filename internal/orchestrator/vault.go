@@ -23,6 +23,7 @@ func (s *Server) registerVaultRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/secrets", s.auth(s.handleSecretPut))
 	mux.HandleFunc("DELETE /v1/secrets/{name}", s.auth(s.handleSecretDelete))
 	mux.HandleFunc("POST /v1/secrets/{name}/scope", s.auth(s.handleSecretScope))
+	mux.HandleFunc("PATCH /v1/secrets/{name}", s.auth(s.handleSecretAutoInject))
 }
 
 func (s *Server) handleSecretList(w http.ResponseWriter, r *http.Request) {
@@ -48,15 +49,30 @@ func (s *Server) handleSecretPut(w http.ResponseWriter, r *http.Request) {
 		Name       string `json:"name"`
 		Value      string `json:"value"`
 		Secret     *bool  `json:"secret"`
-		AutoInject bool   `json:"auto_inject"`
+		AutoInject *bool  `json:"auto_inject"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
+	// A rotation that does not mention auto_inject keeps it: it used to reset
+	// to off on every save, silently dropping the secret from new sandboxes.
+	autoInject := body.AutoInject != nil && *body.AutoInject
+	if body.AutoInject == nil {
+		existing, err := st.ListSecrets(r.Context(), fastOrg(r))
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		for _, v := range existing {
+			if v.Name == strings.TrimSpace(body.Name) {
+				autoInject = v.AutoInject
+			}
+		}
+	}
 	callerID, _ := callerKey(r.Context())
 	got, err := st.PutSecret(r.Context(), fastOrg(r), body.Name, body.Value,
-		body.Secret == nil || *body.Secret, body.AutoInject, callerID)
+		body.Secret == nil || *body.Secret, autoInject, callerID)
 	if err != nil {
 		if errors.Is(err, store.ErrVaultName) || err.Error() == "value is required" {
 			writeErr(w, http.StatusBadRequest, err.Error())
@@ -99,6 +115,33 @@ func (s *Server) handleSecretScope(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "scope": scope})
+}
+
+// handleSecretAutoInject flips auto-injection without the value, which a
+// sealed secret's owner cannot read back to re-send.
+func (s *Server) handleSecretAutoInject(w http.ResponseWriter, r *http.Request) {
+	st := s.projectStore(w)
+	if st == nil {
+		return
+	}
+	var body struct {
+		AutoInject *bool `json:"auto_inject"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.AutoInject == nil {
+		writeErr(w, http.StatusBadRequest, "auto_inject is required: true or false")
+		return
+	}
+	name := r.PathValue("name")
+	ok, err := st.SetSecretAutoInject(r.Context(), fastOrg(r), name, *body.AutoInject)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"name": name, "auto_inject": *body.AutoInject})
 }
 
 func (s *Server) handleSecretDelete(w http.ResponseWriter, r *http.Request) {
