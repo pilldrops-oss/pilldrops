@@ -11,6 +11,7 @@ import type { SandboxDetail as SandboxDetailType, Template, SandboxMetrics, Port
 import { statusPill } from './Sandboxes'
 import { TemplateIcon } from '../components/templateIcons'
 import { usePreviewLink } from '../lib/previewToken'
+import { previewPortOf } from '../lib/previewPort'
 import SandboxTerminal from '../components/SandboxTerminal'
 
 function formatDate(ts: string): string {
@@ -633,7 +634,8 @@ export default function SandboxDetail() {
     return () => clearInterval(interval)
   }, [loadSandbox])
 
-  const openUrl = usePreviewLink(sandbox?.id, sandbox?.public_port || 8000)
+  const previewPort = sandbox ? previewPortOf(sandbox, tplMeta) : 8000
+  const openUrl = usePreviewLink(sandbox?.id, previewPort)
 
   const confirmDialog = useConfirm()
   const toast = useToast()
@@ -826,7 +828,7 @@ export default function SandboxDetail() {
           <PreviewTab
             id={id}
             status={sb.status}
-            defaultPort={sb.public_port}
+            defaultPort={previewPort}
           />
         )}
         {tab === 'logs' && <LogsTab id={id} />}

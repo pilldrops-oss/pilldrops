@@ -402,6 +402,10 @@ export interface SandboxDetail {
   storage_mb?: number
   /** Measured disk usage, MB; absent when the runtime cannot report it. */
   storage_used_mb?: number
+  /** Preview URL on the app port; the detail GET's only record of public_port. */
+  url?: string
+  /** Preview URL on the desktop port; present when the sandbox has a desktop. */
+  desktop_url?: string
 }
 
 export interface FunctionInfo {
