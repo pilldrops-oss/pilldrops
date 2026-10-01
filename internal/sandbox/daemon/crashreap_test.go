@@ -138,3 +138,39 @@ func TestScanDoesNotReapASandboxThatChangedUnderneathIt(t *testing.T) {
 		})
 	}
 }
+
+// slowOOM is a guest whose OOM probe takes the whole scan budget.
+type slowOOM struct{ rt.Instance }
+
+func (slowOOM) OOMKillCount(ctx context.Context) (int, error) {
+	<-ctx.Done()
+	return 0, ctx.Err()
+}
+
+func TestExitScanRunsWhenTheOtherScannersEatTheBudget(t *testing.T) {
+	old := scanBudget
+	scanBudget = 200 * time.Millisecond
+	t.Cleanup(func() { scanBudget = old })
+
+	fp := newFakePersister(nil)
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, IdleTimeout: time.Hour, HardTTL: time.Hour})
+	ctx := context.Background()
+	slow, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	dead, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	d.mu.Lock()
+	d.boxes[slow.ID].inst = slowOOM{d.boxes[slow.ID].inst}
+	d.boxes[dead.ID].inst = deadVMM{d.boxes[dead.ID].inst}
+	d.mu.Unlock()
+
+	d.scanOnce(ctx)
+
+	if _, ok := d.Get(dead.ID); ok {
+		t.Fatal("the dead sandbox was not reaped: the exit scan got no budget")
+	}
+}

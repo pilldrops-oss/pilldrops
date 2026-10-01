@@ -70,14 +70,9 @@ func (d *Daemon) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				scanCtx, scanCancel := context.WithTimeout(ctx, scanBudget)
 				start := d.clock.Now()
-				d.scanOOMKills(scanCtx)
-				d.scanServerCrashes(scanCtx)
-				// A dead VMM's netns, chroot and overlay leak until it is reaped.
-				d.scanExits(scanCtx)
+				d.scanOnce(ctx)
 				d.metrics.ScanDuration.Observe(d.clock.Now().Sub(start))
-				scanCancel()
 			case <-ctx.Done():
 				return
 			}
@@ -85,8 +80,23 @@ func (d *Daemon) Start() {
 	}()
 }
 
-// scanBudget is under the 8s scanner tick so a slow pass cannot overlap the next.
-const scanBudget = 7 * time.Second
+// scanOnce is one scanner pass. The exit scan has a budget of its own and goes
+// first: behind the probes into every guest, a slow fleet starved it, and a dead
+// VMM's netns, chroot and overlay leak until it is reaped.
+func (d *Daemon) scanOnce(ctx context.Context) {
+	exitCtx, exitCancel := context.WithTimeout(ctx, scanBudget)
+	d.scanExits(exitCtx)
+	exitCancel()
+
+	scanCtx, scanCancel := context.WithTimeout(ctx, scanBudget)
+	defer scanCancel()
+	d.scanOOMKills(scanCtx)
+	d.scanServerCrashes(scanCtx)
+}
+
+// scanBudget bounds each scanner pass; a var so tests can shrink it. A slow
+// pass delays the next tick rather than overlapping it.
+var scanBudget = 7 * time.Second
 
 // Stop halts the reconciler. Idempotent.
 func (d *Daemon) Stop() {
