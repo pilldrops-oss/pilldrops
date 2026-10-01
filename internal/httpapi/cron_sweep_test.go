@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -184,5 +185,23 @@ func TestScheduledJobOfALostNodeIsRecordedAsMissed(t *testing.T) {
 	}
 	if j.NextRunAt <= due {
 		t.Errorf("next_run_at = %d, want past %d: the schedule did not move on", j.NextRunAt, due)
+	}
+}
+
+// The owner's own miss is not "owning node is down": that would send an
+// operator looking for a dead node when the sandbox is simply gone.
+func TestScheduledJobMissedOnItsOwnNodeSaysSandboxNotFound(t *testing.T) {
+	_, _, _, st, api := newCronSandboxWithAPI(t)
+	api.SetNodeID("node-a")
+	for id, node := range map[string]string{"sb-mine": "node-a", "sb-theirs": "node-b"} {
+		if err := st.SaveSandbox(t.Context(), store.SandboxRecord{ID: id, OrgID: "default", NodeID: node, State: "running"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id, wantDown := range map[string]bool{"sb-mine": false, "sb-unknown": false, "sb-theirs": true} {
+		_, _, err := api.cronRunner().RunInSandbox(t.Context(), "default", id, "true")
+		if err == nil || errors.Is(err, errOwnerDown) != wantDown {
+			t.Errorf("%s: %v, want owner-down = %v", id, err, wantDown)
+		}
 	}
 }

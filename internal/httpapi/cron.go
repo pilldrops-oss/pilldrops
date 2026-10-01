@@ -204,8 +204,8 @@ func (s *Server) cronRunner() cron.Runner { return daemonCronRunner{s} }
 func (d daemonCronRunner) RunInSandbox(ctx context.Context, orgIDStr, sandboxID, cmd string) (string, int, error) {
 	res, err := d.s.d.Exec(ctx, sandboxID, rt.ExecSpec{
 		Cmd: cmd, Env: d.s.configEnvFor(ctx, sandboxID), Timeout: cronExecTimeout})
-	if errors.Is(err, rt.ErrNotFound) {
-		// The sweep only hands this node jobs it owns or ones with no live owner.
+	if errors.Is(err, rt.ErrNotFound) && d.ownedElsewhere(ctx, sandboxID) {
+		// The sweep hands this node a sibling's job only when its owner is down.
 		return "", 0, errOwnerDown
 	}
 	if err != nil {
@@ -239,6 +239,12 @@ func (d daemonCronRunner) RunBackup(ctx context.Context, _, sandboxID string) (s
 }
 
 var errOwnerDown = errors.New("unavailable: owning node is down")
+
+// ownedElsewhere reports whether the sandbox's row names another node as its owner.
+func (d daemonCronRunner) ownedElsewhere(ctx context.Context, sandboxID string) bool {
+	rec, ok, err := d.s.st.SandboxByID(ctx, sandboxID)
+	return err == nil && ok && rec.NodeID != "" && rec.NodeID != d.s.nodeID
+}
 
 // cronExecTimeout bounds one scheduled run so a hung command cannot hold a sweep slot.
 const cronExecTimeout = 10 * time.Minute
