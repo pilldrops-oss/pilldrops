@@ -377,7 +377,7 @@ def _lc3():
 def _lc4():
     sid = create()["id"]
     try:
-        api("post", f"/v1/sandboxes/{sid}/timeout", {"timeout": 600})
+        api("post", f"/v1/sandboxes/{sid}/timeout", {"seconds": 600})
         return "timeout set"
     finally:
         destroy(sid)

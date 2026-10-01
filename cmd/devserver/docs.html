@@ -393,7 +393,7 @@ ${tryItForm('destroy-sandbox','DELETE','/v1/sandboxes/{id}',[{key:'id',label:'Sa
 [
 ['pause-sandbox','POST','/v1/sandboxes/{id}/pause','Pause a running sandbox. State is preserved.','{"status":"paused"}'],
 ['resume-sandbox','POST','/v1/sandboxes/{id}/resume','Resume a paused sandbox.','{"status":"running","resume_ms":12}'],
-['set-timeout','POST','/v1/sandboxes/{id}/timeout','Update the sandbox TTL.','{"expires_at":"2026-04-08T12:10:00Z"}','{"timeout":600}'],
+['set-timeout','POST','/v1/sandboxes/{id}/timeout','Update the sandbox TTL.','{"expires_at":"2026-04-08T12:10:00Z"}','{"seconds":600}'],
 ['refresh-sandbox','POST','/v1/sandboxes/{id}/refresh','Refresh the sandbox TTL without changing timeout.','{"expires_at":"2026-04-08T12:10:00Z"}'],
 ].forEach(([id,m,path,desc,resp,body])=>{
 mainHTML+=endpoint(id,m,path,desc,`
