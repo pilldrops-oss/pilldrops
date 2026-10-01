@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { listSecrets, putSecret, deleteSecret } from '../api'
 import type { VaultSecret } from '../types'
 import { useToast } from '../components/Toast'
@@ -103,8 +103,10 @@ function CustomSecrets({
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
   const [error, setError] = useState('')
+  const valueRef = useRef<HTMLInputElement>(null)
 
   const trimmed = name.trim()
+  const replacing = secrets.some(s => s.name === trimmed)
   // Checked here as well as server-side so the message lands next to the field
   // rather than arriving as a failed request.
   const nameBad = trimmed !== '' && !ENV_NAME_RE.test(trimmed)
@@ -116,7 +118,7 @@ function CustomSecrets({
       return
     }
     setError('')
-    const ok = await onStore(trimmed, value, `Added ${trimmed}`)
+    const ok = await onStore(trimmed, value, `${replacing ? 'Replaced' : 'Added'} ${trimmed}`)
     if (ok) {
       setName('')
       setValue('')
@@ -141,6 +143,14 @@ function CustomSecrets({
         <div key={s.name} className="vault-custom-row">
           <code className="chip mono">{s.name}</code>
           <span className="vault-last4">…{s.last4}</span>
+          <button
+            type="button"
+            className="btn ghost"
+            disabled={busy === s.name}
+            onClick={() => { setName(s.name); setValue(''); setError(''); valueRef.current?.focus() }}
+          >
+            Replace value
+          </button>
           <button
             type="button"
             className="btn ghost"
@@ -170,7 +180,8 @@ function CustomSecrets({
           className="pa-input mono vault-input"
           type="password"
           autoComplete="off"
-          placeholder="value"
+          ref={valueRef}
+          placeholder={replacing ? `new value for ${trimmed}` : 'value'}
           aria-label="Secret value"
           value={value}
           onChange={e => setValue(e.target.value)}
@@ -182,7 +193,7 @@ function CustomSecrets({
           disabled={!!busy || !trimmed || !value || nameBad}
           onClick={add}
         >
-          Add secret
+          {replacing ? 'Replace secret' : 'Add secret'}
         </button>
       </div>
       {(error || nameBad) && (

@@ -55,6 +55,22 @@ describe('Vault — custom secrets', () => {
     await waitFor(() => expect(api.putSecret).toHaveBeenCalledWith('DATABASE_URL', 'postgres://x'))
   })
 
+  it('replaces the value of an existing secret under the same name', async () => {
+    vi.mocked(api.listSecrets).mockResolvedValue([
+      { name: 'AAA', kind: 'secret', auto_inject: false, last4: 'sdad', created_at: '2026-10-01T00:00:00Z' },
+    ] as never)
+    const user = userEvent.setup()
+    renderVault()
+
+    await user.click(await screen.findByRole('button', { name: 'Replace value' }))
+    expect(screen.getByLabelText('Secret name')).toHaveValue('AAA')
+    expect(screen.getByLabelText('Secret value')).toHaveFocus()
+    await user.type(screen.getByLabelText('Secret value'), 'new-value')
+    await user.click(screen.getByRole('button', { name: 'Replace secret' }))
+
+    await waitFor(() => expect(api.putSecret).toHaveBeenCalledWith('AAA', 'new-value'))
+  })
+
   it('reports a failed save instead of silently doing nothing', async () => {
     vi.mocked(api.putSecret).mockRejectedValue(new Error('vault is locked'))
     const user = userEvent.setup()
