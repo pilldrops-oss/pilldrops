@@ -321,8 +321,14 @@ func previewToken(id string, port int, gen string) string {
 	return previewtoken.Browser(previewSecret, id, port, gen)
 }
 
-// previewGenerationOf is the generation a rebranded sandbox body names.
+// previewGenerationOf is the generation a rebranded sandbox body names: the
+// orchestrator's preview_generation, which carries the flip count this tier
+// cannot read, else the one visibility and public_preview imply with no flips,
+// which is what a body from a node with no orchestrator in front means.
 func previewGenerationOf(m map[string]any) string {
+	if gen, _ := m["preview_generation"].(string); gen != "" {
+		return gen
+	}
 	vis, _ := m["visibility"].(string)
 	public, _ := m["public_preview"].(bool)
 	return sandbox.PreviewGeneration(vis, public, 0)

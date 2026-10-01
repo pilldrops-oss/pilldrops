@@ -101,3 +101,15 @@ func (s *Server) handlePreviewAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "public_preview": *body.Public, "was": was})
 }
+
+// withPreviewGeneration names id's current preview generation in a sandbox
+// body. The portal mints preview tokens from the bodies it relays and has no
+// store to read the flip count from, so a body without it gets tokens the
+// gate refuses after the first flip. Left out when it cannot be read.
+func (s *Server) withPreviewGeneration(ctx context.Context, body []byte, id string) []byte {
+	gen, ok := s.previewGeneration(ctx, id)
+	if !ok {
+		return body
+	}
+	return injectJSONFields(body, map[string]any{"preview_generation": gen})
+}

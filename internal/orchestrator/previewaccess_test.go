@@ -164,3 +164,38 @@ func TestFlippingBackDoesNotReviveOldPreviewTokens(t *testing.T) {
 		t.Error("setting public to what it already was retracted the owner's link")
 	}
 }
+
+// The portal mints from what GET says; it must say the generation the gate
+// checks, flips included.
+func TestGetNamesThePreviewGenerationTheGateChecks(t *testing.T) {
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"sb1","template":"base","status":"running"}`))
+	}))
+	t.Cleanup(node.Close)
+	s, orch, owner, _ := previewAccessFleet(t)
+	if err := upsert(s.reg, "n2", node.URL, "kk", "", nil, "",
+		cluster.Capacity{Cores: 8, MemTotalMB: 64000, MemAvailMB: 64000}, s.now()); err != nil {
+		t.Fatal(err)
+	}
+	s.reg.Place("sb1", "n2")
+	for _, public := range []string{"true", "false"} {
+		if code := setPreviewAccess(t, orch, owner, `{"public":`+public+`}`); code != http.StatusOK {
+			t.Fatalf("flip = %d", code)
+		}
+	}
+	req, _ := http.NewRequest(http.MethodGet, orch.URL+"/v1/sandboxes/sb1", nil)
+	req.Header.Set("Authorization", "Bearer "+owner)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var doc map[string]any
+	if resp.StatusCode != 200 || json.NewDecoder(resp.Body).Decode(&doc) != nil {
+		t.Fatalf("get = %d", resp.StatusCode)
+	}
+	want, _ := s.previewGeneration(context.Background(), "sb1")
+	if doc["preview_generation"] != want || want == sandbox.PreviewGeneration("org", false, 0) {
+		t.Errorf("preview_generation = %v, want %q (after two flips)", doc["preview_generation"], want)
+	}
+}

@@ -346,6 +346,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 				}
 				rb = injectJSONFields(rb, fields)
 			}
+			rb = s.withPreviewGeneration(r.Context(), rb, created.ID)
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -579,7 +580,7 @@ func (s *Server) handleSandboxGet(w http.ResponseWriter, r *http.Request) {
 		if fw := s.forwardsFor(r, id); fw != nil {
 			extra["forwards"] = fw
 		}
-		body = injectJSONFields(body, extra)
+		body = s.withPreviewGeneration(r.Context(), injectJSONFields(body, extra), id)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body) //nolint:errcheck // best-effort: headers are committed
 		return
