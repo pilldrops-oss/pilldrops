@@ -412,9 +412,10 @@ rules were never applied, or did not survive a reboot, looks exactly like one
 that is protected. (That failure mode is specific to these host-owned rules;
 it is the reason the netns default moved them into the node.)
 
-`setup-docker-egress.sh` must run **after** `sandboxd` has started once: it reads
-`sandboxd-net`'s subnet from Docker, and warns loudly rather than silently doing
-nothing if the network does not exist yet.
+`setup-docker-egress.sh` keys its rules on `sandboxd-net`'s subnet, creating the
+network with the runtime's options if `sandboxd` has not started yet. Re-run it
+after upgrading a docker node: node preflight fails until the current rules are
+installed (see [SECURITY.md](../SECURITY.md#upgrading-an-existing-fleet)).
 
 Both scripts `iptables-save` to `/etc/iptables/rules.v4`, and
 `sandbox-egress-restore.service` replays that file before `sandboxd` starts.
