@@ -259,25 +259,19 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 					memMB, biggest))
 				return
 			}
-			// A domain allowlist only lands on a node running the name layer, and
-			// no docker node runs it: "no capacity" sent the caller looking for RAM.
-			if place.EgressDomains {
-				loose := place
-				loose.EgressDomains = false
-				if cluster.Pick(s.reg.Nodes(), loose, s.now(), cluster.NodeTTL) != nil {
-					where := "no node with room for this sandbox"
-					if runtime != "" {
-						where = "the " + runtime + " runtime"
-					}
-					s.metrics.recordSchedule(schedNoRuntime)
-					writeJSON(w, http.StatusNotImplemented, map[string]string{
-						"error": where + " does not support egress allowlists that name a domain: only " +
-							"firecracker nodes run the name layer that enforces them, so create the " +
-							`sandbox with "runtime":"firecracker"`,
-						"code": "egress_not_enforced",
-					})
-					return
-				}
+			// A domain allowlist pinned to a runtime none of whose nodes runs the
+			// name layer (docker never does) is a capability miss, not capacity.
+			// Unpinned, the refusal at the top already established some node can
+			// enforce it, so a miss here is those nodes being full: a 503.
+			if place.EgressDomains && runtime != "" && !s.anyEgressDomainsOn(runtime) {
+				s.metrics.recordSchedule(schedNoRuntime)
+				writeJSON(w, http.StatusNotImplemented, map[string]string{
+					"error": "the " + runtime + " runtime does not support egress allowlists that name a domain: " +
+						"only firecracker nodes run the name layer that enforces them, so create the " +
+						`sandbox with "runtime":"firecracker"`,
+					"code": "egress_not_enforced",
+				})
+				return
 			}
 			// Only this branch means "add nodes".
 			s.metrics.recordSchedule(schedNoCapacity)
@@ -357,6 +351,18 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(rb) //nolint:errcheck // best-effort: status/headers are already committed, nothing left to do on a write failure
+}
+
+// anyEgressDomainsOn reports whether a schedulable node of runtime runs the
+// name layer, as AnyByRuntime does for the runtime alone.
+func (s *Server) anyEgressDomainsOn(runtime string) bool {
+	now := s.now()
+	for _, n := range s.reg.Nodes() {
+		if n.Schedulable(now, cluster.NodeTTL) && n.Runtime == runtime && n.EgressDomains {
+			return true
+		}
+	}
+	return false
 }
 
 // platformPortIn returns the first terminal or desktop port the create would

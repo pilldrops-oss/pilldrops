@@ -74,3 +74,29 @@ func TestADomainAllowlistOnDockerNamesTheRuntimeNotCapacity(t *testing.T) {
 		t.Errorf("error %q should name the docker runtime and point at firecracker", msg)
 	}
 }
+
+// A full firecracker node in a mixed fleet is pressure, not a missing
+// capability: with no runtime pinned, a domain allowlist waits for room (503)
+// rather than being refused for good (501) because a docker node has some.
+func TestADomainAllowlistOnAFullFirecrackerNodeIsCapacity(t *testing.T) {
+	s := NewServer("fleet-key", "nodetoken")
+	for _, n := range []struct {
+		id, runtime string
+		domains     bool
+		availMB     int
+	}{{"d1", "docker", false, 64000}, {"f1", "firecracker", true, 0}} {
+		capy := cluster.Capacity{Cores: 8, MemTotalMB: 64000, MemAvailMB: n.availMB}
+		if err := s.reg.Upsert(cluster.NodeUpsert{ID: n.id, URL: "http://" + n.id + ".invalid", Key: "k-" + n.id, Cap: capy}, s.now()); err != nil {
+			t.Fatal(err)
+		}
+		s.reg.SetNodeMeta(n.id, cluster.NodeMeta{Runtime: n.runtime, EgressDomains: n.domains})
+	}
+	srv := httptest.NewServer(s.Routes())
+	t.Cleanup(srv.Close)
+
+	code, out := do(t, srv, "POST", "/v1/sandboxes", "fleet-key",
+		`{"template":"base","network":{"allow":["example.com"]}}`)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("create = %d %v, want 503: the egress-capable node is full, not missing", code, out)
+	}
+}
