@@ -12,7 +12,6 @@ const SYNONYMS: Record<string, string[]> = {
   'code-interpreter': ['jupyter', 'notebook', 'pandas', 'data science', 'python'],
   desktop: ['gui', 'vnc', 'computer use', 'fluxbox'],
   browser: ['chromium', 'chrome', 'headless', 'scraping'],
-  android: ['emulator', 'apk', 'mobile', 'appium'],
   nextjs: ['next', 'react', 'ssr', 'frontend'],
   fastapi: ['api', 'rest', 'uvicorn', 'python api'],
   node: ['nodejs', 'typescript', 'ts', 'javascript', 'js'],

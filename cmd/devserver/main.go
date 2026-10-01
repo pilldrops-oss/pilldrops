@@ -2405,7 +2405,6 @@ func main() {
 	r.Handle("/", uiMux)
 	r.Handle("/docs", uiMux)
 	r.Handle("/guides", uiMux)
-	r.Handle("/testing", uiMux)
 	for _, p := range webui.PublicPages {
 		r.Handle("/"+p, uiMux)
 	}

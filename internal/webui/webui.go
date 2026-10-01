@@ -36,10 +36,6 @@ var PublicPages = []string{
 	"guides/computer-use", "guides/long-running", "guides/evals",
 	"guides/app-preview", "guides/functions", "guides/untrusted-code",
 	"guides/ci-tests", "guides/data-pipeline", "guides/custom-images",
-	"guides/mobile-testing",
-	"guides/claude-subscription", "guides/chatgpt-subscription",
-	// The launcher, a signed-in tool the SPA build does not own.
-	"workstation",
 }
 
 // PagesDirEnv names a directory of HTML read at request time that overrides
@@ -93,7 +89,6 @@ func injectAnalytics(page []byte, tag string) []byte {
 // Server serves the SPA shell, its static assets, the public pages and the login flow.
 type Server struct {
 	index   []byte            // index.html with mode and runtime injected
-	testing []byte            // nil if not embedded
 	docs    []byte            // nil if not embedded
 	guides  []byte            // nil if not embedded
 	install []byte            // install.sh, nil if not embedded
@@ -204,19 +199,18 @@ func New(sessionKey, runtime, mode string, clustered bool, sandboxDomain string)
 		return nil, err
 	}
 	// Each public page is optional; a missing one keeps its route's redirect.
-	testing, _ := distFS.ReadFile("dist/testing.html") //nolint:errcheck // optional embed
-	docs, _ := distFS.ReadFile("dist/docs.html")       //nolint:errcheck // optional embed
-	guides, _ := distFS.ReadFile("dist/guides.html")   //nolint:errcheck // optional embed
-	install, _ := distFS.ReadFile("dist/install.sh")   //nolint:errcheck // optional embed
-	llms, _ := distFS.ReadFile("dist/llms.txt")        //nolint:errcheck // optional embed
-	ogImg, _ := distFS.ReadFile("dist/og.png")         //nolint:errcheck // optional embed
+	docs, _ := distFS.ReadFile("dist/docs.html")     //nolint:errcheck // optional embed
+	guides, _ := distFS.ReadFile("dist/guides.html") //nolint:errcheck // optional embed
+	install, _ := distFS.ReadFile("dist/install.sh") //nolint:errcheck // optional embed
+	llms, _ := distFS.ReadFile("dist/llms.txt")      //nolint:errcheck // optional embed
+	ogImg, _ := distFS.ReadFile("dist/og.png")       //nolint:errcheck // optional embed
 	extra := make(map[string][]byte, len(PublicPages))
 	for _, p := range PublicPages {
 		if b, e := distFS.ReadFile("dist/" + p + ".html"); e == nil {
 			extra[p] = b
 		}
 	}
-	return &Server{index: idx, testing: testing, docs: docs, guides: guides, install: install,
+	return &Server{index: idx, docs: docs, guides: guides, install: install,
 		llms: llms, ogImg: ogImg, extra: extra, dlDir: os.Getenv("PILLDROPS_DL_DIR"), mode: mode,
 		pagesDir: os.Getenv(PagesDirEnv), analytics: analyticsTag(),
 		assets: http.FileServer(http.FS(sub)), sessionKey: sessionKey}, nil
@@ -274,13 +268,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 			return
 		}
 		http.Redirect(w, r, "/docs", http.StatusFound)
-	})
-	mux.HandleFunc("GET /testing", func(w http.ResponseWriter, r *http.Request) {
-		if len(s.testing) > 0 {
-			servePublic(w, s.testing)
-			return
-		}
-		http.Redirect(w, r, "/guides", http.StatusFound)
 	})
 	for _, p := range PublicPages {
 		slug, page := p, s.extra[p]

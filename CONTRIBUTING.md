@@ -25,7 +25,7 @@ sections cover the tiers, a request end to end and where each part lives;
 ## Build, run, and test
 
 ```bash
-make build        # build the node agent, envd, and agentd
+make build        # build sandboxd and envd
 make dev          # run the dev server on http://127.0.0.1:8080 (loopback, anonymous)
 make test         # run the Go test suite
 make test-cover   # tests with a coverage report

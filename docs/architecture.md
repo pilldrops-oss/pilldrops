@@ -78,12 +78,10 @@ cmd/
   sandboxd-fleet/  fleet node agent (no web UI)
   orchestrator/    control plane: auth, admission, scheduling, forwarding, dashboard
   envd/            in-guest agent: exec, files, terminal
-  agentd/          in-guest supervisor for agent templates
   devserver/       development server behind `make dev` (local, unisolated runtime)
   pilldrops-join/  node bootstrap used by a join token
   pilldrops-bench/ latency and density benchmarks
   setplan/         assign a limit preset to an org
-  gendocs/         generates docs/agent from the OpenAPI document
 internal/
   httpapi/         the node's /v1 API
   orchestrator/    the control plane's API, forwarding and background jobs
@@ -95,8 +93,7 @@ internal/
   egress/, egressproxy/   outbound policy
   store/           SQLite / Postgres, versioned migrations
   proxy/           preview reverse proxy
-  extras/          optional features (AI agent, chat bridges, functions); the
-                   engine never imports them
+  extras/          optional features (functions); the engine never imports them
 templates/         sandbox image recipes
 web/               dashboard source
 cli/               older Python CLI (the maintained CLI is pilldrops-oss/pilldrops-cli)

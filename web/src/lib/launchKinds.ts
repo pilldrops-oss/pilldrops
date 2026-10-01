@@ -22,12 +22,8 @@ export function kindOf(t: Template): Kind {
   if (t.kind && SERVER_KIND_MAP[t.kind]) return SERVER_KIND_MAP[t.kind]
   const tags = (t.tags ?? []).map(x => x.toLowerCase())
   const has = (...needles: string[]) => needles.some(n => tags.includes(n))
-  const lang = (t.language ?? '').toLowerCase()
 
-  if (
-    t.has_server &&
-    (lang === 'android' || t.id === 'desktop' || has('vnc', 'emulator', 'computer-use'))
-  ) {
+  if (t.has_server && (t.id === 'desktop' || has('vnc', 'emulator', 'computer-use'))) {
     return 'gui'
   }
 
@@ -122,7 +118,6 @@ export const CATEGORY_ORDER = [
   'Node / Web',
   'Systems',
   'Browser / E2E',
-  'Mobile',
   'Other',
 ] as const
 
@@ -141,7 +136,6 @@ export function categoryOf(t: Template): Category {
   if (has('use-case')) return 'Use cases'
   if (hasWord('database', 'queue', 'postgres', 'postgresql', 'redis', 'mysql', 'mongodb', 'mongo', 'kafka', 'sql', 'nosql'))
     return 'Databases'
-  if (has('android', 'mobile', 'appium', 'ios', 'emulator')) return 'Mobile'
   if (has('playwright', 'puppeteer', 'selenium', 'browser', 'e2e', 'openclaw', 'desktop', 'vnc'))
     return 'Browser / E2E'
   if (hasWord('go', 'golang', 'rust', 'cargo', 'c++', 'cpp', 'systems')) return 'Systems'
@@ -167,14 +161,6 @@ export function shellQuote(v: string): string {
 
 // The UI never offers a runtime picker; only container-required templates pin docker.
 
-function isAndroidTemplate(t: Template): boolean {
-  if ((t.language ?? '').toLowerCase() === 'android') return true
-  if (t.id.startsWith('android')) return true
-  if (t.id === 'mobile-test') return true
-  const tags = (t.tags ?? []).map(x => x.toLowerCase())
-  return tags.some(x => x === 'emulator' || x === 'appium' || x === 'android')
-}
-
 function isImageBackedService(t: Template): boolean {
   if (t.image) return true
   const cat = (t.category ?? '').toLowerCase()
@@ -183,13 +169,12 @@ function isImageBackedService(t: Template): boolean {
 
 // requiredRuntime returns the runtime to pin on create, or undefined for auto.
 export function requiredRuntime(t: Template): string | undefined {
-  if (isAndroidTemplate(t) || isImageBackedService(t)) return 'docker'
+  if (isImageBackedService(t)) return 'docker'
   return undefined
 }
 
 // runsOnLabel is the read-only "Runs on" text.
 export function runsOnLabel(t: Template): string {
-  if (isAndroidTemplate(t)) return 'Docker · KVM'
   if (isImageBackedService(t)) return 'Docker'
   return 'Auto'
 }

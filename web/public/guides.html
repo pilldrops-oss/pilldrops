@@ -176,7 +176,6 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
     <a href="/guides/ci-tests">CI for AI-written code</a>
     <a href="/guides/data-pipeline">Data jobs & ETL</a>
     <a href="/guides/custom-images">Custom images</a>
-    <a href="/guides/mobile-testing">Mobile E2E (Android)</a>
   </aside>
 
   <main class="doc">
@@ -202,17 +201,18 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
 
     <!-- ═══════════════ 2. CODING AGENTS ═══════════════ -->
     <section class="guide" id="guide-coding-agents">
-      <p class="gkick">Guide 02 · templates: claude, claude-terminal, codex, opencode, amp, grok</p>
+      <p class="gkick">Guide 02 · template: node · CLI installed via exec</p>
       <h2 class="disp"><a href="/guides/coding-agents">Run Claude Code & autonomous coding agents safely</a></h2>
       <p class="gwhat">A coding agent wants a full shell, a repo checkout, and hours of uninterrupted time —
-        exactly what you don't want on your laptop or prod boxes. PillDrops ships ready templates
-        for the five major agent CLIs; the agent gets root in its own microVM, you get a wall.</p>
+        exactly what you don't want on your laptop or prod boxes. Create a plain <code>node</code>
+        sandbox, install the agent CLI through <code>exec</code>, and it gets root in its own
+        microVM; you get a wall.</p>
       <p style="margin:0"><a href="/guides/coding-agents" style="color:var(--phos);font-weight:600">Read the full guide →</a></p>
     </section>
 
     <!-- ═══════════════ 3. BROWSER AUTOMATION ═══════════════ -->
     <section class="guide" id="guide-browser-automation">
-      <p class="gkick">Guide 03 · templates: playwright, playwright-headed</p>
+      <p class="gkick">Guide 03 · template: playwright</p>
       <h2 class="disp"><a href="/guides/browser-automation">Browser automation & web scraping for AI agents</a></h2>
       <p class="gwhat">Agents that browse need Chromium, and Chromium needs a machine. The
         <code>playwright</code> template boots with the browser and drivers installed — write the
@@ -304,41 +304,10 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
     <section class="guide" id="guide-custom-images">
       <p class="gkick">Guide 12 · any Dockerfile</p>
       <h2 class="disp"><a href="/guides/custom-images">Ship your own toolchain with custom images</a></h2>
-      <p class="gwhat">When the 16 templates aren't enough — private deps, system packages, pinned
+      <p class="gwhat">When the 10 templates aren't enough — private deps, system packages, pinned
         toolchains — build a custom image from any Dockerfile and launch sandboxes from it like any
         template.</p>
       <p style="margin:0"><a href="/guides/custom-images" style="color:var(--phos);font-weight:600">Read the full guide →</a></p>
-    </section>
-
-
-    <!-- ═══════════════ 13. MOBILE E2E ═══════════════ -->
-    <section class="guide" id="guide-mobile-testing">
-      <p class="gkick">Guide 13 · templates: mobile-test / android / android-headless · requires a KVM node (Pro plan+)</p>
-      <h2 class="disp"><a href="/guides/mobile-testing">Mobile E2E testing on a cloud Android emulator</a></h2>
-      <p class="gwhat">A device farm without the farm: each sandbox boots a KVM-accelerated
-        Android 14 emulator with <code>adb</code> and Appium inside. Run your suite with one
-        command and get a session page — live progress while it runs, then the full report
-        with a screen recording — or drive the device by hand.</p>
-      <p style="margin:0"><a href="/guides/mobile-testing" style="color:var(--phos);font-weight:600">Read the full guide →</a></p>
-    </section>
-
-    <!-- ═══════════════ 14–15. BRING YOUR PLAN ═══════════════ -->
-    <section class="guide" id="guide-claude-subscription">
-      <p class="gkick">Guide 14 · template: claude · no API key needed</p>
-      <h2 class="disp"><a href="/guides/claude-subscription">Use your Claude Pro/Max subscription — no API key</a></h2>
-      <p class="gwhat">Already paying for Claude? One command in the workstation's web terminal
-        (<code>claude setup-token</code>) signs the machine in with your subscription — no API key,
-        no per-token bill, nothing for us to store.</p>
-      <p style="margin:0"><a href="/guides/claude-subscription" style="color:var(--phos);font-weight:600">Read the full guide →</a></p>
-    </section>
-
-    <section class="guide" id="guide-chatgpt-subscription">
-      <p class="gkick">Guide 15 · template: codex · no API key needed</p>
-      <h2 class="disp"><a href="/guides/chatgpt-subscription">Use your ChatGPT Plus/Pro subscription with Codex</a></h2>
-      <p class="gwhat">Codex signs in with the ChatGPT account you already have:
-        <code>codex login --device-auth</code>, open the URL, type the one-time code. The CLI itself
-        recommends this on remote machines — your cloud workstation is exactly that.</p>
-      <p style="margin:0"><a href="/guides/chatgpt-subscription" style="color:var(--phos);font-weight:600">Read the full guide →</a></p>
     </section>
 
     <div style="margin-top:70px;border-top:1px solid var(--hair);padding-top:36px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
@@ -365,8 +334,7 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
     {"@type": "ListItem", "position": 9, "name": "Run untrusted user code in your product", "url": "https://pilldrops.com/guides/untrusted-code"},
     {"@type": "ListItem", "position": 10, "name": "CI for AI-written code — test before you trust", "url": "https://pilldrops.com/guides/ci-tests"},
     {"@type": "ListItem", "position": 11, "name": "Data jobs & ETL without a job cluster", "url": "https://pilldrops.com/guides/data-pipeline"},
-    {"@type": "ListItem", "position": 12, "name": "Ship your own toolchain with custom images", "url": "https://pilldrops.com/guides/custom-images"},
-    {"@type": "ListItem", "position": 13, "name": "Mobile E2E testing on a cloud Android emulator", "url": "https://pilldrops.com/guides/mobile-testing"}
+    {"@type": "ListItem", "position": 12, "name": "Ship your own toolchain with custom images", "url": "https://pilldrops.com/guides/custom-images"}
   ]
 }
 </script>

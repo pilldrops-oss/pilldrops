@@ -188,7 +188,7 @@ has the details.
   what each one isolates
 - [Checkpoints](docs/checkpoints.md), [fork](docs/fork.md) and
   [snapshots](docs/snapshots.md)
-- [CLI reference](docs/pilldrops-cli.md) and the [API for agents](docs/agent/)
+- [CLI reference](docs/pilldrops-cli.md)
 - The full HTTP API reference is served by every server at `/docs`
 
 SDKs: [Python](https://github.com/pilldrops-oss/pilldrops-python) ·
@@ -198,7 +198,7 @@ SDKs: [Python](https://github.com/pilldrops-oss/pilldrops-python) ·
 ## Development
 
 ```bash
-make build     # sandboxd, envd and agentd for linux/amd64
+make build     # sandboxd and envd for linux/amd64
 make test      # Go tests (needs a C compiler for the race detector)
 make check     # everything CI runs; run it on Linux before opening a PR
 ```

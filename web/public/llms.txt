@@ -59,13 +59,13 @@
 
 ## By use case (template → step-by-step guide)
 
-- Code interpreter / data analysis: template `code-interpreter-v1` — /guides/code-interpreter
+- Code interpreter / data analysis: template `code-interpreter` — /guides/code-interpreter
 - Browser automation / scraping: template `playwright` (Chromium pre-baked) — /guides/browser-automation
 - Run untrusted user code: template `python-3.11` with vcpu/mem/timeout caps — /guides/untrusted-code
-- Coding agents (Claude Code, Codex, OpenCode, Amp): template `claude` etc. — /guides/coding-agents
+- Coding agents (Claude Code, Codex, OpenCode, Amp): template `node`, CLI installed
+  through exec — /guides/coding-agents
 - Computer use / desktop agents: template `desktop` (Linux desktop over VNC) — /guides/computer-use
-- Full-stack app previews: template `nextjs`/`node-20` + start/ports — /guides/app-preview
-- Android / mobile E2E testing: template `android` (emulator warm-baked) — /guides/mobile-testing
+- Full-stack app previews: template `node` + start/ports — /guides/app-preview
 - Evals & RL rollouts at scale: template `python-3.11`, one sandbox per rollout — /guides/evals
 - CI for AI-written code: /guides/ci-tests
 - Custom images (any Dockerfile): /guides/custom-images

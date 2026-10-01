@@ -4,10 +4,9 @@
 # scripts/build-template.sh reads the same one for in-tree templates, so a
 # sandbox boots identically whichever built its rootfs.
 #
-# Lines carrying an __INTREE_ONLY__ marker, and the placeholder line below the
-# envd start, belong to the in-tree build alone; templatebuild drops both,
-# because an image converted through the API carries neither of the binaries
-# they name.
+# Lines carrying an __INTREE_ONLY__ marker belong to the in-tree build alone;
+# templatebuild drops them, because an image converted through the API
+# carries no baked start.sh.
 #
 # envd propagates its own environment to exec'd commands, so init loads the
 # Docker image's ENV first — the VM boots via /sbin/init, not Docker, so
@@ -30,5 +29,4 @@ mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null
 [ -x /usr/local/bin/start.sh ] && /usr/local/bin/start.sh >/var/log/start.log 2>&1 & # __INTREE_ONLY__
 # Start envd in background, then keep init (PID 1) alive.
 /usr/local/bin/envd &
-__AGENTD__
 exec sleep infinity

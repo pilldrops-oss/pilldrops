@@ -28,7 +28,7 @@ import (
 const (
 	vsockPort = 6001
 	// credVsockPort is the AF_VSOCK port the node pushes the token hash to.
-	// Separate from the TCP data port; AF_VSOCK shares no port space with agentd's TCP 6002.
+	// Separate from the TCP data port; AF_VSOCK shares no port space with TCP.
 	credVsockPort = 6002
 	// version is what Health reports; the node reads its capability level from it.
 	version   = envdproto.Tag
