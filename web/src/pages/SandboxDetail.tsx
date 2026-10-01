@@ -11,7 +11,7 @@ import type { SandboxDetail as SandboxDetailType, Template, SandboxMetrics, Port
 import { statusPill } from './Sandboxes'
 import { TemplateIcon } from '../components/templateIcons'
 import { usePreviewLink } from '../lib/previewToken'
-import { previewPortOf } from '../lib/previewPort'
+import { previewPortOf, withNoVncResize } from '../lib/previewPort'
 import SandboxTerminal from '../components/SandboxTerminal'
 
 function formatDate(ts: string): string {
@@ -223,14 +223,15 @@ export function PreviewTab({
   // path-form previews, so the report gets a direct link.
   const [previewPath, previewQuery] = iframeUrl.split('?')
   const reportUrl = `${previewPath}report/${previewQuery ? `?${previewQuery}` : ''}`
+  const embedUrl = withNoVncResize(iframeUrl, outcome)
 
   function previewBody() {
     if (!isRunning) return <NotRunningNotice status={status} what="preview your application" />
-    if (!isPreviewCrossOrigin()) return <UnsafeEmbedNotice url={iframeUrl} what="preview" />
+    if (!isPreviewCrossOrigin()) return <UnsafeEmbedNotice url={embedUrl} what="preview" />
     return (
       <iframe
         className="preview-iframe"
-        src={iframeUrl}
+        src={embedUrl}
         title={`Preview — port ${activePort}`}
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
       />
