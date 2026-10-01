@@ -114,13 +114,18 @@ func runLatency(cl client, tr *tracker) {
 		os.Exit(2)
 	}
 
+	// Read before any sandbox exists, so a refused key exits with nothing to clean up.
+	hs, err := cl.hostStats()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	if err := prepareCache(cl, tr, *cacheState); err != nil {
 		fmt.Fprintf(os.Stderr, "cache setup: %v\n", err)
 		os.Exit(2)
 	}
 
 	cpuModel, kernel, factsSource := localFacts()
-	hs := cl.hostStats()
 	cores, _ := hs["cpu_cores"].(float64)
 	memTotal, _ := hs["mem_total_mb"].(float64)
 	sha, dirty := gitSHA()

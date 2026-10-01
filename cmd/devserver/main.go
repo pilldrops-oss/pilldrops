@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -939,6 +940,27 @@ func newAPIAuth(keyStore *APIKeyStore, requireAuth bool) func(http.Handler) http
 			}
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+// hostStub is the local GET /v1/host. It counts every tenant's sandboxes, so
+// like the node's it answers only the operator: here, the PORTAL_API_KEY holder.
+func hostStub(mgr *DevManager, portalKey string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(presentedToken(r)), []byte(portalKey)) != 1 {
+			http.Error(w, `{"error":"operator role required"}`, http.StatusForbidden)
+			return
+		}
+		// Full HostResp shape; a partial object crashes the page.
+		mgr.mu.RLock()
+		active := len(mgr.sandboxes)
+		mgr.mu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		writeFprintf(w, `{"cpu_cores":%d,"cpu_percent":0,"load_avg":[0,0,0],`+
+			`"mem_total_mb":0,"mem_used_mb":0,"mem_available_mb":0,`+
+			`"disk_total_gb":0,"disk_used_gb":0,"disk_free_gb":0,`+
+			`"sandboxes_active":%d,"vcpu_committed":0,"mem_committed_mb":0}`,
+			runtime.NumCPU(), active)
 	}
 }
 
@@ -2987,18 +3009,7 @@ func main() {
 			w.Header().Set("Content-Type", "application/json")
 			writeBytes(w, []byte(`{"functions":[]}`))
 		})
-		r.Get("/v1/host", func(w http.ResponseWriter, _ *http.Request) {
-			// Full HostResp shape; a partial object crashes the page.
-			mgr.mu.RLock()
-			active := len(mgr.sandboxes)
-			mgr.mu.RUnlock()
-			w.Header().Set("Content-Type", "application/json")
-			writeFprintf(w, `{"cpu_cores":%d,"cpu_percent":0,"load_avg":[0,0,0],`+
-				`"mem_total_mb":0,"mem_used_mb":0,"mem_available_mb":0,`+
-				`"disk_total_gb":0,"disk_used_gb":0,"disk_free_gb":0,`+
-				`"sandboxes_active":%d,"vcpu_committed":0,"mem_committed_mb":0}`,
-				runtime.NumCPU(), active)
-		})
+		r.Get("/v1/host", hostStub(mgr, devKey))
 
 		// After the fleet-passthrough /metrics stub above: chi lets the last
 		// registration of a pattern win, and the local ownership-checked
