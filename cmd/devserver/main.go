@@ -1836,7 +1836,9 @@ func registerSandboxActionRoutes(r chi.Router, mgr *DevManager, ownerID func(*ht
 	}
 	r.Post("/v1/sandboxes/{id}/timeout", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
+		// "timeout" is the pre-SDK-fix field name, still accepted from old clients.
 		var body struct {
+			Seconds int `json:"seconds"`
 			Timeout int `json:"timeout"`
 		}
 		decodeJSONBody(r, &body)
@@ -1844,8 +1846,16 @@ func registerSandboxActionRoutes(r chi.Router, mgr *DevManager, ownerID func(*ht
 		if !ok {
 			return
 		}
-		if body.Timeout > 0 {
-			sb.ExpiresAt = time.Now().Add(time.Duration(body.Timeout) * time.Second)
+		seconds := body.Seconds
+		if seconds == 0 {
+			seconds = body.Timeout
+		}
+		if seconds == 0 {
+			http.Error(w, `{"error":"\"seconds\" is required: a positive TTL from now"}`, http.StatusBadRequest)
+			return
+		}
+		if seconds > 0 {
+			sb.ExpiresAt = time.Now().Add(time.Duration(seconds) * time.Second)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		writeJSON(w, map[string]interface{}{"sandbox_id": id, "expires_at": sb.ExpiresAt})

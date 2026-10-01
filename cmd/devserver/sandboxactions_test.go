@@ -265,3 +265,37 @@ func TestFreePortSkipsABusyPort(t *testing.T) {
 		t.Fatalf("freePort returned %d, which is in use", got)
 	}
 }
+
+// The SDKs send {"seconds":N}; reading only "timeout" left the TTL untouched.
+func TestSandboxTimeout_ReadsSecondsAndRefusesZero(t *testing.T) {
+	start := time.Now().Add(time.Minute)
+	sb := &DevSandbox{ID: "sb-1", UserID: "u:alice", ExpiresAt: start}
+	mgr := &DevManager{sandboxes: map[string]*DevSandbox{"sb-1": sb}}
+	r := sandboxActionRouter(mgr, NewExecHistory(), NewUsageTracker(), "u:alice")
+
+	post := func(body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/v1/sandboxes/sb-1/timeout", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	for _, body := range []string{`{}`, `{"seconds":0}`} {
+		if code := post(body); code != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", body, code)
+		}
+	}
+	if !sb.ExpiresAt.Equal(start) {
+		t.Fatalf("a refused /timeout moved the expiry to %v", sb.ExpiresAt)
+	}
+
+	for body, want := range map[string]time.Duration{`{"seconds":3600}`: time.Hour, `{"timeout":7200}`: 2 * time.Hour} {
+		if code := post(body); code != http.StatusOK {
+			t.Fatalf("%s = %d, want 200", body, code)
+		}
+		if d := time.Until(sb.ExpiresAt); d < want-time.Minute || d > want {
+			t.Errorf("%s: expiry is %v out, want ~%v", body, d, want)
+		}
+	}
+}
