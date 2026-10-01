@@ -46,6 +46,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "watch" {
 		os.Exit(runWatch(os.Args[2:], os.Stdout))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "reap" {
+		reapForever()
+	}
 
 	// A fast-boot microVM has no entropy; without this Node and Python hang on getrandom().
 	seedEntropy()

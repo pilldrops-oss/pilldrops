@@ -110,6 +110,9 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 	var envdToken string
 	var cmd []string
 	if !service {
+		// PID 1 is otherwise `sleep infinity`, which never reaps: a killed
+		// background process stayed a zombie and still listed as running.
+		base = append(base, "--init")
 		// Under Firecracker the guest init runs start.sh; here PID 1 must.
 		const startIfPresent = "if [ -x /usr/local/bin/start.sh ]; then /usr/local/bin/start.sh >/tmp/start.log 2>&1 & fi; "
 

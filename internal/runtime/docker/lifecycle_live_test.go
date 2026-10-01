@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -78,5 +79,52 @@ func TestLiveRuntimeLifecycle(t *testing.T) {
 		if _, err := du.DiskUsageMB(ctx); err != nil {
 			t.Errorf("disk usage: %v", err)
 		}
+	}
+}
+
+// A pid from Procs must be one Signal can reach, and the killed process must
+// be reaped rather than left a zombie that still shows as running.
+func TestLiveSignalKillsAListedProcess(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Skipf("docker runtime unavailable: %v", err)
+	}
+	ctx := t.Context()
+	inst, err := r.Boot(ctx, rt.BootSpec{
+		SandboxID: "sb-live-sig-" + time.Now().Format("150405"),
+		Template:  rt.Template{Name: "base", Image: "alpine:3"},
+		VCPU:      1, MemMiB: 256,
+	})
+	if err != nil {
+		t.Skipf("boot failed (image or daemon unavailable): %v", err)
+	}
+	t.Cleanup(func() { _ = inst.Stop(t.Context()) })
+
+	if _, err := inst.Exec(ctx, rt.ExecSpec{Cmd: "sleep 777", Detach: true}); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	procs, err := inst.Procs()
+	if err != nil {
+		t.Fatalf("procs: %v", err)
+	}
+	pid := 0
+	for _, p := range procs {
+		if strings.HasPrefix(p.Cmd, "sleep") && p.PID > pid {
+			pid = p.PID
+		}
+	}
+	if pid == 0 {
+		t.Fatalf("procs does not list the sleep: %+v", procs)
+	}
+	if err := inst.Signal(pid, 9); err != nil {
+		t.Fatalf("signal %d: %v", pid, err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	res, err := inst.Exec(ctx, rt.ExecSpec{Cmd: "cat /proc/" + strconv.Itoa(pid) + "/stat 2>/dev/null || echo gone"})
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if strings.TrimSpace(res.Stdout) != "gone" {
+		t.Errorf("pid %d is still there after SIGKILL: %s", pid, res.Stdout)
 	}
 }

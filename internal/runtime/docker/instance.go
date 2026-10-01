@@ -270,32 +270,21 @@ func (i *dockerInstance) FS() rt.FileSystem {
 	return &dockerFS{cid: i.cid, eng: i.eng, user: i.runUser}
 }
 
+// procList prints "pid comm" for each process in the container's own pid
+// namespace, skipping itself. docker top reports host pids, which a kill run
+// inside the container (Signal, or the tenant's own shell) cannot address.
+const procList = `for d in /proc/[0-9]*; do p=${d#/proc/}; [ "$p" = $$ ] && continue; ` +
+	`{ read -r c < "$d/comm"; } 2>/dev/null && echo "$p $c"; done`
+
 func (i *dockerInstance) Procs() ([]rt.Proc, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if i.eng != nil {
-		if _, rows, err := i.eng.Top(ctx, i.cid, "-eo pid,comm"); err == nil {
-			var procs []rt.Proc
-			for _, f := range rows {
-				if len(f) < 2 {
-					continue
-				}
-				if pid, perr := strconv.Atoi(strings.TrimSpace(f[0])); perr == nil {
-					procs = append(procs, rt.Proc{PID: pid, Cmd: strings.Join(f[1:], " ")})
-				}
-			}
-			return procs, nil
-		}
-	}
-	out, _, code, err := dockerOut(ctx, "top", i.cid, "-eo", "pid,comm")
+	out, _, code, err := i.runExec(ctx, rt.ExecSpec{}, procList, []string{"exec", i.cid, "/bin/sh", "-c", procList})
 	if err != nil || code != 0 {
 		return nil, nil // best-effort, like the process runtime
 	}
 	var procs []rt.Proc
-	for n, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if n == 0 { // header row
-			continue
-		}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 {
 			continue
@@ -311,8 +300,11 @@ func (i *dockerInstance) Signal(pid, sig int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_, se, code, err := dockerOut(ctx, "exec", i.cid, "kill", "-"+strconv.Itoa(sig), strconv.Itoa(pid))
-	if err != nil || code != 0 {
-		return fmt.Errorf("signal %d/%d: %w %s", pid, sig, err, strings.TrimSpace(se))
+	if err != nil {
+		return fmt.Errorf("signal %d/%d: %w", pid, sig, err)
+	}
+	if code != 0 {
+		return fmt.Errorf("signal %d/%d: %s", pid, sig, strings.TrimSpace(se))
 	}
 	return nil
 }

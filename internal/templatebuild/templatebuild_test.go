@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -21,7 +22,7 @@ func TestInitScriptStartsEnvd(t *testing.T) {
 		"/etc/sandbox-env",
 		"/etc/resolv.conf",
 		"/etc/hosts",
-		"exec sleep infinity",
+		"exec /usr/local/bin/envd reap",
 	} {
 		if !strings.Contains(init, want) {
 			t.Errorf("/sbin/init does not contain %q", want)
@@ -32,6 +33,23 @@ func TestInitScriptStartsEnvd(t *testing.T) {
 	if strings.Contains(init, "agentd") || strings.Contains(init, "__") ||
 		strings.Contains(init, "/usr/local/bin/start.sh") {
 		t.Errorf("/sbin/init kept a line only the in-tree build wants:\n%s", init)
+	}
+}
+
+// The boot scripts run under a POSIX sh, which has no brace expansion:
+// `mkdir -p /newroot/{proc,sys}` made one directory named "{proc,sys}".
+func TestBootScriptsUseNoBraceExpansion(t *testing.T) {
+	brace := regexp.MustCompile(`(^|[^$])\{[^}]*,[^}]*\}`)
+	for _, name := range []string{"assets/overlay-init", "assets/init"} {
+		b, err := assets.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			if !strings.HasPrefix(strings.TrimSpace(line), "#") && brace.MatchString(line) {
+				t.Errorf("%s uses brace expansion: %q", name, line)
+			}
+		}
 	}
 }
 

@@ -459,22 +459,6 @@ func memUsedMiB(s statsJSON) int {
 	return int((usage + 1<<20 - 1) >> 20)
 }
 
-// Top lists processes in a container.
-func (e *engine) Top(ctx context.Context, cid, psArgs string) (titles []string, procs [][]string, err error) {
-	var out struct {
-		Titles    []string   `json:"Titles"`
-		Processes [][]string `json:"Processes"`
-	}
-	q := url.Values{}
-	if psArgs != "" {
-		q.Set("ps_args", psArgs)
-	}
-	if err := e.getQ(ctx, "/containers/"+cid+"/top", q, &out); err != nil {
-		return nil, nil, err
-	}
-	return out.Titles, out.Processes, nil
-}
-
 // Kill signals the container's main process; the Engine API has no per-pid
 // signal.
 func (e *engine) Kill(ctx context.Context, cid, signal string) error {
