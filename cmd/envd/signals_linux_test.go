@@ -110,3 +110,31 @@ func childrenOf(ppid int) []string {
 	}
 	return out
 }
+
+// The reaper is PID 1: a signal that ends it panics the guest.
+func TestReaperSurvivesTerminatingSignals(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reaper := exec.Command(self)
+	reaper.Env = append(os.Environ(), "ENVD_REAP_HELPER=1")
+	if err := reaper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- reaper.Wait() }()
+	t.Cleanup(func() { _ = reaper.Process.Kill() })
+
+	time.Sleep(200 * time.Millisecond) // past the runtime's own handler install
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGUSR1} {
+		if err := reaper.Process.Signal(sig); err != nil {
+			t.Fatalf("send %v: %v", sig, err)
+		}
+		select {
+		case err := <-exited:
+			t.Fatalf("the reaper exited on %v: %v", sig, err)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
