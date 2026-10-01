@@ -182,3 +182,24 @@ func TestPutReplacesAndDeleteReports(t *testing.T) {
 		t.Error("second delete reported a removal")
 	}
 }
+
+// A save that does not mention auto_inject leaves it alone in the same
+// statement that writes the value; a new entry starts off.
+func TestPutSecretKeepingAutoInject(t *testing.T) {
+	s := vaultStore(t)
+	ctx := t.Context()
+	got, err := s.PutSecretKeepingAutoInject(ctx, "u:acme", "TOK", "v1", true)
+	if err != nil || got.AutoInject {
+		t.Fatalf("new entry = %+v, %v; want auto_inject off", got, err)
+	}
+	if _, err := s.SetSecretAutoInject(ctx, "u:acme", "TOK", true); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.PutSecretKeepingAutoInject(ctx, "u:acme", "TOK", "v2", true)
+	if err != nil || !got.AutoInject {
+		t.Fatalf("rotation = %+v, %v; want auto_inject kept on", got, err)
+	}
+	if v, _, _ := s.SecretValue(ctx, "u:acme", "TOK"); v != "v2" {
+		t.Errorf("value = %q, want v2", v)
+	}
+}

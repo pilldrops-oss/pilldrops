@@ -57,22 +57,16 @@ func (s *Server) handleSecretPut(w http.ResponseWriter, r *http.Request) {
 	}
 	// A rotation that does not mention auto_inject keeps it: it used to reset
 	// to off on every save, silently dropping the secret from new sandboxes.
-	autoInject := body.AutoInject != nil && *body.AutoInject
-	if body.AutoInject == nil {
-		existing, err := st.ListSecrets(r.Context(), fastOrg(r))
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		for _, v := range existing {
-			if v.Name == strings.TrimSpace(body.Name) {
-				autoInject = v.AutoInject
-			}
-		}
-	}
 	callerID, _ := callerKey(r.Context())
-	got, err := st.PutSecret(r.Context(), fastOrg(r), body.Name, body.Value,
-		body.Secret == nil || *body.Secret, autoInject, callerID)
+	var got store.VaultSecret
+	var err error
+	if body.AutoInject == nil {
+		got, err = st.PutSecretKeepingAutoInject(r.Context(), fastOrg(r), body.Name, body.Value,
+			body.Secret == nil || *body.Secret, callerID)
+	} else {
+		got, err = st.PutSecret(r.Context(), fastOrg(r), body.Name, body.Value,
+			body.Secret == nil || *body.Secret, *body.AutoInject, callerID)
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrVaultName) || err.Error() == "value is required" {
 			writeErr(w, http.StatusBadRequest, err.Error())

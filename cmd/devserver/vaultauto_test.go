@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -48,5 +49,27 @@ func TestPortalAutoInjectSurvivesARotationAndFlipsWithoutTheValue(t *testing.T) 
 	}
 	if code := send("PATCH", "/v1/secrets/NOPE", `{"auto_inject":true}`); code != 404 {
 		t.Errorf("patch of a missing secret = %d, want 404", code)
+	}
+}
+
+// The rotation's keep is decided under the vault lock, so a PATCH racing it
+// is never overwritten by a value read before it.
+func TestPortalAutoInjectToggleIsNotLostToAConcurrentRotation(t *testing.T) {
+	vs := testVault(t)
+	r := chi.NewRouter()
+	registerVaultRoutes(r, vs, func(*http.Request) string { return "u:alice" })
+	send := func(method, path, body string) {
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(method, path, strings.NewReader(body)))
+	}
+	for i := range 40 {
+		send("POST", "/v1/secrets", `{"name":"TOK","value":"v","auto_inject":true}`)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); send("PATCH", "/v1/secrets/TOK", `{"auto_inject":false}`) }()
+		go func() { defer wg.Done(); send("POST", "/v1/secrets", `{"name":"TOK","value":"rotated"}`) }()
+		wg.Wait()
+		if vs.List("u:alice")[0].AutoInject {
+			t.Fatalf("round %d: the PATCH to false was lost to a rotation", i)
+		}
 	}
 }
