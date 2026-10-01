@@ -272,12 +272,15 @@ func (s *Server) SetStore(st *store.Store) {
 	}
 	if s.ui != nil && st != nil {
 		s.ui.SetAdminStore(store.AccountsOf(st))
-		s.ui.SetKeyCheck(func(ctx context.Context, key string) (bool, error) {
-			_, err := st.ValidateKey(ctx, key)
+		s.ui.SetKeyCheck(func(ctx context.Context, key string) (string, error) {
+			k, err := st.ValidateKey(ctx, key)
 			if errors.Is(err, store.ErrInvalidKey) {
-				return false, nil
+				return "", nil
 			}
-			return err == nil, err
+			if err != nil {
+				return "", err
+			}
+			return k.Role, nil
 		})
 	}
 }

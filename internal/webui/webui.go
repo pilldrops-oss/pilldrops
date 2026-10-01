@@ -99,7 +99,7 @@ type Server struct {
 	// admins is nil when there is no shared store; the console then uses the API-key form.
 	admins AdminStore
 	// keyCheck lets the account console also sign a customer in with an API key; nil refuses keys.
-	keyCheck func(ctx context.Context, key string) (bool, error)
+	keyCheck func(ctx context.Context, key string) (string, error)
 	// pagesDir overrides embedded pages at request time. See PagesDirEnv.
 	pagesDir    string
 	analytics   string       // script tag injected into public pages, "" when unset

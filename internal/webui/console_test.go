@@ -311,11 +311,16 @@ func TestEveryAuthFormSharesTheShell(t *testing.T) {
 
 func TestConsoleSignsInWithACustomerKey(t *testing.T) {
 	s, mux := consoleServer(t, newFakeAdmins())
-	s.SetKeyCheck(func(_ context.Context, key string) (bool, error) {
-		if key == "outage" {
-			return false, context.DeadlineExceeded
+	s.SetKeyCheck(func(_ context.Context, key string) (string, error) {
+		switch key {
+		case "outage":
+			return "", context.DeadlineExceeded
+		case "pd_customer":
+			return "user", nil
+		case "pd_node":
+			return "operator", nil
 		}
-		return key == "pd_customer", nil
+		return "", nil
 	})
 
 	rr := post(mux, "/dashboard/login", url.Values{"key": {"pd_customer"}})
@@ -341,6 +346,17 @@ func TestConsoleSignsInWithACustomerKey(t *testing.T) {
 	}
 	if rr := post(mux, "/dashboard/login", url.Values{"key": {"outage"}}); rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("store error = %d, want 503", rr.Code)
+	}
+
+	// An operator-role key (node or bootstrap) must not open a console
+	// session; operators sign in with their admin account instead.
+	unknown := post(mux, "/dashboard/login", url.Values{"key": {"pd_revoked"}})
+	operator := post(mux, "/dashboard/login", url.Values{"key": {"pd_node"}})
+	if operator.Code != http.StatusUnauthorized {
+		t.Errorf("operator-role key = %d, want 401", operator.Code)
+	}
+	if operator.Body.String() != unknown.Body.String() {
+		t.Error("an operator-role key gets a different error than an unknown key")
 	}
 }
 

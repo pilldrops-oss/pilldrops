@@ -24,8 +24,9 @@ type AdminStore interface {
 func (s *Server) SetAdminStore(a AdminStore) { s.admins = a }
 
 // SetKeyCheck lets the console sign a customer in with an API key. check
-// reports whether key is live; an error means it could not tell.
-func (s *Server) SetKeyCheck(check func(ctx context.Context, key string) (bool, error)) {
+// reports the key's role ("user" or "operator"), or "" if the key is unknown
+// or revoked; an error means it could not tell.
+func (s *Server) SetKeyCheck(check func(ctx context.Context, key string) (string, error)) {
 	s.keyCheck = check
 }
 
@@ -132,23 +133,25 @@ func (s *Server) handleConsoleLogin(w http.ResponseWriter, r *http.Request) {
 	s.startSession(w, r, email)
 }
 
-// handleConsoleKeyLogin signs in with a customer API key. Only keys the check
-// knows are accepted, so the deployment's master key still opens no console.
+// handleConsoleKeyLogin signs in with a customer API key. Only a user-role key
+// opens a console session: the deployment's master key, and node/bootstrap
+// keys (role "operator"), get the same generic error as an unknown key.
+// Operators sign in with their admin account instead.
 func (s *Server) handleConsoleKeyLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.logins.allow(clientIP(r), time.Now()) {
 		s.consoleError(w, http.StatusTooManyRequests, signinHTML, "Too many attempts. Try again shortly.")
 		return
 	}
 	key := strings.TrimSpace(r.PostFormValue("key"))
-	ok := false
+	role := ""
 	if s.keyCheck != nil {
 		var err error
-		if ok, err = s.keyCheck(r.Context(), key); err != nil {
+		if role, err = s.keyCheck(r.Context(), key); err != nil {
 			s.consoleError(w, http.StatusServiceUnavailable, signinHTML, "Cannot verify credentials right now. Try again shortly.")
 			return
 		}
 	}
-	if !ok {
+	if role != "user" {
 		s.consoleError(w, http.StatusUnauthorized, signinHTML, "Invalid API key.")
 		return
 	}
