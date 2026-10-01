@@ -2,7 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 
 import type { Template, CreateSandboxResp } from '../../types'
 
+import { absolutePreviewUrl } from '../../api'
 import { usePreviewLink } from '../../lib/previewToken'
+import { previewPortOf } from '../../lib/previewPort'
 import type { PollResult } from '../../lib/previewStatus'
 import PreviewDiagnosis from '../PreviewDiagnosis'
 
@@ -187,7 +189,11 @@ function DeployReady({
   previewOutcome?: PollResult | null
   liveStatus?: string | null
 }) {
-  const baseUrl = result.app_url || result.url || ''
+  // The node's own app_url names its sandbox domain, which this dashboard may not
+  // route; every preview link here is built the dashboard's way.
+  const nodeUrl = result.app_url || result.url
+  const port = result.cdp_token_port ?? previewPortOf({ url: nodeUrl })
+  const baseUrl = nodeUrl ? absolutePreviewUrl(result.id, port) : ''
   const minted = usePreviewLink(baseUrl ? result.id : undefined, result.cdp_token_port ?? null)
   const url = baseUrl && result.cdp_token
     ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(result.cdp_token)}`

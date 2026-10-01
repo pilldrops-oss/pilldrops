@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import ErrorBoundary from './ErrorBoundary'
 import { RowsSkeleton } from './Skeleton'
 import { labelFor } from '../lib/navLabels'
-import { IS_LOCAL_RUNTIME } from '../api'
+import { IS_LOCAL_RUNTIME, checkAdminAccess } from '../api'
 import { clearThread } from '../lib/threadStore'
 
 const FUNCTIONS_ENABLED = false
@@ -26,6 +26,14 @@ export default function Shell() {
   const [mobileNav, setMobileNav] = useState(false)
   const navigate = useNavigate()
   const loc = useLocation()
+  // The console is served in user mode; an operator key still gets the admin pages.
+  const [operator, setOperator] = useState(false)
+  useEffect(() => {
+    if (IS_ADMIN) return
+    let alive = true
+    void checkAdminAccess().then(r => { if (alive) setOperator(r === 'ok') })
+    return () => { alive = false }
+  }, [])
 
   useEffect(() => {
     document.body.classList.toggle('dark', dark)
@@ -50,7 +58,12 @@ export default function Shell() {
           </div>
         </div>
 
-        {IS_ADMIN ? <AdminNav /> : <UserNav />}
+        {IS_ADMIN ? <AdminNav /> : (
+          <>
+            <UserNav />
+            {operator && <AdminNav />}
+          </>
+        )}
 
         <div className="foot">
           <div className="rt">
@@ -301,8 +314,9 @@ function Breadcrumb() {
   const parts = location.pathname.replace(/^\//, '').split('/')
   const first = parts[0] ?? ''
 
-  const label = labelFor(first, IS_ADMIN)
-  const sub = (first === 'sandbox' || first === 'fn') && parts[1] ? parts[1] : null
+  // sandboxes/:id is the admin sandbox page, not the customer list.
+  const label = labelFor(first, IS_ADMIN || (first === 'sandboxes' && !!parts[1]))
+  const sub = ['sandbox', 'fn', 't', 'sandboxes', 'users'].includes(first) && parts[1] ? parts[1] : null
 
   return (
     <div className="bc">

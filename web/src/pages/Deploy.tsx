@@ -966,7 +966,7 @@ export default function Deploy() {
                   error={launch.error}
                   onReset={launch.reset}
                   service={cfg.kind === 'service' ? tpl : null}
-                  onOpen={id => navigate(`/sandbox/${id}`)}
+                  onOpen={id => navigate(`/sandbox/${id}`, { state: { sandbox: launch.result } })}
                 />
               </div>
             ) : (

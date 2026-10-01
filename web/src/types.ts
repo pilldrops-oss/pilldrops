@@ -267,6 +267,9 @@ export interface CreateSandboxResp {
   /** Browser template: ready-to-use tokened links. */
   viewer_url?: string
   cdp_url?: string
+  /** "cold" or "snapshot"; reported by create only, not by the detail GET. */
+  boot_type?: string
+  boot_ms?: number
 }
 
 export interface ExecResp {
