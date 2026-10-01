@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
@@ -150,6 +151,24 @@ func TestPublicPreviewDoesNotOpenPlatformPorts(t *testing.T) {
 		}
 		if !gate(port, "?token="+s.previewToken(t.Context(), "sb1", port)) {
 			t.Errorf("the owner's token for port %d does not open it", port)
+		}
+	}
+}
+
+func TestPlatformPortRefusalDoesNotAdvisePublic(t *testing.T) {
+	s, st := revokeServer(t, sandbox.VisibilityOrg)
+	if err := st.SetPublicPreview(t.Context(), "sb1", true); err != nil {
+		t.Fatalf("set public: %v", err)
+	}
+	refusal := func(port int) string {
+		w := httptest.NewRecorder()
+		s.authorizePreview(w, httptest.NewRequest(http.MethodGet, "/preview/sb1/"+strconv.Itoa(port)+"/", nil), "sb1", port)
+		return w.Body.String()
+	}
+	for _, port := range []int{rt.TerminalPort, rt.DesktopPort} {
+		body := refusal(port)
+		if strings.Contains(body, "Create with") || !strings.Contains(body, "even when the sandbox is public") {
+			t.Errorf("port %d refusal does not explain that public never opens it: %s", port, body)
 		}
 	}
 }

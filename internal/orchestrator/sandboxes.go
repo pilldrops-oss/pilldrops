@@ -12,6 +12,7 @@ import (
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
 	"github.com/pilldrops-oss/pilldrops/internal/egress"
+	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 	"github.com/pilldrops-oss/pilldrops/internal/templates"
@@ -323,13 +324,33 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 				} else {
 					s.publicSB.Store(created.ID, true)
 				}
-				rb = injectJSONFields(rb, map[string]any{"public": true})
+				fields := map[string]any{"public": true}
+				if port := mainPort(req); rt.IsPlatformPort(port) {
+					fields["warning"] = fmt.Sprintf("public: true does not share this sandbox's preview: port %d is a "+
+						"terminal or desktop port, which gives shell access, so it always needs an access token "+
+						"from the owner. Mint one with GET /v1/sandboxes/%s/preview-token?port=%d", port, created.ID, port)
+				}
+				rb = injectJSONFields(rb, fields)
 			}
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(rb) //nolint:errcheck // best-effort: status/headers are already committed, nothing left to do on a write failure
+}
+
+// mainPort is the port the create's preview link points at, as the node picks it.
+func mainPort(req sandbox.Spec) int {
+	if req.Port > 0 {
+		return req.Port
+	}
+	if req.Start != "" {
+		return 8000 // the node's default for a deployed app
+	}
+	if t, ok := templates.Resolve(req.Template); ok {
+		return t.Port
+	}
+	return 0
 }
 
 // maxCreateTries bounds how many nodes one create is offered to when each

@@ -135,6 +135,15 @@ const previewPrivatePage = `<!doctype html><meta charset="utf-8"><title>Private 
 <p>Open it with the <code>viewer_url</code> from the create response (or the dashboard). The link carries an access token; the bare URL isn't reachable. Create with <code>public: true</code> to make a preview shareable without a token.</p>
 <p style="margin-top:10px">If this link used to work: changing a sandbox's visibility retracts every preview link issued before the change. Mint a new one with <code>GET /v1/sandboxes/&lt;id&gt;/preview-token?port=&lt;port&gt;</code>.</p></div>`
 
+// previewPlatformPortPage is the refusal for the terminal and desktop ports,
+// where public: true does not apply, so the generic page's advice would mislead.
+const previewPlatformPortPage = `<!doctype html><meta charset="utf-8"><title>Owner access only</title>
+<style>html,body{margin:0;height:100%;display:grid;place-items:center;background:#0e0e10;color:#e8eaed;font-family:system-ui,Segoe UI,Roboto,sans-serif}
+.c{max-width:440px;text-align:center;padding:32px}h1{font-size:19px;margin:0 0 10px}p{color:#9aa0a6;font-size:14px;line-height:1.5;margin:0}code{color:#8ab4f8}</style>
+<div class="c"><h1>🔒 This port needs the owner's access link</h1>
+<p>The terminal and desktop ports give shell access to the sandbox, so they always need an access token from the sandbox's owner, even when the sandbox is public. <code>public: true</code> shares only the app's own ports.</p>
+<p style="margin-top:10px">The owner can mint a link with <code>GET /v1/sandboxes/&lt;id&gt;/preview-token?port=&lt;port&gt;</code> or open it from the dashboard.</p></div>`
+
 // authorizePreview is the single preview gate: public sandboxes pass, private
 // ones need ?token= (then persisted as a cookie so sub-resources load) or the
 // cookie. Writes the 403 page and returns false when refused.
@@ -188,7 +197,11 @@ func (s *Server) authorizePreview(w http.ResponseWriter, r *http.Request, id str
 	setPreviewGuards(w.Header(), s.previewGuardDomain(r))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)
-	_, _ = w.Write([]byte(previewPrivatePage)) //nolint:errcheck // best-effort: status/headers already committed
+	page := previewPrivatePage
+	if rt.IsPlatformPort(port) {
+		page = previewPlatformPortPage
+	}
+	_, _ = w.Write([]byte(page)) //nolint:errcheck // best-effort: status/headers already committed
 	return false
 }
 

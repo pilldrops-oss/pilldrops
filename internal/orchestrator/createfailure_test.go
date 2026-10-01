@@ -253,3 +253,25 @@ func TestBusyNodeCreateGoesElsewhere(t *testing.T) {
 		t.Errorf("placed on %v, want node-ok", n)
 	}
 }
+
+func TestPublicDesktopCreateWarnsTheLinkStaysGated(t *testing.T) {
+	s, _ := createFailureFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"sb-d"}`))
+	})
+	cases := map[string]bool{
+		`{"template":"desktop","public":true}`:                         true,
+		`{"template":"base","port":7681,"public":true}`:                true,
+		`{"template":"base","port":3000,"public":true}`:                false,
+		`{"template":"desktop","start":"python app.py","public":true}`: false,
+	}
+	for body, wantWarning := range cases {
+		w := doCreate(t, s, body)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("%s: status %d %q", body, w.Code, w.Body.String())
+		}
+		if got := strings.Contains(w.Body.String(), `"warning"`); got != wantWarning {
+			t.Errorf("%s: warning present = %v, want %v (body %s)", body, got, wantWarning, w.Body.String())
+		}
+	}
+}
