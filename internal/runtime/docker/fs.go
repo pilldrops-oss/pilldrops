@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os/exec"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -280,9 +281,10 @@ func (d *dockerFS) Stat(ctx context.Context, p string) (rt.FileInfo, error) {
 // fsFail is a failed helper's error. Only a failure inside the container
 // is the caller's path problem, tagged with the sentinel its stderr names so
 // the API answers 404/409/403/400. A failure to run the helper at all (the
-// engine or CLI unreachable, docker.sock refused, docker exec's own 125-127)
-// is the node's: left untagged, it reaches the caller as a 503, never as a
-// 403 for a "permission denied" that was the node's and not theirs.
+// engine or CLI unreachable, docker.sock refused, docker exec's own 125) is
+// the node's, and a helper the image does not have (126/127) is the image's:
+// both are left untagged and reach the caller as a 503, never as a 403 for a
+// "permission denied" that was not about their path.
 func fsFail(what string, err error, code int, stderr string) error {
 	se := strings.TrimSpace(stderr)
 	var exitErr *exec.ExitError
@@ -292,8 +294,10 @@ func fsFail(what string, err error, code int, stderr string) error {
 	switch {
 	case err != nil:
 		return fmt.Errorf("%s: node could not run the file operation: %w %s", what, err, se)
-	case (code >= 125 && code <= 127) || dockerCLIFault(se):
+	case code == 125 || dockerCLIFault(se):
 		return fmt.Errorf("%s: node could not run the file operation: %s", what, se)
+	case code == 126 || code == 127:
+		return fmt.Errorf("%s: the sandbox image lacks %s: %s", what, missingTool(se), se)
 	}
 	if kind := rt.FSKind(se); kind != nil {
 		return fmt.Errorf("%w: %s: %s", kind, what, se)
@@ -322,6 +326,20 @@ func dockerCLIFault(stderr string) bool {
 		}
 	}
 	return false
+}
+
+// missingToolRe finds the binary an exec could not start, in runc's
+// `exec: "stat": executable file not found` and sh's `sh: 1: stat: not found`.
+var missingToolRe = regexp.MustCompile(`exec: "([^"]+)"|([^\s:]+): (?:not found|command not found|Permission denied)\s*$`)
+
+func missingTool(stderr string) string {
+	if m := missingToolRe.FindStringSubmatch(stderr); m != nil {
+		if m[1] != "" {
+			return m[1]
+		}
+		return m[2]
+	}
+	return "a tool this file operation needs"
 }
 
 var _ rt.FileSystem = (*dockerFS)(nil)

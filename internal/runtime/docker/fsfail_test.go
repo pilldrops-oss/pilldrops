@@ -3,6 +3,7 @@ package docker
 import (
 	"errors"
 	"io/fs"
+	"strings"
 	"testing"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
@@ -40,6 +41,29 @@ func TestFSFailReadsATenantPathNamedLikeTheSocketAsTheirs(t *testing.T) {
 	} {
 		if err := fsFail("op", nil, 1, se); !errors.Is(err, fs.ErrPermission) {
 			t.Errorf("%q = %v, want fs.ErrPermission", se, err)
+		}
+	}
+}
+
+// An image without the helper is not the node failing; it says what is missing.
+// Still untagged, so still a 503: the caller's path is not at fault either.
+func TestFSFailNamesTheToolTheImageLacks(t *testing.T) {
+	for se, tool := range map[string]string{
+		`OCI runtime exec failed: exec failed: unable to start container process: exec: "stat": executable file not found in $PATH: unknown`: "stat",
+		"sh: 1: find: not found": "find",
+		"":                       "a tool this file operation needs",
+	} {
+		err := fsFail("stat x", nil, 127, se)
+		if !strings.Contains(err.Error(), "the sandbox image lacks "+tool) {
+			t.Errorf("%q: %v, want it to say the image lacks %s", se, err, tool)
+		}
+		if strings.Contains(err.Error(), "node could not") {
+			t.Errorf("%q: %v blames the node for the image", se, err)
+		}
+		for _, kind := range []error{fs.ErrPermission, fs.ErrExist, fs.ErrInvalid, rt.ErrPathNotFound} {
+			if errors.Is(err, kind) {
+				t.Errorf("%q: tagged %v, which would not be a 503", se, kind)
+			}
 		}
 	}
 }
