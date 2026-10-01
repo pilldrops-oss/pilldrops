@@ -3,6 +3,8 @@ package nodeboot
 import (
 	"net"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -82,7 +84,7 @@ func TestBothRuntimesBlockSandboxToHost(t *testing.T) {
 				t.Fatalf("read %s: %v", tc.path, err)
 			}
 			src := string(body)
-			if !strings.Contains(src, "iptables -I INPUT") {
+			if !regexp.MustCompile(`(iptables -I|top) INPUT`).MatchString(src) {
 				t.Errorf("%s installs no INPUT rule: a sandbox can open connections to "+
 					"services the node binds on 0.0.0.0. DOCKER-USER/FORWARD rules do not "+
 					"cover container-to-host traffic.", tc.path)
@@ -93,5 +95,50 @@ func TestBothRuntimesBlockSandboxToHost(t *testing.T) {
 					"replies to connections the NODE opened would be dropped, breaking the preview proxy", tc.path)
 			}
 		})
+	}
+}
+
+// A partial earlier run (the reply-ACCEPT kept, the DROP lost) must not end
+// with the DROP inserted above the ACCEPT, where it eats every reply.
+func TestSetupDockerEgressRestoresTheInputOrder(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("as root the script would persist the stub's rules over this host's /etc/iptables")
+	}
+	bin, fix := t.TempDir(), t.TempDir()
+	stubs := map[string]string{
+		// Stateful: each chain is a file of rule specs, top first.
+		"iptables": `#!/bin/bash
+op=$1; f="$FIXDIR/$2"; shift 2; rule="$*"
+case $op in
+  -N) [ -f "$f" ] && exit 1; : >"$f" ;;
+  -I) touch "$f"; { echo "$rule"; cat "$f"; } >"$f.new"; mv "$f.new" "$f" ;;
+  -C) grep -qxF -- "$rule" "$f" 2>/dev/null ;;
+  -D) grep -qxF -- "$rule" "$f" 2>/dev/null || exit 1
+      awk -v r="$rule" '!d && $0 == r { d = 1; next } { print }' "$f" >"$f.new"; mv "$f.new" "$f" ;;
+esac
+`,
+		"docker":    "#!/bin/sh\necho 172.18.0.0/16\n",
+		"ip6tables": "#!/bin/sh\nexit 1\n",
+	}
+	for name, body := range stubs {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	accept := "-s 172.18.0.0/16 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+	drop := "-s 172.18.0.0/16 -j DROP"
+	if err := os.WriteFile(filepath.Join(fix, "INPUT"), []byte(accept+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", "../../scripts/setup-docker-egress.sh")
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FIXDIR="+fix)
+	// Persisting to /etc/iptables needs root and comes after the rules, so its failure is not this test's.
+	out, _ := cmd.CombinedOutput()
+	b, err := os.ReadFile(filepath.Join(fix, "INPUT"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(b), accept+"\n"+drop+"\n"; got != want {
+		t.Fatalf("INPUT after a re-run:\n%s\nwant:\n%s\nscript output:\n%s", got, want, out)
 	}
 }

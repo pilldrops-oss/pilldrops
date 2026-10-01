@@ -79,8 +79,11 @@ case "$mode" in
     [ -z "$du_accept_at" ] || [ "$du_at" -lt "$du_accept_at" ] \
       || fail "the FORWARD -j DOCKER-USER jump is BELOW an ACCEPT (line $du_at vs $du_accept_at) — container egress can bypass every DOCKER-USER DROP"
     du="$(iptables -S DOCKER-USER)"
-    # The sandboxd-net subnet is allocated by dockerd and differs per host.
-    sb_re='-s 172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+/[0-9]+'
+    # The sandboxd-net subnet is allocated by dockerd from its address pools,
+    # which an operator may move to 10/8 or 192.168/16, so it is read, not guessed.
+    sb_net=$(docker network inspect sandboxd-net -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null) || sb_net=""
+    [ -n "$sb_net" ] || fail "cannot read the sandboxd-net subnet from docker — the network is missing or docker is down (run setup-docker-egress.sh)"
+    sb_re="-s ${sb_net//./\\.}"
     # The DNS/HTTP/HTTPS allowlist setup-host.sh gives Firecracker VMs. Without
     # its closing DROP a sandbox reaches every port on every public address,
     # the control plane on a peer host included.

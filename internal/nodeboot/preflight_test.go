@@ -210,6 +210,11 @@ func fakeIptables(t *testing.T, chains map[string]string) (binDir, fixDir string
 	if err := os.WriteFile(filepath.Join(binDir, "iptables"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// docker network inspect answers the sandboxd-net fixture, absent when the network is.
+	docker := "#!/bin/sh\ncat \"$FIXDIR/sandboxd-net\" 2>/dev/null\n"
+	if err := os.WriteFile(filepath.Join(binDir, "docker"), []byte(docker), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	return binDir, fixDir
 }
 
@@ -267,7 +272,8 @@ const healthyDockerUser = `-N DOCKER-USER
 `
 
 func healthyChains() map[string]string {
-	return map[string]string{"FORWARD": healthyForward, "INPUT": healthyInput, "DOCKER-USER": healthyDockerUser}
+	return map[string]string{"FORWARD": healthyForward, "INPUT": healthyInput, "DOCKER-USER": healthyDockerUser,
+		"sandboxd-net": "172.18.0.0/16"}
 }
 
 // Each broken chain must go red; the healthy cases must not, or enforce takes working nodes out.
@@ -291,6 +297,24 @@ func TestVerifyEgressScriptMutations(t *testing.T) {
 	}{
 		{name: "healthy firecracker", mutate: func(map[string]string) {}, mode: "--firecracker"},
 		{name: "healthy docker", mutate: func(map[string]string) {}, mode: "--docker"},
+		{
+			// dockerd allocates from its address pools, which an operator may
+			// move out of 172.16/12; a guessed range then read as rules missing.
+			name: "healthy docker on a 10.200/16 sandboxd-net",
+			mutate: func(c map[string]string) {
+				for _, chain := range []string{"INPUT", "DOCKER-USER"} {
+					c[chain] = strings.ReplaceAll(c[chain], "172.18.0.0/16", "10.200.0.0/16")
+				}
+				c["sandboxd-net"] = "10.200.0.0/16"
+			},
+			mode: "--docker",
+		},
+		{
+			name:     "sandboxd-net missing",
+			mutate:   func(c map[string]string) { delete(c, "sandboxd-net") },
+			mode:     "--docker",
+			wantFail: true, wantMsg: "cannot read the sandboxd-net subnet",
+		},
 		{
 			name:     "10/8 DROP present but below the allowlist ACCEPT",
 			mutate:   func(c map[string]string) { c["FORWARD"] = belowAllowlist },

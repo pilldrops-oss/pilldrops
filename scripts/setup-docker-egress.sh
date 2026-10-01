@@ -21,28 +21,29 @@ SB_NET="$(docker network inspect sandboxd-net -f '{{range .IPAM.Config}}{{.Subne
 
 # Delete then insert, so a re-run restores the order below rather than
 # stacking new rules above old ones. -I prepends: the last call ends on top.
-top() {
-  while iptables -D DOCKER-USER "$@" 2>/dev/null; do :; done
-  iptables -I DOCKER-USER "$@"
+top() { # top CHAIN RULE...
+  local chain=$1; shift
+  while iptables -D "$chain" "$@" 2>/dev/null; do :; done
+  iptables -I "$chain" "$@"
 }
 
 # The allowlist setup-host.sh gives Firecracker VMs: DNS, HTTP, HTTPS. Without
 # it a sandbox reached the orchestrator, Postgres and MinIO on peer hosts
 # through this node's address, which their firewalls trust. RETURN, not
 # ACCEPT, so docker's own chains still see the packet.
-top -s "$SB_NET" -j DROP
-top -s "$SB_NET" -p tcp --dport 443 -j RETURN
-top -s "$SB_NET" -p tcp --dport 80 -j RETURN
-top -s "$SB_NET" -p tcp --dport 53 -j RETURN
-top -s "$SB_NET" -p udp --dport 53 -j RETURN
+top DOCKER-USER -s "$SB_NET" -j DROP
+top DOCKER-USER -s "$SB_NET" -p tcp --dport 443 -j RETURN
+top DOCKER-USER -s "$SB_NET" -p tcp --dport 80 -j RETURN
+top DOCKER-USER -s "$SB_NET" -p tcp --dport 53 -j RETURN
+top DOCKER-USER -s "$SB_NET" -p udp --dport 53 -j RETURN
 # Destination DROPs above the allowlist, which is destination-blind.
-top -d 100.64.0.0/10 -j DROP                 # CGNAT
-top -s "$SB_NET" -d 192.168.0.0/16 -j DROP   # RFC1918; scoped so other docker networks here keep working
-top -d 172.16.0.0/12 -j DROP                 # RFC1918 (covers docker0 172.17/16)
-top -d 172.17.0.1/32 -j DROP                 # docker gateway -> host (explicit)
-top -d 10.0.0.0/8 -j DROP                    # RFC1918
-top -d 169.254.0.0/16 -j DROP                # metadata (all providers) + link-local
-top -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+top DOCKER-USER -d 100.64.0.0/10 -j DROP                 # CGNAT
+top DOCKER-USER -s "$SB_NET" -d 192.168.0.0/16 -j DROP   # RFC1918; scoped so other docker networks here keep working
+top DOCKER-USER -d 172.16.0.0/12 -j DROP                 # RFC1918 (covers docker0 172.17/16)
+top DOCKER-USER -d 172.17.0.1/32 -j DROP                 # docker gateway -> host (explicit)
+top DOCKER-USER -d 10.0.0.0/8 -j DROP                    # RFC1918
+top DOCKER-USER -d 169.254.0.0/16 -j DROP                # metadata (all providers) + link-local
+top DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
 # IPv6 backstop. The runtime disables IPv6 in new containers, but containers
 # adopted across an upgrade still have a link-local stack that bypasses every
@@ -61,13 +62,12 @@ echo "Docker egress rules applied: metadata/RFC1918/CGNAT/gateway DROP and the D
 
 # Sandbox -> node. A packet to the host's own addresses traverses INPUT, never
 # DOCKER-USER, so the DROPs above do not cover it and the node API binds
-# 0.0.0.0. -I inserts at the top: DROP first, then the ESTABLISHED,RELATED
-# ACCEPT so it lands above. Without it replies to node-opened connections
-# (preview proxy) are dropped.
-iptables -C INPUT -s "$SB_NET" -j DROP 2>/dev/null || \
-iptables -I INPUT -s "$SB_NET" -j DROP
-iptables -C INPUT -s "$SB_NET" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
-iptables -I INPUT -s "$SB_NET" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+# 0.0.0.0. DROP first, then the ESTABLISHED,RELATED ACCEPT so it lands above;
+# delete-then-insert like DOCKER-USER, so a partial earlier run cannot leave the
+# DROP above it. Without it replies to node-opened connections (preview proxy)
+# are dropped.
+top INPUT -s "$SB_NET" -j DROP
+top INPUT -s "$SB_NET" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 echo "Sandbox->host INPUT DROP applied for $SB_NET (replies to node-initiated connections still allowed)."
 
 # sandbox-egress-restore.service restores these files before sandboxd starts.
