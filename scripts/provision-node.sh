@@ -249,8 +249,16 @@ install -D -m 0755 bin/pilldrops-linux /opt/pilldrops/bin/pilldrops-linux
 
 # No `|| true` anywhere here: sandboxd.service Requires= the restore unit, and
 # a node whose restore unit is missing must fail to start, not start open.
-log "Installing the systemd units from packaging/"
-install -m 0644 packaging/sandboxd.service packaging/sandbox-egress-restore.service /etc/systemd/system/
+# Installed only when absent: a re-run must not overwrite a unit the operator
+# edited. Override settings with a drop-in (systemctl edit sandboxd) instead.
+for u in sandboxd.service sandbox-egress-restore.service; do
+  if [ -e "/etc/systemd/system/$u" ]; then
+    log "$u already installed; left as is (override with: systemctl edit $u)"
+  else
+    log "Installing $u from packaging/"
+    install -m 0644 "packaging/$u" "/etc/systemd/system/$u"
+  fi
+done
 systemctl daemon-reload
 systemctl enable sandbox-egress-restore.service sandboxd.service
 for u in sandbox-egress-restore.service sandboxd.service; do

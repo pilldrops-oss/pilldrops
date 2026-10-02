@@ -363,7 +363,11 @@ comma-separated, default `base`; set but empty builds none), `envd` and the
 guest CLI in `/opt/pilldrops/bin` (the Docker runtime bind-mounts both into
 every sandbox; without them a docker sandbox has no exec API or terminal), and
 the `sandboxd` and `sandbox-egress-restore` units from `packaging/`, enabled
-but not started. Go is there on purpose:
+but not started. A re-run leaves an installed unit alone, so set the node's
+environment and other overrides in a drop-in (`systemctl edit sandboxd`
+writes `/etc/systemd/system/sandboxd.service.d/override.conf`) rather than by
+editing the unit; to pick up a newer packaged unit, delete the installed one
+and re-run. Go is there on purpose:
 `internal/vm` is `//go:build linux` and runs zero tests on macOS, so live work
 means `go build` / `go test -c` **on the node** rather than cross-compiling and
 copying binaries across.
