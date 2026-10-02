@@ -56,7 +56,7 @@ func (d *Daemon) scanOOMKills(ctx context.Context) {
 		count, err := r.OOMKillCount(cctx)
 		cancel()
 		if ctx.Err() == nil {
-			d.noteReach(ctx, t.id, t.org, t.tmpl, err == nil)
+			d.noteReach(ctx, t.id, t.org, t.tmpl, t.inst, err == nil)
 		}
 		if err != nil || count <= t.seen {
 			return
@@ -78,14 +78,19 @@ func (d *Daemon) scanOOMKills(ctx context.Context) {
 // the sandbox stayed "running" while every exec answered 503.
 const unreachableAfter = 3
 
-// noteReach counts the OOM probe's failed execs and records an "unreachable"
-// event once, on the scan that reaches unreachableAfter.
-func (d *Daemon) noteReach(ctx context.Context, id, org, tmpl string, ok bool) {
+// noteReach counts the OOM probe's failed execs into inst and records an
+// "unreachable" event once, on the scan that reaches unreachableAfter. The count
+// is per instance: a pause, resume or revive starts it again, and a probe of an
+// instance the sandbox no longer runs on counts for nothing.
+func (d *Daemon) noteReach(ctx context.Context, id, org, tmpl string, inst rt.Instance, ok bool) {
 	d.mu.Lock()
 	sb := d.boxes[id]
-	if sb == nil {
+	if sb == nil || sb.inst != inst || sb.State != StateRunning {
 		d.mu.Unlock()
 		return
+	}
+	if sb.probeInst != inst {
+		sb.probeInst, sb.probeFails = inst, 0
 	}
 	if ok {
 		sb.probeFails = 0

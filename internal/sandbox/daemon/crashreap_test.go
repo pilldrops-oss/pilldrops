@@ -251,6 +251,10 @@ type envdDownVMM struct {
 	down bool
 }
 
+// Freeze and Thaw make it a standby-capable instance, as both real runtimes are.
+func (*envdDownVMM) Freeze(context.Context) error { return nil }
+func (*envdDownVMM) Thaw(context.Context) error   { return nil }
+
 func (e *envdDownVMM) OOMKillCount(context.Context) (int, error) {
 	if e.down {
 		return 0, errors.New("envd: connection refused")
@@ -292,5 +296,57 @@ func TestScanReportsASandboxItCannotExecIntoOnce(t *testing.T) {
 	}
 	if n := fp.countEvents("unreachable"); n != 2 {
 		t.Errorf("unreachable events = %d, want a second one after envd answered and went down again", n)
+	}
+}
+
+// A failed probe from before a pause, resume or freeze is not a failure of the
+// sandbox that comes back: the count starts again with the state.
+func TestUnreachableCountStartsAgainAcrossATransition(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name       string
+		transition func(d *Daemon, id string) error
+	}{
+		{"pause and resume", func(d *Daemon, id string) error {
+			if err := d.Pause(ctx, id); err != nil {
+				return err
+			}
+			return d.Resume(ctx, id)
+		}},
+		{"standby and wake", func(d *Daemon, id string) error {
+			if _, err := d.Standby(ctx, id); err != nil {
+				return err
+			}
+			return d.Resume(ctx, id)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fp := newFakePersister(nil)
+			d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
+			sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			// Wraps the current instance unless a transition kept the wrapped one.
+			envdDown := func() {
+				d.mu.Lock()
+				defer d.mu.Unlock()
+				if _, ok := d.boxes[sb.ID].inst.(*envdDownVMM); !ok {
+					d.boxes[sb.ID].inst = &envdDownVMM{Instance: d.boxes[sb.ID].inst, down: true}
+				}
+			}
+			envdDown()
+			for range unreachableAfter - 1 {
+				d.scanOOMKills(ctx)
+			}
+			if err := tc.transition(d, sb.ID); err != nil {
+				t.Fatal(err)
+			}
+			envdDown()
+			d.scanOOMKills(ctx)
+			if fp.countEvents("unreachable") != 0 {
+				t.Errorf("reported after one failed probe since the %s; failures from before it carried over", tc.name)
+			}
+		})
 	}
 }

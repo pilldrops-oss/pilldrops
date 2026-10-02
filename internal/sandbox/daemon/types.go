@@ -173,8 +173,9 @@ type Sandbox struct {
 	oomSeen int
 	// serverUp is the last observed liveness of the registered start server.
 	serverUp bool
-	// probeFails counts the scans in a row whose exec into the sandbox failed.
+	// probeFails counts the scans in a row whose exec into probeInst failed.
 	probeFails int
+	probeInst  rt.Instance
 }
 
 // SandboxInfo is an immutable snapshot of a sandbox's public state. The HTTP
