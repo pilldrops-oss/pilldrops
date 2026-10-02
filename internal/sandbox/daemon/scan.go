@@ -55,6 +55,9 @@ func (d *Daemon) scanOOMKills(ctx context.Context) {
 		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		count, err := r.OOMKillCount(cctx)
 		cancel()
+		if ctx.Err() == nil {
+			d.noteReach(ctx, t.id, t.org, t.tmpl, err == nil)
+		}
 		if err != nil || count <= t.seen {
 			return
 		}
@@ -67,6 +70,34 @@ func (d *Daemon) scanOOMKills(ctx context.Context) {
 		}
 		d.mu.Unlock()
 	})
+}
+
+// unreachableAfter is how many scans in a row must fail to exec into a running
+// sandbox before it is reported. Under firecracker every exec rides envd, and
+// the guest's reaper stops restarting envd after ten quick exits: without this
+// the sandbox stayed "running" while every exec answered 503.
+const unreachableAfter = 3
+
+// noteReach counts the OOM probe's failed execs and records an "unreachable"
+// event once, on the scan that reaches unreachableAfter.
+func (d *Daemon) noteReach(ctx context.Context, id, org, tmpl string, ok bool) {
+	d.mu.Lock()
+	sb := d.boxes[id]
+	if sb == nil {
+		d.mu.Unlock()
+		return
+	}
+	if ok {
+		sb.probeFails = 0
+	} else {
+		sb.probeFails++
+	}
+	report := sb.probeFails == unreachableAfter
+	d.mu.Unlock()
+	if report {
+		d.recordEvent(ctx, org, id, "unreachable", tmpl)
+		d.log().Error("cannot exec into a running sandbox; its envd is down", "sandbox_id", id, "org_id", org)
+	}
 }
 
 // scanExits reaps a running sandbox whose VMM or container died underneath it,

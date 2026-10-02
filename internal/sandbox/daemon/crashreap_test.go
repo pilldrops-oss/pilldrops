@@ -244,3 +244,53 @@ func TestScanRevivesARestartCasualtyAndKeepsOneThatWillNotStart(t *testing.T) {
 		})
 	}
 }
+
+// envdDownVMM is a running instance nothing can exec into: its envd is down.
+type envdDownVMM struct {
+	rt.Instance
+	down bool
+}
+
+func (e *envdDownVMM) OOMKillCount(context.Context) (int, error) {
+	if e.down {
+		return 0, errors.New("envd: connection refused")
+	}
+	return 0, nil
+}
+
+func TestScanReportsASandboxItCannotExecIntoOnce(t *testing.T) {
+	fp := newFakePersister(nil)
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, IdleTimeout: time.Hour, HardTTL: time.Hour})
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	d.mu.Lock()
+	e := &envdDownVMM{Instance: d.boxes[sb.ID].inst, down: true}
+	d.boxes[sb.ID].inst = e
+	d.mu.Unlock()
+
+	for range unreachableAfter - 1 {
+		d.scanOOMKills(ctx)
+	}
+	if n := fp.countEvents("unreachable"); n != 0 {
+		t.Fatalf("reported after %d failed probes; a busy guest can miss one", unreachableAfter-1)
+	}
+	for range 3 {
+		d.scanOOMKills(ctx)
+	}
+	if n := fp.countEvents("unreachable"); n != 1 {
+		t.Fatalf("unreachable events = %d, want exactly 1 while envd stays down", n)
+	}
+
+	e.down = false
+	d.scanOOMKills(ctx)
+	e.down = true
+	for range unreachableAfter {
+		d.scanOOMKills(ctx)
+	}
+	if n := fp.countEvents("unreachable"); n != 2 {
+		t.Errorf("unreachable events = %d, want a second one after envd answered and went down again", n)
+	}
+}
