@@ -181,6 +181,9 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// Carry a tri-state through the heartbeat if that case starts mattering.
 	place := cluster.Request{VCPU: req.VCPU, MemMB: memMB, Zone: req.Zone, Runtime: runtime, Template: canonTemplate,
 		Avoid: []string{move.from}}
+	if fromSnapshot == nil {
+		place.NoBuild = s.noReadyBuild(r.Context(), canonTemplate)
+	}
 	if fromSnapshot != nil && s.reg.AnyWithCapability(cluster.CapNamedSnapshot, s.now(), cluster.NodeTTL) {
 		place.NamedSnapshot = true
 	}
@@ -211,18 +214,6 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		node = next
 		if node == nil {
-			// "Nothing can boot this template" is a 400; "capacity is tight" is a retryable 503.
-			if canonTemplate != "" {
-				if supported, bootable := s.reg.TemplateSupport(canonTemplate, s.now(), cluster.NodeTTL); !supported {
-					msg := "template " + req.Template + " is not available on any online node"
-					if len(bootable) > 0 {
-						msg += " — bootable now: " + strings.Join(bootable, ", ")
-					}
-					s.metrics.recordSchedule(schedNoTemplate)
-					writeErr(w, 400, msg)
-					return
-				}
-			}
 			if req.Image != "" && !s.reg.AnyByRuntime("docker", s.now(), cluster.NodeTTL) {
 				// On an fc-only fleet the docker pin makes this a capability miss, not capacity.
 				s.metrics.recordSchedule(schedNoRuntime)
@@ -237,6 +228,18 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, 400, "template "+req.Template+" requires the "+runtime+
 					" runtime — no "+runtime+" node is online")
 				return
+			}
+			// "Nothing can boot this template" is a 400; "capacity is tight" is a retryable 503.
+			if canonTemplate != "" {
+				if supported, bootable := s.reg.TemplateSupport(place, s.now(), cluster.NodeTTL); !supported {
+					msg := "template " + req.Template + " is not available on any online node"
+					if len(bootable) > 0 {
+						msg += " — bootable now: " + strings.Join(bootable, ", ")
+					}
+					s.metrics.recordSchedule(schedNoTemplate)
+					writeErr(w, 400, msg)
+					return
+				}
 			}
 			// A snapshot no online CPU can run is a capability miss, not capacity:
 			// retrying never helps and "no node has capacity" would send an operator

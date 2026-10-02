@@ -202,7 +202,7 @@ func TestNilAndEmptyTemplateListsAreDifferentAnswers(t *testing.T) {
 		t.Error("a node that enumerates and holds nothing was treated as unrestricted — it wins " +
 			"on fit in the preferred tier and then pays the fetch that preference exists to avoid")
 	}
-	if !cold.hostsTemplate("base") {
+	if !cold.canBoot(Request{Template: "base"}) {
 		t.Error("a cold node with a shared store is not eligible at all — it can fetch")
 	}
 }

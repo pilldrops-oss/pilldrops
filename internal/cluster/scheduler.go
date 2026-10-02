@@ -87,6 +87,9 @@ type Request struct {
 	// Template is the canonical id (aliases resolved by the caller); nodes
 	// advertising a template list must include it.
 	Template string
+	// NoBuild reports that the artifact store has no ready build of Template,
+	// so a node that would have to fetch it cannot boot it.
+	NoBuild bool
 	// TagNetworks restricts placement to nodes that can partition network tags.
 	// Set it only when the create names tags: a node without the capability
 	// would accept the sandbox and refuse the tags with a 501.
@@ -160,9 +163,13 @@ func (n *Node) holdsTemplate(tmpl string) bool {
 	return false
 }
 
-// hostsTemplate reports whether the node can boot tmpl at all, by holding or fetching it.
-func (n *Node) hostsTemplate(tmpl string) bool {
-	return n.holdsTemplate(tmpl) || n.CanFetchTemplates
+// canBoot reports whether the node can boot req's template under req's runtime
+// pin at all, by holding it or by fetching a build the store has.
+func (n *Node) canBoot(req Request) bool {
+	if req.Runtime != "" && n.Runtime != req.Runtime {
+		return false
+	}
+	return n.holdsTemplate(req.Template) || n.CanFetchTemplates && !req.NoBuild
 }
 
 // standardRequest is the reference footprint for status and headroom math.
@@ -227,10 +234,7 @@ func Pick(nodes []*Node, req Request, now time.Time, ttl time.Duration) *Node {
 		if !n.Schedulable(now, ttl) || !n.fits(req) || slices.Contains(req.Avoid, n.ID) {
 			continue
 		}
-		if req.Runtime != "" && n.Runtime != req.Runtime {
-			continue
-		}
-		if !n.hostsTemplate(req.Template) {
+		if !n.canBoot(req) {
 			continue
 		}
 		// A node without the capability would take the sandbox and then refuse

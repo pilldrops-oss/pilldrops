@@ -1,12 +1,15 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
+	"github.com/pilldrops-oss/pilldrops/internal/store"
 	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
 
@@ -35,9 +38,23 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 	now := s.now()
 	for _, t := range cat {
 		id, _ := t["id"].(string)
-		t["available"], _ = s.reg.TemplateSupport(id, now, cluster.NodeTTL)
+		// The same Request a create of this template places with.
+		place := cluster.Request{Template: id, Runtime: templateRuntime(id), NoBuild: s.noReadyBuild(r.Context(), id)}
+		t["available"], _ = s.reg.TemplateSupport(place, now, cluster.NodeTTL)
 	}
 	writeJSON(w, http.StatusOK, cat)
+}
+
+// noReadyBuild reports that the store knows tmpl has no ready build, so a node
+// that would have to fetch it cannot boot it. Without a store, or on a read
+// error, it says false and leaves the answer to the node.
+func (s *Server) noReadyBuild(ctx context.Context, tmpl string) bool {
+	st := s.st.Load()
+	if st == nil || tmpl == "" {
+		return false
+	}
+	_, err := st.ReadyBuildForTemplate(ctx, tmpl)
+	return errors.Is(err, store.ErrNoReadyBuild)
 }
 
 func (s *Server) handlePublicTemplates(w http.ResponseWriter, r *http.Request) {
