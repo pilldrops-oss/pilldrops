@@ -445,10 +445,15 @@ func (i *dockerInstance) confirmDead(now time.Time) bool {
 }
 
 // restartCasualty reports whether a stop at finishedAt was the doing of the
-// dockerd that started at dockerdStart. An unknown start or stop time is never
-// a casualty: the container is then judged by confirmDead like any exit.
+// dockerd that started at dockerdStart. With dockerd's start unknown every stop
+// is one: a restart must never destroy a healthy sandbox, and a crash is still
+// destroyed when its revive will not stay up. A known start with an unknown
+// stop is judged by confirmDead like any exit.
 func restartCasualty(finishedAt, dockerdStart time.Time) bool {
-	if finishedAt.IsZero() || dockerdStart.IsZero() {
+	if dockerdStart.IsZero() {
+		return true
+	}
+	if finishedAt.IsZero() {
 		return false
 	}
 	return finishedAt.Before(dockerdStart.Add(restartGrace))

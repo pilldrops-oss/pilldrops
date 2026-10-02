@@ -179,8 +179,10 @@ type Sandbox struct {
 	// revives counts casualty revives under the engine that started at
 	// reviveEngine: a container that dies again under the same engine is
 	// bounded to maxRevives; a new engine start was the engine's doing.
+	// revivedAt is the last one, which an unknown engine start counts from.
 	revives      int
 	reviveEngine time.Time
+	revivedAt    time.Time
 	// reviveFails counts revives in a row whose start failed without a
 	// confirmed stop; reviveRetryAt is when the next one may run.
 	reviveFails   int

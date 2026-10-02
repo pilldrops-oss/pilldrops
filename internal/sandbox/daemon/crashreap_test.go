@@ -521,3 +521,35 @@ func TestReviveBackoffCapsAndNeverOverflows(t *testing.T) {
 		}
 	}
 }
+
+// With dockerd's start unknown (rootless, snap, a remote DOCKER_HOST) every
+// stop reads as a restart's: restarts minutes apart over a sandbox's life must
+// never use up its revives, while a container dying right after each revive
+// still does (TestScanDestroysACasualtyThatWillNotStayUp).
+func TestScanRevivesUnderAnUnknownEngineStartForEveryRestart(t *testing.T) {
+	clk := &manualClock{t: time.Unix(1_000_000, 0)}
+	fp := newFakePersister(nil)
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, Clock: clk, IdleTimeout: 24 * time.Hour, HardTTL: 24 * time.Hour})
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	d.mu.Lock()
+	c := &casualtyVMM{deadVMM: deadVMM{d.boxes[sb.ID].inst}}
+	c.revived = c
+	d.boxes[sb.ID].inst = c
+	d.mu.Unlock()
+
+	const restarts = 2*maxRevives + 1
+	for range restarts {
+		d.scanExits(ctx)
+		clk.Advance(10 * time.Minute)
+	}
+	if info, ok := d.Get(sb.ID); !ok || info.State != StateRunning {
+		t.Fatalf("present %v, state %q: dockerd restarts destroyed a healthy sandbox", ok, info.State)
+	}
+	if n := fp.countEvents("restarted"); n != restarts {
+		t.Errorf("restarted events = %d, want %d", n, restarts)
+	}
+}

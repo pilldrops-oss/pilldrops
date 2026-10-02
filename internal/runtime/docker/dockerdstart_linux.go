@@ -7,17 +7,30 @@ import (
 	"time"
 )
 
-// dockerdPIDFile is dockerd's default --pidfile.
-var dockerdPIDFile = "/var/run/docker.pid"
-
-// dockerdStarted is when the local dockerd started, or zero when unknown (a
-// remote daemon, a non-default pidfile).
+// dockerdStarted is when the local dockerd started, or zero when unknown.
 func dockerdStarted() time.Time {
-	b, err := os.ReadFile(dockerdPIDFile)
-	if err != nil {
-		return time.Time{}
+	t, _ := dockerdStart()
+	return t
+}
+
+// dockerdStart is when the local dockerd started, or zero and why it is not
+// known: a remote daemon has no local pidfile, and a rootless or snap dockerd
+// writes its own (SANDBOXD_DOCKERD_PIDFILE).
+func dockerdStart() (time.Time, string) {
+	if remoteDockerHost() {
+		return time.Time{}, "DOCKER_HOST is a remote daemon, whose pidfile is not on this host"
 	}
-	return procStarted(strings.TrimSpace(string(b)))
+	pidfile := dockerdPIDFile()
+	b, err := os.ReadFile(pidfile)
+	if err != nil {
+		return time.Time{}, "no dockerd pidfile at " + pidfile + " (set SANDBOXD_DOCKERD_PIDFILE)"
+	}
+	pid := strings.TrimSpace(string(b))
+	t := procStarted(pid)
+	if t.IsZero() {
+		return t, "pid " + pid + " in " + pidfile + " is not a running process"
+	}
+	return t, ""
 }
 
 // procStarted reads a process's start time from /proc: its starttime in clock

@@ -242,11 +242,18 @@ func TestLiveAliveSeesAContainerThatDied(t *testing.T) {
 	old := deadConfirmAfter
 	deadConfirmAfter = 0
 	t.Cleanup(func() { deadConfirmAfter = old })
-	if !lv.Alive() {
-		t.Error("one stopped read already reads as dead")
-	}
-	if lv.Alive() {
-		t.Error("a killed container reads as alive on the second read")
+	if dockerdStarted().IsZero() {
+		// With dockerd's start unknown every stop reads as a restart's, to revive.
+		if lv.Alive() || !inst.(rt.Reviver).Casualty() {
+			t.Error("a stopped container under an unknown dockerd start is not a restart casualty")
+		}
+	} else {
+		if !lv.Alive() {
+			t.Error("one stopped read already reads as dead")
+		}
+		if lv.Alive() {
+			t.Error("a killed container reads as alive on the second read")
+		}
 	}
 	if inst.(rt.OOMKilledReporter).OOMKilled() {
 		t.Error("a plain kill reads as an OOM kill")

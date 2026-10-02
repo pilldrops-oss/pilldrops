@@ -38,7 +38,7 @@ func TestRestartCasualty(t *testing.T) {
 		{"just before the restart (graceful)", restarted.Add(-time.Second), restarted, true},
 		{"stopped 30 s after the start (crash)", restarted.Add(30 * time.Second), restarted, true},
 		{"died 5 min into the same dockerd", restarted.Add(5 * time.Minute), restarted, false},
-		{"dockerd's start unknown", restarted.Add(-time.Minute), time.Time{}, false},
+		{"dockerd's start unknown (rootless, snap, remote)", restarted.Add(5 * time.Minute), time.Time{}, true},
 		{"stop time unknown", time.Time{}, restarted, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
