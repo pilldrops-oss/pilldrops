@@ -239,5 +239,6 @@ type usageBatchWriter interface {
 	RecordUsageBatch(ctx context.Context, recs []UsageRecord) error
 }
 
-// restoreBudget bounds reading persisted sandboxes back at boot.
-const restoreBudget = 60 * time.Second
+// restoreBudget bounds reading persisted sandboxes back at boot; a var so
+// tests can shrink it.
+var restoreBudget = 60 * time.Second

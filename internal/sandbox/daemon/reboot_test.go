@@ -113,3 +113,63 @@ func TestRebootKeepsAContainerThatWillNotStartAsFailed(t *testing.T) {
 		t.Errorf("sweep known sets = %v; the failed sandbox must be known, or its container goes", r.swept)
 	}
 }
+
+// slowStartVMM is a stopped container whose start takes a while and gives up
+// when its context ends, as retryStart does.
+type slowStartVMM struct {
+	deadVMM
+	took time.Duration
+}
+
+func (*slowStartVMM) Casualty() bool { return true }
+func (s *slowStartVMM) Revive(ctx context.Context) (rt.Instance, error) {
+	select {
+	case <-time.After(s.took):
+		return s.Instance, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+type slowRebootRT struct {
+	*runtimetest.Fake
+	stopped map[string]*slowStartVMM
+}
+
+func (r *slowRebootRT) Adopt(_ context.Context, id string) (rt.Instance, bool) {
+	c, ok := r.stopped[id]
+	return c, ok
+}
+
+// The revives ran one after another on the restore's own deadline, so on a
+// node with a few dozen sandboxes the later ones failed for want of time and
+// healthy containers were marked failed.
+func TestRebootRevivesEverySandboxWhenTheirStartsOutlastTheRestoreBudget(t *testing.T) {
+	defer func(b time.Duration) { restoreBudget = b }(restoreBudget)
+	restoreBudget = 100 * time.Millisecond
+
+	r := &slowRebootRT{Fake: runtimetest.NewFake(), stopped: map[string]*slowStartVMM{}}
+	var recs []PersistedSandbox
+	for i := range 24 {
+		id := "sb-" + string(rune('a'+i))
+		inst, err := r.Boot(context.Background(), rt.BootSpec{SandboxID: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.stopped[id] = &slowStartVMM{deadVMM: deadVMM{inst}, took: 60 * time.Millisecond}
+		recs = append(recs, runningRec(id, time.Now().Add(time.Hour)))
+	}
+	fp := newFakePersister(recs)
+	d := New(Config{Runtime: r, Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
+	d.Start()
+	defer d.Stop()
+
+	for _, rec := range recs {
+		if info, ok := d.Get(rec.ID); !ok || info.State != StateRunning {
+			t.Errorf("%s: state = %s (present %v), want running", rec.ID, info.State, ok)
+		}
+	}
+	if n := fp.countEvents("exited"); n != 0 {
+		t.Errorf("%d healthy containers were marked failed", n)
+	}
+}

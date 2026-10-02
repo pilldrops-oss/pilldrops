@@ -22,6 +22,12 @@ func (d *Daemon) restoreFromStore(ctx context.Context) {
 	}
 	adopter, _ := d.cfg.Runtime.(rt.Adopter)
 	now := d.clock.Now()
+	type casualty struct {
+		id string
+		lv rt.Liveness
+		rv rt.Reviver
+	}
+	var casualties []casualty
 	for _, r := range recs {
 		// Only delete records this node provably owns: an unowned row on a
 		// shared database is usually another node's live sandbox. An empty
@@ -79,7 +85,7 @@ func (d *Daemon) restoreFromStore(ctx context.Context) {
 				}
 				d.adoptRunning(ctx, r, inst, now)
 				if lv, ok := inst.(rt.Liveness); ok && stopped {
-					d.reviveCasualty(ctx, r.ID, lv, rv)
+					casualties = append(casualties, casualty{r.ID, lv, rv})
 				}
 				continue
 			}
@@ -109,6 +115,13 @@ func (d *Daemon) restoreFromStore(ctx context.Context) {
 		d.persistRec(ctx, rec) // state may have changed from running to paused
 		d.log().Info("sandbox restored as paused", "sandbox_id", r.ID, "previous_state", r.State)
 	}
+
+	// Off the restore budget: after a reboot every container is a casualty, and
+	// one at a time on a shared deadline the later ones failed for want of time.
+	forEachTarget(context.WithoutCancel(ctx), len(casualties), lifecycleConcurrency, func(i int) {
+		c := casualties[i]
+		d.reviveCasualty(ctx, c.id, c.lv, c.rv)
+	})
 
 	// Sweep instances no record claims.
 	if sw, ok := d.cfg.Runtime.(rt.Sweeper); ok {

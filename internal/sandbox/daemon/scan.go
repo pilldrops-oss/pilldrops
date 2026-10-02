@@ -144,6 +144,10 @@ func (d *Daemon) scanExits(ctx context.Context) {
 // than reaping it. One that will not start is marked failed with an "exited"
 // event and kept, data and all: only a destroy removes it.
 func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness, rv rt.Reviver) {
+	// Its own deadline: a docker start with retries plus the app's readiness
+	// wait outlasts the scan and restore budgets its callers run on.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reviveTimeout)
+	defer cancel()
 	sb, release, err := d.acquireOp(id)
 	if err != nil {
 		return
@@ -183,6 +187,9 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 	d.recordEvent(ctx, orgID, id, "restarted", template)
 	d.log().Warn("sandbox stopped by its engine restarting was started again", "sandbox_id", id)
 }
+
+// reviveTimeout bounds one revive, start retries and app restart included.
+const reviveTimeout = 2 * time.Minute
 
 // scanConcurrency bounds how many sandboxes a scanner probes at once.
 const scanConcurrency = 16
