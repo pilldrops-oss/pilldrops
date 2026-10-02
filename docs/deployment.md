@@ -956,7 +956,10 @@ analytics tag into them; both are off unless set.
 `VAULT_SECRET_KEY` is the one at-rest key the control plane keeps to itself, and
 it is deliberately absent from the node join bundle. A clustered control plane
 **refuses to start** without it; unclustered, connecting a provider key is
-**refused** rather than stored unencrypted — which is what used to happen, silently. `ALLOW_PLAINTEXT_VAULT=1` restores the old behaviour
+**refused** rather than stored unencrypted — which is what used to happen, silently.
+**Upgrading:** set it on every orchestrator replica before rolling onto a build
+with this guard, or the upgraded replica will not start (see SECURITY.md,
+*Upgrading an existing fleet*). `ALLOW_PLAINTEXT_VAULT=1` restores the old behaviour
 for local development and should never be set on a shared deployment.
 
 Generate one with `openssl rand -hex 32`.
