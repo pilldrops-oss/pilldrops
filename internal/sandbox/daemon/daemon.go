@@ -86,11 +86,14 @@ func guestEnv(spec CreateSpec, id string) []string {
 
 // Daemon is the lifecycle owner.
 type Daemon struct {
-	cfg      Config
-	clock    Clock
-	mu       sync.RWMutex
-	boxes    map[string]*Sandbox
-	pending  map[string]int // per-org in-flight create reservations
+	cfg     Config
+	clock   Clock
+	mu      sync.RWMutex
+	boxes   map[string]*Sandbox
+	pending map[string]int // per-org in-flight create reservations
+	// rehoming holds one channel per sandbox a rehome is running for, closed
+	// when it ends; guarded by mu.
+	rehoming map[string]chan struct{}
 	stop     chan struct{}
 	stopOnce sync.Once
 	// revives tracks restore's background casualty revives; reviveStop, closed
@@ -171,7 +174,7 @@ func New(cfg Config) *Daemon {
 	_ = os.MkdirAll(cfg.SnapshotDir, 0o755)
 	d := &Daemon{
 		cfg: cfg, clock: cfg.Clock,
-		boxes: make(map[string]*Sandbox), pending: make(map[string]int), stop: make(chan struct{}), reviveStop: make(chan struct{}),
+		boxes: make(map[string]*Sandbox), pending: make(map[string]int), rehoming: make(map[string]chan struct{}), stop: make(chan struct{}), reviveStop: make(chan struct{}),
 		metrics: newDaemonMetrics(),
 	}
 	// Anchor here so the first usage flush lands one full interval in, not on the first tick.

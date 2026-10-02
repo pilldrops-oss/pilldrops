@@ -3,8 +3,10 @@ package daemon
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,5 +50,90 @@ func TestAFailedRehomeLeavesNoTemplate(t *testing.T) {
 	}
 	if ok, err := archive.Get(ctx, id, filepath.Join(t.TempDir(), "again")); !ok || err != nil {
 		t.Fatalf("the archive was lost with the failed rehome: %v, %v", ok, err)
+	}
+}
+
+// gatedBlobs holds the first archive read (the first rehome's) until released,
+// and a read arriving while it is held (a second rehome's) until firstDone.
+type gatedBlobs struct {
+	BlobStore
+	mu                       sync.Mutex
+	reads                    int
+	held                     bool
+	firstHeld, secondArrived chan struct{}
+	release, firstDone       chan struct{}
+}
+
+func (g *gatedBlobs) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	g.mu.Lock()
+	n, held := g.reads, g.held
+	g.reads++
+	if n == 0 {
+		g.held = true
+	}
+	g.mu.Unlock()
+	switch {
+	case n == 0:
+		close(g.firstHeld)
+		<-g.release
+		g.mu.Lock()
+		g.held = false
+		g.mu.Unlock()
+	case held:
+		close(g.secondArrived)
+		<-g.firstDone
+	}
+	return g.BlobStore.Get(ctx, key)
+}
+
+// Two rehomes of one sandbox at once: the second replaced, then on its Create
+// failing with "already runs on this node" removed, the capture the first runs from.
+func TestAConcurrentRehomeLeavesTheLiveSandboxsCapture(t *testing.T) {
+	templates.SetDir(t.TempDir())
+	t.Cleanup(func() { templates.SetDir("") })
+	blobs, err := artifact.Open(artifact.KindFS, artifact.Options{Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	const id = "sb-1790000000000-0123abcd"
+	capture := t.TempDir()
+	// mem.lazy: its memory is served from the archive, so the first rehome
+	// keeps the archive for the second to fetch.
+	for _, name := range []string{"mem.lazy", "state", "rootfs.squashfs"} {
+		if err := os.WriteFile(filepath.Join(capture, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := (&BlobArchive{Store: blobs}).PutPause(ctx, id, capture, "p1"); err != nil {
+		t.Fatal(err)
+	}
+	gate := &gatedBlobs{BlobStore: blobs, firstHeld: make(chan struct{}), secondArrived: make(chan struct{}),
+		release: make(chan struct{}), firstDone: make(chan struct{})}
+	fp := recordFake{newFakePersister(nil)}
+	fp.saved[id] = PersistedSandbox{ID: id, OrgID: "o", Template: "base", State: "paused", PauseArchive: "p1", CreatedAt: 100}
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, SnapshotArchive: &BlobArchive{Store: gate},
+		IdleTimeout: time.Minute, HardTTL: time.Hour})
+
+	first, second := make(chan error, 1), make(chan error, 1)
+	go func() { first <- d.Rehome(ctx, id, "o") }()
+	<-gate.firstHeld
+	go func() { second <- d.Rehome(ctx, id, "o") }()
+	select {
+	case <-gate.secondArrived:
+	case <-time.After(200 * time.Millisecond): // the second waits for the first instead
+	}
+	close(gate.release)
+	if err := <-first; err != nil {
+		t.Fatalf("first rehome: %v", err)
+	}
+	close(gate.firstDone)
+	<-second
+
+	if info, ok := d.Get(id); !ok || info.State != StateRunning {
+		t.Fatalf("present %v, state %q; want the rehomed sandbox running", ok, info.State)
+	}
+	if _, err := os.Stat(filepath.Join(templates.Dir(), "snap-rehome-"+id, "rootfs.squashfs")); err != nil {
+		t.Fatalf("the capture the rehomed sandbox runs from is gone: %v", err)
 	}
 }

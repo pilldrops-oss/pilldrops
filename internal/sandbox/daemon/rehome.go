@@ -29,11 +29,34 @@ func (d *Daemon) Rehome(ctx context.Context, id, org string) error {
 	if !ok {
 		return fmt.Errorf("%w: this node has no shared store to read the record from", ErrNotRehomable)
 	}
-	d.mu.RLock()
-	_, held := d.boxes[id]
-	d.mu.RUnlock()
-	if held {
-		return nil // already here: a retried rehome is a no-op
+	// One rehome of a sandbox at a time: a concurrent one would replace, then
+	// on its Create failing remove, the capture the first one boots from.
+	for {
+		d.mu.Lock()
+		_, held := d.boxes[id]
+		running, busy := d.rehoming[id]
+		if !held && !busy {
+			done := make(chan struct{})
+			d.rehoming[id] = done
+			defer func() {
+				d.mu.Lock()
+				delete(d.rehoming, id)
+				d.mu.Unlock()
+				close(done)
+			}()
+		}
+		d.mu.Unlock()
+		if held {
+			return nil // already here: a retried rehome is a no-op
+		}
+		if !busy {
+			break
+		}
+		select {
+		case <-running:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	r, found, err := g.SandboxRecord(ctx, id)
 	if err != nil {
