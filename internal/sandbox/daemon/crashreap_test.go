@@ -183,10 +183,12 @@ type casualtyVMM struct {
 	revived   rt.Instance
 	reviveErr error
 	stopped   bool
+	revives   int
 }
 
 func (*casualtyVMM) Casualty() bool { return true }
 func (c *casualtyVMM) Revive(context.Context) (rt.Instance, error) {
+	c.revives++
 	return c.revived, c.reviveErr
 }
 func (c *casualtyVMM) Stop(context.Context) error { c.stopped = true; return nil }
@@ -271,10 +273,13 @@ func TestScanDestroysACasualtyThatWillNotStayUp(t *testing.T) {
 }
 
 // A revive that fails for any reason but a confirmed stop is dockerd still
-// settling: destroying on it destroyed healthy sandboxes.
-func TestScanKeepsACasualtyWhoseReviveErrsWithoutAConfirmedStop(t *testing.T) {
+// settling: it never counts and never destroys, is retried with backoff, and
+// the stopped sandbox is not metered as running meanwhile. Counting it
+// destroyed a healthy sandbox after ~40 s of containerd not being ready.
+func TestScanKeepsRetryingACasualtyWhoseStartErrsWithoutAConfirmedStop(t *testing.T) {
+	clk := &manualClock{t: time.Unix(1_000_000, 0)}
 	fp := newFakePersister(nil)
-	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, IdleTimeout: time.Hour, HardTTL: time.Hour})
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, Clock: clk, IdleTimeout: time.Hour, HardTTL: 24 * time.Hour})
 	ctx := context.Background()
 	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
 	if err != nil {
@@ -286,87 +291,43 @@ func TestScanKeepsACasualtyWhoseReviveErrsWithoutAConfirmedStop(t *testing.T) {
 	d.boxes[sb.ID].inst = c
 	d.mu.Unlock()
 
-	d.scanExits(ctx)
-
+	const scans = 60 // eight minutes of scans 8 s apart
+	for range scans {
+		d.scanExits(ctx)
+		clk.Advance(8 * time.Second)
+	}
 	if info, ok := d.Get(sb.ID); !ok || info.State != StateRunning {
-		t.Fatalf("present %v, state %q: a revive that could not reach dockerd destroyed the sandbox", ok, info.State)
+		t.Fatalf("present %v, state %q: transient start errors destroyed the sandbox", ok, info.State)
 	}
 	if c.stopped || fp.countEvents("exited") != 0 {
-		t.Errorf("stopped %v, events %v; want nothing destroyed", c.stopped, fp.events)
+		t.Fatalf("stopped %v, events %v; want nothing destroyed", c.stopped, fp.events)
 	}
-	c.reviveErr, c.revived = nil, orig
-	d.scanExits(ctx)
-	if fp.countEvents("restarted") != 1 {
-		t.Errorf("events = %v, want the next scan to revive it", fp.events)
-	}
-}
-
-// The count is of revives back to back: a healthy sandbox revived on each of
-// several dockerd restarts minutes apart was destroyed without a start attempt.
-func TestReviveCountResetsAfterARevivedSandboxStaysUp(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		apart     time.Duration
-		destroyed bool
-	}{
-		{"restarts three minutes apart", 3 * time.Minute, false},
-		{"dies again within seconds", 10 * time.Second, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			clk := &manualClock{t: time.Unix(1_000_000, 0)}
-			fp := newFakePersister(nil)
-			d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, Clock: clk, IdleTimeout: time.Hour, HardTTL: time.Hour})
-			ctx := context.Background()
-			sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
-			if err != nil {
-				t.Fatalf("create: %v", err)
-			}
-			for range maxRevives + 1 {
-				d.mu.Lock()
-				if box := d.boxes[sb.ID]; box != nil {
-					c := &casualtyVMM{deadVMM: deadVMM{box.inst}}
-					c.revived = c.Instance
-					box.inst = c
-				}
-				d.mu.Unlock()
-				d.scanExits(ctx)
-				clk.Advance(tc.apart)
-			}
-			_, present := d.Get(sb.ID)
-			if present == tc.destroyed {
-				t.Fatalf("present after %d deaths %v apart = %v, want destroyed %v (events %v)",
-					maxRevives+1, tc.apart, present, tc.destroyed, fp.events)
-			}
-		})
-	}
-}
-
-// answersAfterRevive is a casualty whose revive reports a confirmed stop and
-// which then answers: the destroy that follows must re-check, not assume.
-type answersAfterRevive struct {
-	casualtyVMM
-	probes int
-}
-
-func (a *answersAfterRevive) Alive() bool { a.probes++; return a.probes > 1 }
-
-func TestCrashDestroyRechecksTheSandboxIsStillDown(t *testing.T) {
-	fp := newFakePersister(nil)
-	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, IdleTimeout: time.Hour, HardTTL: time.Hour})
-	ctx := context.Background()
-	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
-	if err != nil {
-		t.Fatalf("create: %v", err)
+	if c.revives < maxRevives+2 || c.revives >= scans {
+		t.Errorf("revive attempts = %d over %d scans, want retries that continue with backoff", c.revives, scans)
 	}
 	d.mu.Lock()
-	a := &answersAfterRevive{casualtyVMM: casualtyVMM{deadVMM: deadVMM{d.boxes[sb.ID].inst}, reviveErr: rt.ErrWontStayUp}}
-	d.boxes[sb.ID].inst = a
+	metered := d.boxes[sb.ID].meter.running
 	d.mu.Unlock()
+	if metered {
+		t.Error("a sandbox whose container is down is metered as running")
+	}
 
-	d.scanExits(ctx)
-
-	if _, ok := d.Get(sb.ID); !ok {
-		t.Fatal("destroyed a sandbox that answered by the time the destroy ran")
+	c.reviveErr, c.revived = nil, orig
+	for range scans {
+		d.scanExits(ctx)
+		clk.Advance(8 * time.Second)
+		if fp.countEvents("restarted") > 0 {
+			break
+		}
+	}
+	if fp.countEvents("restarted") != 1 {
+		t.Fatalf("events = %v, want it revived once dockerd answers", fp.events)
+	}
+	d.mu.Lock()
+	metered = d.boxes[sb.ID].meter.running
+	d.mu.Unlock()
+	if !metered {
+		t.Error("a revived sandbox is not metered")
 	}
 }
 
@@ -473,5 +434,13 @@ func TestUnreachableCountStartsAgainAcrossATransition(t *testing.T) {
 				t.Errorf("reported after one failed probe since the %s; failures from before it carried over", tc.name)
 			}
 		})
+	}
+}
+
+func TestReviveBackoffCapsAndNeverOverflows(t *testing.T) {
+	for n, want := range map[int]time.Duration{1: 8 * time.Second, 2: 16 * time.Second, 5: 2 * time.Minute, 64: 2 * time.Minute, 1000: 2 * time.Minute} {
+		if got := reviveBackoff(n); got != want {
+			t.Errorf("reviveBackoff(%d) = %v, want %v", n, got, want)
+		}
 	}
 }

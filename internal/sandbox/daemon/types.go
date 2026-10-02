@@ -181,6 +181,10 @@ type Sandbox struct {
 	// to maxRevives, one that stayed up between engine restarts starts afresh.
 	revives    int
 	lastRevive time.Time
+	// reviveFails counts revives in a row whose start failed without a
+	// confirmed stop; reviveRetryAt is when the next one may run.
+	reviveFails   int
+	reviveRetryAt time.Time
 }
 
 // SandboxInfo is an immutable snapshot of a sandbox's public state. The HTTP

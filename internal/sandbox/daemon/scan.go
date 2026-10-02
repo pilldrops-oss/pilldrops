@@ -147,9 +147,10 @@ func (d *Daemon) scanExits(ctx context.Context) {
 
 // reviveCasualty starts again a sandbox its engine's restart stopped, rather
 // than reaping it. One confirmed stopped again right after its start
-// (rt.ErrWontStayUp), or revived maxRevives times within reviveWindow, is a
-// crash: destroyed with an "exited" event. Any other revive error (dockerd
-// still settling) leaves it for the next scan, which the count bounds.
+// (rt.ErrWontStayUp), or dead again after maxRevives confirmed revives each
+// within reviveWindow of the last, is a crash: destroyed with an "exited"
+// event. Any other revive error (dockerd still settling) is retried with
+// backoff and never counted.
 func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness, rv rt.Reviver) {
 	// Its own deadline: a docker start with retries plus the app's readiness
 	// wait outlasts the scan and restore budgets its callers run on.
@@ -176,16 +177,20 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 		return
 	}
 	now := d.clock.Now()
+	if now.Before(sb.reviveRetryAt) {
+		d.mu.Unlock()
+		release()
+		return
+	}
 	if now.Sub(sb.lastRevive) > reviveWindow {
 		sb.revives = 0
 	}
-	sb.revives++
-	sb.lastRevive = now
-	exhausted := sb.revives > maxRevives
+	// Dead again within reviveWindow of its maxRevives-th confirmed revive.
+	exhausted := sb.revives >= maxRevives
 	d.mu.Unlock()
 
 	if exhausted {
-		err = errors.New("revived too often")
+		err = errors.New("died again after each of its last revives")
 	} else {
 		var inst rt.Instance
 		inst, err = rv.Revive(ctx)
@@ -197,13 +202,33 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 			return
 		}
 		if err != nil && !errors.Is(err, rt.ErrWontStayUp) {
+			// Nothing read it stopped after a start: the engine is still
+			// settling. Not counted, never a crash; retried with backoff, and
+			// not metered as running while it is down.
+			d.mu.Lock()
+			sb.reviveFails++
+			wait := reviveBackoff(sb.reviveFails)
+			sb.reviveRetryAt = now.Add(wait)
+			var u Usage
+			if sb.meter.running {
+				u = sb.meter.sample(now)
+				sb.meter.freeze(now)
+			}
+			d.mu.Unlock()
 			release()
-			d.log().Warn("revive failed; retrying on the next scan", "sandbox_id", id, "error", err)
+			d.flushUsage(ctx, id, orgID, u)
+			d.log().Warn("revive failed; retrying", "sandbox_id", id, "in", wait, "error", err)
 			return
 		}
 		if err == nil {
 			d.mu.Lock()
 			sb.inst = inst
+			sb.revives++
+			sb.lastRevive = now
+			sb.reviveFails, sb.reviveRetryAt = 0, time.Time{}
+			if !sb.meter.running {
+				sb.meter.resume(d.clock.Now())
+			}
 			rec := d.recordOf(sb)
 			d.mu.Unlock()
 			d.persistRec(ctx, rec)
@@ -237,6 +262,19 @@ const (
 	maxRevives   = 3
 	reviveWindow = 2 * time.Minute
 )
+
+// reviveBackoffBase and reviveBackoffMax space the retries of a revive whose
+// start failed without a confirmed stop: doubling from one scan's worth.
+const (
+	reviveBackoffBase = 8 * time.Second
+	reviveBackoffMax  = 2 * time.Minute
+)
+
+// reviveBackoff is the wait before the n-th retry (n >= 1). The shift is capped
+// so a long outage stays at reviveBackoffMax instead of overflowing to zero.
+func reviveBackoff(n int) time.Duration {
+	return min(reviveBackoffBase<<min(n-1, 8), reviveBackoffMax)
+}
 
 // reviveTimeout bounds one revive, start retries and app restart included.
 const reviveTimeout = 2 * time.Minute
