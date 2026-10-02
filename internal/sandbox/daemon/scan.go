@@ -146,8 +146,8 @@ func (d *Daemon) scanExits(ctx context.Context) {
 }
 
 // reviveCasualty starts again a sandbox its engine's restart stopped, rather
-// than reaping it. One that will not start is marked failed with an "exited"
-// event and kept, data and all: only a destroy removes it.
+// than reaping it. One that will not start, or has been revived maxRevives
+// times within reviveWindow, is a crash: destroyed with an "exited" event.
 func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness, rv rt.Reviver) {
 	// Its own deadline: a docker start with retries plus the app's readiness
 	// wait outlasts the scan and restore budgets its callers run on.
@@ -164,47 +164,66 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 	if err != nil {
 		return
 	}
-	defer release()
 	d.mu.Lock()
 	lv, _ := sb.inst.(rt.Liveness)
 	current := lv == was && sb.State == StateRunning
 	orgID, template, startCmd, env := sb.OrgID, sb.Template, sb.StartCmd, sb.Env
-	d.mu.Unlock()
 	if !current {
+		d.mu.Unlock()
+		release()
 		return
 	}
-
-	inst, err := rv.Revive(ctx)
-	if err != nil && closed(d.reviveStop) {
-		// Not a container that will not start: the daemon is stopping. Left
-		// as it was, so the next start adopts and starts it again.
-		d.log().Info("revive cancelled by the daemon stopping", "sandbox_id", id)
-		return
+	if now := d.clock.Now(); now.Sub(sb.revivedSince) > reviveWindow {
+		sb.revives, sb.revivedSince = 0, now
 	}
-	d.mu.Lock()
-	if err != nil {
-		sb.State = StateFailed
-	} else {
-		sb.inst = inst
-	}
-	rec := d.recordOf(sb)
+	sb.revives++
+	exhausted := sb.revives > maxRevives
 	d.mu.Unlock()
-	d.persistRec(ctx, rec)
-	if err != nil {
-		d.recordEvent(ctx, orgID, id, "exited", template)
-		d.log().Error("sandbox stopped by its engine restarting would not start again; marked failed, data kept",
-			"sandbox_id", id, "error", err)
-		return
-	}
-	// The container's own command came back with it; a registered server did not.
-	if startCmd != "" {
-		if err := inst.StartServer(ctx, startCmd, env); err != nil {
-			d.log().Warn("revive: app restart failed", "sandbox_id", id, "error", err)
+
+	if exhausted {
+		err = errors.New("revived too often")
+	} else {
+		var inst rt.Instance
+		inst, err = rv.Revive(ctx)
+		if err != nil && closed(d.reviveStop) {
+			// Not a container that will not start: the daemon is stopping. Left
+			// as it was, so the next start adopts and starts it again.
+			release()
+			d.log().Info("revive cancelled by the daemon stopping", "sandbox_id", id)
+			return
+		}
+		if err == nil {
+			d.mu.Lock()
+			sb.inst = inst
+			rec := d.recordOf(sb)
+			d.mu.Unlock()
+			d.persistRec(ctx, rec)
+			// The container's own command came back with it; a registered server did not.
+			if startCmd != "" {
+				if err := inst.StartServer(ctx, startCmd, env); err != nil {
+					d.log().Warn("revive: app restart failed", "sandbox_id", id, "error", err)
+				}
+			}
+			release()
+			d.recordEvent(ctx, orgID, id, "restarted", template)
+			d.log().Warn("sandbox stopped by its engine restarting was started again", "sandbox_id", id)
+			return
 		}
 	}
-	d.recordEvent(ctx, orgID, id, "restarted", template)
-	d.log().Warn("sandbox stopped by its engine restarting was started again", "sandbox_id", id)
+	release()
+	d.log().Error("sandbox would not stay up after restart; destroying it as a crash",
+		"sandbox_id", id, "error", err)
+	if err := d.destroy(ctx, id, false, "exited", nil); err != nil && !errors.Is(err, rt.ErrNotFound) {
+		d.log().Warn("destroying a sandbox that would not stay up failed", "sandbox_id", id, "error", err)
+	}
 }
+
+// maxRevives bounds the casualty revives of one sandbox within reviveWindow:
+// a container that starts and dies again is a crash, not a casualty.
+const (
+	maxRevives   = 3
+	reviveWindow = 10 * time.Minute
+)
 
 // reviveTimeout bounds one revive, start retries and app restart included.
 const reviveTimeout = 2 * time.Minute

@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"errors"
-	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -92,7 +91,7 @@ func TestRebootRestoresEveryStoppedContainerAndRemovesNothing(t *testing.T) {
 	}
 }
 
-func TestRebootKeepsAContainerThatWillNotStartAsFailed(t *testing.T) {
+func TestRebootDestroysAContainerThatWillNotStart(t *testing.T) {
 	r := rebooted(t, []string{"sb-broken"}, map[string]bool{"sb-broken": true})
 	fp := newFakePersister([]PersistedSandbox{runningRec("sb-broken", time.Now().Add(time.Hour))})
 	d := New(Config{Runtime: r, Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
@@ -100,24 +99,14 @@ func TestRebootKeepsAContainerThatWillNotStartAsFailed(t *testing.T) {
 	defer d.Stop()
 	d.revives.Wait()
 
-	info, ok := d.Get("sb-broken")
-	if !ok {
-		t.Fatal("a container that would not start had its sandbox dropped")
+	if _, ok := d.Get("sb-broken"); ok {
+		t.Fatal("a container that would not start is still listed; a crash is destroyed")
 	}
-	if info.State != StateFailed {
-		t.Errorf("state = %s, want failed", info.State)
-	}
-	if r.stopped["sb-broken"].stopped || fp.deleted["sb-broken"] {
-		t.Error("the container or its record was removed")
-	}
-	if got := fp.saved["sb-broken"].State; got != string(StateFailed) {
-		t.Errorf("persisted state = %q, want failed", got)
+	if !fp.deleted["sb-broken"] {
+		t.Error("its record was kept")
 	}
 	if fp.countEvents("exited") != 1 {
 		t.Errorf("events = %v, want one exited", fp.events)
-	}
-	if len(r.swept) != 1 || !slices.Contains(r.swept[0], "sb-broken") {
-		t.Errorf("sweep known sets = %v; the failed sandbox must be known, or its container goes", r.swept)
 	}
 }
 

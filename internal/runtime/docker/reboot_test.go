@@ -40,6 +40,7 @@ inspect)
 	*sandboxd.id*) [ -f "$d/label-$last" ] || { echo "Error: No such object: $last" >&2; exit 1; }; cat "$d/label-$last" ;;
 	*sandboxd.runuser*) echo 1000 ;;
 	*sandboxd.port*) cat "$d/port-$last" 2>/dev/null || echo "<no value>" ;;
+	*State.Running*) echo "true false 0001-01-01T00:00:00Z" ;;
 	*) echo "sh -c sleep infinity" ;;
 	esac ;;
 port) cat "$d/pub-$2-${3%/tcp}" 2>/dev/null || exit 1 ;;

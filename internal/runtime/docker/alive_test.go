@@ -69,3 +69,26 @@ func TestRetryStartIsBounded(t *testing.T) {
 		t.Fatalf("a start that succeeds on the second try: err=%v after %d tries", err, calls)
 	}
 }
+
+// docker start exits 0 for a container whose command dies at once; on the rig
+// that read as revived and was revived again every scan.
+func TestStayedUpConfirmsTheContainerIsStillRunning(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		st      containerState
+		readErr error
+		wantErr bool
+	}{
+		{"still running", containerState{Running: true}, nil, false},
+		{"exited right after start", containerState{Running: false}, nil, true},
+		{"state unreadable", containerState{}, errors.New("engine hiccup"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := stayedUp(ctx, time.Millisecond, func() (containerState, error) { return tc.st, tc.readErr })
+			if (err != nil) != tc.wantErr {
+				t.Errorf("err = %v, want error %v", err, tc.wantErr)
+			}
+		})
+	}
+}

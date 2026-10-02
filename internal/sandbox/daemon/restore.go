@@ -105,8 +105,8 @@ func (d *Daemon) restoreFromStore(ctx context.Context) bool {
 		// since the state it came back in is "running".
 		// "lost" is the control plane's mark on a node it reaped (store.StateLost).
 		// This node is back, so a VM that survived is adopted, not swept.
-		// "failed" is a sandbox whose instance would not start again; its
-		// container still holds its data, so it is adopted and retried, never swept.
+		// "failed" is a row an older build kept for a container that would not
+		// start again; it is adopted and retried, and a crash now destroys it.
 		if (r.State == string(StateRunning) || r.State == string(StateStandby) ||
 			r.State == "lost" || r.State == string(StateFailed)) && adopter != nil {
 			inst, ok := adopt(r.ID)

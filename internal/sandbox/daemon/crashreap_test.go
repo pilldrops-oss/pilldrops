@@ -190,15 +190,50 @@ func (c *casualtyVMM) Revive(context.Context) (rt.Instance, error) {
 }
 func (c *casualtyVMM) Stop(context.Context) error { c.stopped = true; return nil }
 
-func TestScanRevivesARestartCasualtyAndKeepsOneThatWillNotStart(t *testing.T) {
+func TestScanRevivesARestartCasualty(t *testing.T) {
+	fp := newFakePersister(nil)
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, IdleTimeout: time.Hour, HardTTL: time.Hour})
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	d.mu.Lock()
+	orig := d.boxes[sb.ID].inst
+	c := &casualtyVMM{deadVMM: deadVMM{orig}, revived: orig}
+	d.boxes[sb.ID].inst = c
+	d.mu.Unlock()
+
+	d.scanExits(ctx)
+
+	info, ok := d.Get(sb.ID)
+	if !ok || info.State != StateRunning {
+		t.Fatalf("a restart casualty that came back: present %v, state %q; want running", ok, info.State)
+	}
+	if c.stopped {
+		t.Error("the casualty's container was stopped, which removes it")
+	}
+	if fp.countEvents("restarted") != 1 {
+		t.Errorf("events = %v, want one restarted", fp.events)
+	}
+	d.mu.Lock()
+	swapped := d.boxes[sb.ID].inst == orig
+	d.mu.Unlock()
+	if !swapped {
+		t.Error("the revived instance did not replace the casualty")
+	}
+}
+
+// A crashed sandbox is destroyed, the way E2B does it: one whose start fails,
+// or whose container starts and dies again every scan, must not loop.
+func TestScanDestroysACasualtyThatWillNotStayUp(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		reviveErr error
-		state     State
-		event     string
+		restarted int
 	}{
-		{"started again", nil, StateRunning, "restarted"},
-		{"will not start", errors.New("no such container"), StateFailed, "exited"},
+		{"start fails", errors.New("would not stay up after restart"), 0},
+		{"starts and dies again", nil, maxRevives},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fp := newFakePersister(nil)
@@ -209,37 +244,26 @@ func TestScanRevivesARestartCasualtyAndKeepsOneThatWillNotStart(t *testing.T) {
 				t.Fatalf("create: %v", err)
 			}
 			d.mu.Lock()
-			orig := d.boxes[sb.ID].inst
-			c := &casualtyVMM{deadVMM: deadVMM{orig}, revived: orig, reviveErr: tc.reviveErr}
+			c := &casualtyVMM{deadVMM: deadVMM{d.boxes[sb.ID].inst}, reviveErr: tc.reviveErr}
+			c.revived = c // comes back still dead and still a casualty
 			d.boxes[sb.ID].inst = c
 			d.mu.Unlock()
 
-			d.scanExits(ctx)
+			for range 2 * maxRevives {
+				d.scanExits(ctx)
+			}
 
-			info, ok := d.Get(sb.ID)
-			if !ok {
-				t.Fatal("a restart casualty was reaped; its data is gone")
+			if _, ok := d.Get(sb.ID); ok {
+				t.Fatal("a sandbox that would not stay up is still listed")
 			}
-			if info.State != tc.state {
-				t.Errorf("state = %q, want %q", info.State, tc.state)
+			if n := fp.countEvents("restarted"); n != tc.restarted {
+				t.Errorf("restarted events = %d, want %d", n, tc.restarted)
 			}
-			if c.stopped {
-				t.Error("the casualty's container was stopped, which removes it")
+			if n := fp.countEvents("exited"); n != 1 {
+				t.Errorf("exited events = %d, want 1 (events %v)", n, fp.events)
 			}
-			if fp.countEvents(tc.event) != 1 {
-				t.Errorf("events = %v, want one %q", fp.events, tc.event)
-			}
-			if _, ok := fp.history[sb.ID]; ok {
-				t.Error("a kept sandbox went to history")
-			}
-			if got := fp.saved[sb.ID].State; got != string(tc.state) {
-				t.Errorf("persisted state = %q, want %q", got, tc.state)
-			}
-			d.mu.Lock()
-			swapped := d.boxes[sb.ID].inst == orig
-			d.mu.Unlock()
-			if tc.reviveErr == nil && !swapped {
-				t.Error("the revived instance did not replace the casualty")
+			if got := fp.history[sb.ID].ExitState; got != "exited" {
+				t.Errorf("history exit state = %q, want exited", got)
 			}
 		})
 	}

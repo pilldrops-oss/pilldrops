@@ -326,6 +326,9 @@ func (i *dockerInstance) Revive(ctx context.Context) (rt.Instance, error) {
 		}
 		return err
 	})
+	if err == nil {
+		err = stayedUp(ctx, reviveSettle, i.state)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("docker start %s: %w", i.cid, err)
 	}
@@ -336,6 +339,24 @@ func (i *dockerInstance) Revive(ctx context.Context) (rt.Instance, error) {
 		vcpu: i.vcpu, memMiB: i.memMiB, service: i.service, runUser: i.runUser,
 		start: time.Now(), eng: i.eng, primary: i.primary, ports: map[int]string{i.primary: host},
 	}, nil
+}
+
+// reviveSettle is how long a started container must stay running to count as
+// revived: `docker start` exits 0 for one whose command dies at once.
+const reviveSettle = 2 * time.Second
+
+// stayedUp waits settle, then confirms the container is still running. A
+// state read that fails confirms nothing either way and is not a failure.
+func stayedUp(ctx context.Context, settle time.Duration, state func() (containerState, error)) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(settle):
+	}
+	if st, err := state(); err == nil && !st.Running {
+		return errors.New("would not stay up after restart: exited right after start")
+	}
+	return nil
 }
 
 // retryStart runs start up to reviveTries times, reviveBackoff apart.

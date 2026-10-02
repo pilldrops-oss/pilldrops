@@ -176,6 +176,10 @@ type Sandbox struct {
 	// probeFails counts the scans in a row whose exec into probeInst failed.
 	probeFails int
 	probeInst  rt.Instance
+	// revives counts the casualty revives since revivedSince, which bounds
+	// a container that starts and dies again to maxRevives.
+	revives      int
+	revivedSince time.Time
 }
 
 // SandboxInfo is an immutable snapshot of a sandbox's public state. The HTTP
