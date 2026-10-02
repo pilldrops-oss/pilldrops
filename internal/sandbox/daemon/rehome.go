@@ -84,6 +84,9 @@ func (d *Daemon) Rehome(ctx context.Context, id, org string) error {
 		ID: id, OrgID: r.OrgID, Template: tmpl, Snapshot: tmpl,
 		VCPU: r.VCPU, MemMiB: r.MemMiB, StorageMB: r.StorageMB,
 	}); err != nil {
+		// Holding rootfs.squashfs, it would be listed to tenants as a template;
+		// the archive keeps the capture for a retry.
+		_ = os.RemoveAll(dir)
 		return fmt.Errorf("rehome %s: boot from its archive: %w", id, err)
 	}
 	// It runs here now and its record says so, but when its memory is being
