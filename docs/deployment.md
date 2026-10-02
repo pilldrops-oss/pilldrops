@@ -356,7 +356,12 @@ cd ~/pdbuild && sudo BUILD_DIR=$PWD TEMPLATES=base bash scripts/provision-node.s
 It installs Docker + squashfs-tools, a Go toolchain in `/usr/local/go`,
 Firecracker and its jailer in `/usr/bin`, the guest kernel at
 `/var/lib/sandbox/vmlinux`, host networking via `scripts/setup-host.sh`, and a
-template rootfs under `/var/lib/sandbox/templates`. Go is there on purpose:
+template rootfs under `/var/lib/sandbox/templates` (`TEMPLATES=` lists them,
+comma-separated, default `base`; set but empty builds none), `envd` and the
+guest CLI in `/opt/pilldrops/bin` (the Docker runtime bind-mounts both into
+every sandbox; without them a docker sandbox has no exec API or terminal), and
+the `sandboxd` and `sandbox-egress-restore` units from `packaging/`, enabled
+but not started. Go is there on purpose:
 `internal/vm` is `//go:build linux` and runs zero tests on macOS, so live work
 means `go build` / `go test -c` **on the node** rather than cross-compiling and
 copying binaries across.

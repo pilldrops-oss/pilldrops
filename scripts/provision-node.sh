@@ -16,6 +16,8 @@
 #   4. guest kernel -> KERNEL_PATH (the 5.10 pin is load-bearing, see below)
 #   5. microVM networking (bridge fcbr0 + NAT) via scripts/setup-host.sh
 #   6. template rootfs images via scripts/build-template.sh
+#   7. envd + the guest CLI -> /opt/pilldrops/bin (the docker runtime bind-mounts
+#      both into every sandbox) and the systemd units from packaging/
 #
 # Requires a REAL KVM host — /dev/kvm must exist. A cloud VM without it cannot
 # run Firecracker; use the Docker runtime path instead.
@@ -27,7 +29,8 @@
 #   KERNEL_PATH=/var/lib/sandbox/vmlinux
 #   SNAPSHOT_DIR=/var/lib/sandbox/templates
 #   OVERLAY_DIR=/var/lib/sandbox/overlays
-#   TEMPLATES=base                comma list of templates to build
+#   TEMPLATES=base                comma list of templates to build; set but
+#                                 empty (TEMPLATES=) builds none
 #   BUILD_DIR=.                   dir holding scripts/ and templates/
 #   CLI_REPO=<BUILD_DIR>/../pilldrops-cli   source for the guest CLI binary
 set -euo pipefail
@@ -57,7 +60,8 @@ GO_VERSION="${GO_VERSION:-1.25.13}"
 KERNEL_PATH="${KERNEL_PATH:-/var/lib/sandbox/vmlinux}"
 SNAPSHOT_DIR="${SNAPSHOT_DIR:-/var/lib/sandbox/templates}"
 OVERLAY_DIR="${OVERLAY_DIR:-/var/lib/sandbox/overlays}"
-TEMPLATES="${TEMPLATES:-base}"
+# `-`, not `:-`: an explicitly empty TEMPLATES means "build none".
+TEMPLATES="${TEMPLATES-base}"
 BUILD_DIR="${BUILD_DIR:-.}"
 ARCH="$(uname -m)"
 
@@ -233,11 +237,33 @@ for t in $(echo "${TEMPLATES}" | tr ',' ' '); do
   SNAPSHOT_DIR="${SNAPSHOT_DIR}" bash scripts/build-template.sh "$t"
 done
 
+# ── 7. node binaries and systemd units ────────────────────────────────────────
+# The docker runtime bind-mounts envd and the guest CLI from /opt/pilldrops/bin
+# into every sandbox (internal/runtime/docker/docker.go); without them a docker
+# sandbox boots with no exec API and no terminal. envd is rebuilt rather than
+# reused, for the stale-binary reason build-template.sh gives.
+log "Installing envd and the guest CLI into /opt/pilldrops/bin"
+CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/envd ./cmd/envd/
+install -D -m 0755 bin/envd /opt/pilldrops/bin/envd
+install -D -m 0755 bin/pilldrops-linux /opt/pilldrops/bin/pilldrops-linux
+
+# No `|| true` anywhere here: sandboxd.service Requires= the restore unit, and
+# a node whose restore unit is missing must fail to start, not start open.
+log "Installing the systemd units from packaging/"
+install -m 0644 packaging/sandboxd.service packaging/sandbox-egress-restore.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable sandbox-egress-restore.service sandboxd.service
+for u in sandbox-egress-restore.service sandboxd.service; do
+  [ "$(systemctl is-enabled "$u")" = enabled ] || { echo "✗ $u is not enabled" >&2; exit 1; }
+done
+
 echo
 log "✓ PROVISION COMPLETE — Firecracker host ready. Run sandboxd with:"
 echo "     FIRECRACKER_BIN=/usr/bin/firecracker JAILER_BIN=/usr/bin/jailer"
 echo "     KERNEL_PATH=${KERNEL_PATH} SNAPSHOT_DIR=${SNAPSHOT_DIR} OVERLAY_DIR=${OVERLAY_DIR}"
 echo "     TEMPLATES=${TEMPLATES}"
 echo
-log "NOTE: a docker-runtime node on this host additionally needs scripts/setup-docker-egress.sh;"
-log "      this script provisions the Firecracker path only."
+log "sandboxd.service is installed and enabled, not started: put the node binary at"
+log "      /opt/pilldrops/bin/sandboxd-linux (make sandboxd-linux), set its environment"
+log "      (docs/deployment.md), then: systemctl start sandboxd"
+log "NOTE: a docker-runtime node on this host additionally needs scripts/setup-docker-egress.sh."
