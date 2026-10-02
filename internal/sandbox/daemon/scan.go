@@ -153,6 +153,13 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 	// wait outlasts the scan and restore budgets its callers run on.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reviveTimeout)
 	defer cancel()
+	go func() {
+		select {
+		case <-d.reviveStop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 	sb, release, err := d.acquireOp(id)
 	if err != nil {
 		return
@@ -168,6 +175,12 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 	}
 
 	inst, err := rv.Revive(ctx)
+	if err != nil && closed(d.reviveStop) {
+		// Not a container that will not start: the daemon is stopping. Left
+		// as it was, so the next start adopts and starts it again.
+		d.log().Info("revive cancelled by the daemon stopping", "sandbox_id", id)
+		return
+	}
 	d.mu.Lock()
 	if err != nil {
 		sb.State = StateFailed

@@ -66,6 +66,7 @@ func TestRebootRestoresEveryStoppedContainerAndRemovesNothing(t *testing.T) {
 	d := New(Config{Runtime: r, Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
 	d.Start()
 	defer d.Stop()
+	d.revives.Wait()
 
 	for _, id := range ids {
 		info, ok := d.Get(id)
@@ -97,6 +98,7 @@ func TestRebootKeepsAContainerThatWillNotStartAsFailed(t *testing.T) {
 	d := New(Config{Runtime: r, Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
 	d.Start()
 	defer d.Stop()
+	d.revives.Wait()
 
 	info, ok := d.Get("sb-broken")
 	if !ok {
@@ -124,10 +126,16 @@ func TestRebootKeepsAContainerThatWillNotStartAsFailed(t *testing.T) {
 type slowStartVMM struct {
 	deadVMM
 	took time.Duration
+	// deaf ignores cancellation, as a docker start wedged in the engine does.
+	deaf bool
 }
 
 func (*slowStartVMM) Casualty() bool { return true }
 func (s *slowStartVMM) Revive(ctx context.Context) (rt.Instance, error) {
+	if s.deaf {
+		time.Sleep(s.took)
+		return s.Instance, nil
+	}
 	select {
 	case <-time.After(s.took):
 		return s.Instance, nil
@@ -157,21 +165,12 @@ func TestRebootRevivesEverySandboxWhenTheirStartsOutlastTheRestoreBudget(t *test
 	defer func(b time.Duration) { restoreBudget = b }(restoreBudget)
 	restoreBudget = 100 * time.Millisecond
 
-	r := &slowRebootRT{Fake: runtimetest.NewFake(), stopped: map[string]*slowStartVMM{}}
-	var recs []PersistedSandbox
-	for i := range 24 {
-		id := "sb-" + string(rune('a'+i))
-		inst, err := r.Boot(context.Background(), rt.BootSpec{SandboxID: id})
-		if err != nil {
-			t.Fatal(err)
-		}
-		r.stopped[id] = &slowStartVMM{deadVMM: deadVMM{inst}, took: 60 * time.Millisecond}
-		recs = append(recs, runningRec(id, time.Now().Add(time.Hour)))
-	}
+	r, recs := slowReboot(t, 24, 60*time.Millisecond, false)
 	fp := newFakePersister(recs)
 	d := New(Config{Runtime: r, Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
 	d.Start()
 	defer d.Stop()
+	d.revives.Wait()
 
 	for _, rec := range recs {
 		if info, ok := d.Get(rec.ID); !ok || info.State != StateRunning {
@@ -207,6 +206,7 @@ func TestRestoreDecidesNothingFromAFailedListingAndRetries(t *testing.T) {
 	d := New(Config{Runtime: r, Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
 	d.Start()
 	defer d.Stop()
+	d.revives.Wait()
 
 	fp.mu.Lock()
 	deleted := len(fp.deleted)
@@ -236,5 +236,64 @@ func TestRestoreDecidesNothingFromAFailedListingAndRetries(t *testing.T) {
 	}
 	if !r.stopped["sb-expired"].stopped {
 		t.Error("the expired sandbox's container was not removed once it could be looked up")
+	}
+}
+
+// slowReboot builds n stopped containers whose start takes took.
+func slowReboot(t *testing.T, n int, took time.Duration, deaf bool) (*slowRebootRT, []PersistedSandbox) {
+	t.Helper()
+	r := &slowRebootRT{Fake: runtimetest.NewFake(), stopped: map[string]*slowStartVMM{}}
+	var recs []PersistedSandbox
+	for i := range n {
+		id := "sb-" + string(rune('a'+i))
+		inst, err := r.Boot(context.Background(), rt.BootSpec{SandboxID: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.stopped[id] = &slowStartVMM{deadVMM: deadVMM{inst}, took: took, deaf: deaf}
+		recs = append(recs, runningRec(id, time.Now().Add(time.Hour)))
+	}
+	return r, recs
+}
+
+// Start held the HTTP listener and heartbeat until every revive finished; on a
+// node full of slow starts the control plane reaped the node meanwhile.
+func TestStartReturnsWhileRevivesRun(t *testing.T) {
+	r, recs := slowReboot(t, 8, 400*time.Millisecond, false)
+	fp := newFakePersister(recs)
+	d := New(Config{Runtime: r, Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
+	t0 := time.Now()
+	d.Start()
+	defer d.Stop()
+	if took := time.Since(t0); took > 200*time.Millisecond {
+		t.Errorf("Start took %v; it waited for the revives", took)
+	}
+	d.revives.Wait()
+	if n := fp.countEvents("restarted"); n != len(recs) {
+		t.Errorf("restarted events = %d, want %d once the revives finished", n, len(recs))
+	}
+}
+
+func TestStopDuringRevivesIsBounded(t *testing.T) {
+	defer func(w time.Duration) { reviveStopWait = w }(reviveStopWait)
+	reviveStopWait = 200 * time.Millisecond
+	for _, deaf := range []bool{false, true} {
+		r, recs := slowReboot(t, 4, 5*time.Second, deaf)
+		fp := newFakePersister(recs)
+		d := New(Config{Runtime: r, Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
+		d.Start()
+		time.Sleep(50 * time.Millisecond) // the revives are in flight
+		t0 := time.Now()
+		d.Stop()
+		if took := time.Since(t0); took > time.Second {
+			t.Errorf("deaf=%v: Stop took %v with revives in flight, want at most ~%v", deaf, took, reviveStopWait)
+		}
+		if !deaf {
+			for _, rec := range recs {
+				if info, ok := d.Get(rec.ID); !ok || info.State == StateFailed {
+					t.Errorf("%s: a revive cancelled by Stop marked the sandbox failed or dropped it", rec.ID)
+				}
+			}
+		}
 	}
 }

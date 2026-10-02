@@ -113,6 +113,7 @@ func (d *Daemon) Stop() {
 			d.bgCancel()
 		}
 	})
+	d.stopRevives()
 }
 
 // reconcileOnce is one tick of the control loop, extracted so tests can drive

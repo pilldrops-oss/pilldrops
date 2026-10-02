@@ -154,12 +154,27 @@ func (d *Daemon) restoreFromStore(ctx context.Context) bool {
 		d.log().Info("sandbox restored as paused", "sandbox_id", r.ID, "previous_state", r.State)
 	}
 
-	// Off the restore budget: after a reboot every container is a casualty, and
-	// one at a time on a shared deadline the later ones failed for want of time.
-	forEachTarget(context.WithoutCancel(ctx), len(casualties), lifecycleConcurrency, func(i int) {
-		c := casualties[i]
-		d.reviveCasualty(ctx, c.id, c.lv, c.rv)
-	})
+	// In the background: a start with retries and an app readiness wait per
+	// container, on a node full of them, held Start -- and with it the HTTP
+	// listener and heartbeat -- long enough for the control plane to reap the
+	// node. The casualties are already in d.boxes, so the sweep below keeps them.
+	if len(casualties) > 0 {
+		d.mu.Lock()
+		stopping := closed(d.reviveStop)
+		if !stopping {
+			d.revives.Add(1)
+		}
+		d.mu.Unlock()
+		if !stopping {
+			go func() {
+				defer d.revives.Done()
+				forEachTarget(context.Background(), len(casualties), lifecycleConcurrency, func(i int) {
+					c := casualties[i]
+					d.reviveCasualty(context.Background(), c.id, c.lv, c.rv)
+				})
+			}()
+		}
+	}
 
 	if !complete {
 		return false
@@ -234,6 +249,9 @@ func (d *Daemon) adoptRunning(ctx context.Context, r PersistedSandbox, inst rt.I
 // Shutdown pauses every running sandbox so the next Start can restore it, then
 // stops the reconciler. Instances that cannot be paused are stopped anyway.
 func (d *Daemon) Shutdown(ctx context.Context) {
+	// A revive holds its sandbox's op lock for up to reviveTimeout; the pauses
+	// below must not queue behind it.
+	d.stopRevives()
 	d.mu.RLock()
 	var ids []string
 	for id, sb := range d.boxes {
@@ -277,4 +295,39 @@ func (d *Daemon) Shutdown(ctx context.Context) {
 		}
 	}
 	d.Stop()
+}
+
+// reviveStopWait bounds how long stopping waits for revives to give up; a var
+// so tests can shrink it.
+var reviveStopWait = 10 * time.Second
+
+// stopRevives cancels restore's background revives and waits for them, at most
+// reviveStopWait. A cancelled revive leaves its sandbox as it was, for the next
+// start to adopt again.
+func (d *Daemon) stopRevives() {
+	d.reviveStopOnce.Do(func() {
+		d.mu.Lock()
+		close(d.reviveStop)
+		d.mu.Unlock()
+	})
+	done := make(chan struct{})
+	go func() {
+		d.revives.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(reviveStopWait):
+		d.log().Warn("stop: casualty revives still running; not waiting for them", "waited", reviveStopWait)
+	}
+}
+
+// closed reports whether ch is closed.
+func closed(ch chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }

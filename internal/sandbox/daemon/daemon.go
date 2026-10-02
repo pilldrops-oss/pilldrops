@@ -93,6 +93,11 @@ type Daemon struct {
 	pending  map[string]int // per-org in-flight create reservations
 	stop     chan struct{}
 	stopOnce sync.Once
+	// revives tracks restore's background casualty revives; reviveStop, closed
+	// under mu, cancels them, and no revive is added once it is closed.
+	revives        sync.WaitGroup
+	reviveStop     chan struct{}
+	reviveStopOnce sync.Once
 	// bgCancel cancels the context shared by the reconciler and scanners.
 	bgCancel context.CancelFunc
 	// lastUsageFlush is guarded by mu.
@@ -162,7 +167,7 @@ func New(cfg Config) *Daemon {
 	_ = os.MkdirAll(cfg.SnapshotDir, 0o755)
 	d := &Daemon{
 		cfg: cfg, clock: cfg.Clock,
-		boxes: make(map[string]*Sandbox), pending: make(map[string]int), stop: make(chan struct{}),
+		boxes: make(map[string]*Sandbox), pending: make(map[string]int), stop: make(chan struct{}), reviveStop: make(chan struct{}),
 		metrics: newDaemonMetrics(),
 	}
 	// Anchor here so the first usage flush lands one full interval in, not on the first tick.
