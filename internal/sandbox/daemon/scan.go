@@ -151,7 +151,7 @@ func (d *Daemon) scanExits(ctx context.Context) {
 // reviveCasualty starts again a sandbox its engine's restart stopped, rather
 // than reaping it. One confirmed stopped again right after its start
 // (rt.ErrWontStayUp), or dead again after maxRevives confirmed revives under
-// the same engine start, is a crash: destroyed with an "exited" event. Any other revive error (dockerd still settling) is retried with
+// the same known engine start, is a crash: destroyed with an "exited" event. Any other revive error (dockerd still settling) is retried with
 // backoff and never counted.
 func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness, rv rt.Reviver) {
 	// Its own deadline: a docker start with retries plus the app's readiness
@@ -185,19 +185,34 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 		return
 	}
 	engine := rv.EngineStarted()
-	// An unknown engine start never changes: a death long after the last
-	// revive is a later restart's casualty, not that revive failing.
-	if !engine.Equal(sb.reviveEngine) || (engine.IsZero() && now.Sub(sb.revivedAt) >= unknownEngineCrashWindow) {
+	if !engine.Equal(sb.reviveEngine) {
 		sb.revives = 0
 	}
-	// Dead again under the engine of its maxRevives-th confirmed revive.
-	exhausted := sb.revives >= maxRevives
 	// Seen dead: not metered as running until a confirmed revive.
 	var u Usage
 	if sb.meter.running {
 		u = sb.meter.sample(now)
 		sb.meter.freeze(now)
 	}
+	// With the engine's start unknown no death is counted: a dockerd crash
+	// loop would read as the sandbox's own and destroy it. A death after a
+	// revive waits a growing backoff instead, reset when first seen dead past
+	// the cap after it; only a revive that will not stay up destroys it.
+	unknown := engine.IsZero()
+	if unknown && sb.revives > 0 && sb.reviveRetryAt.IsZero() && now.Sub(sb.revivedAt) >= deathBackoffMax {
+		sb.revives = 0
+	}
+	if unknown && sb.revives > 0 {
+		if next := sb.revivedAt.Add(deathBackoff(sb.revives)); now.Before(next) {
+			sb.reviveRetryAt = next
+			d.mu.Unlock()
+			release()
+			d.flushUsage(ctx, id, orgID, u)
+			return
+		}
+	}
+	// Dead again under the engine of its maxRevives-th confirmed revive.
+	exhausted := !unknown && sb.revives >= maxRevives
 	d.mu.Unlock()
 	d.flushUsage(ctx, id, orgID, u)
 
@@ -307,9 +322,14 @@ func (d *Daemon) readopt(ctx context.Context, id string, was rt.Liveness, rv rt.
 	d.log().Warn("sandbox running again after a failed revive was taken back", "sandbox_id", id)
 }
 
-// unknownEngineCrashWindow is how soon after its last revive a death counts
-// toward maxRevives when the engine's start is unknown.
-const unknownEngineCrashWindow = time.Minute
+// deathBackoffMax caps deathBackoff.
+const deathBackoffMax = 5 * time.Minute
+
+// deathBackoff is how long after its n-th revive (n >= 1) a sandbox that died
+// again waits for the next one, when the engine's start is unknown.
+func deathBackoff(n int) time.Duration {
+	return min(reviveBackoffBase<<min(n-1, 8), deathBackoffMax)
+}
 
 // maxRevives bounds casualty revives under one engine start: a container that
 // starts and dies again is a crash, not a casualty.

@@ -241,9 +241,11 @@ func TestScanDestroysACasualtyThatWillNotStayUp(t *testing.T) {
 		name      string
 		reviveErr error
 		restarted int
+		engine    time.Time
 	}{
-		{"confirmed stopped after its start", fmt.Errorf("docker start c1: %w", rt.ErrWontStayUp), 0},
-		{"starts and dies again", nil, maxRevives},
+		{"confirmed stopped after its start", fmt.Errorf("docker start c1: %w", rt.ErrWontStayUp), 0, time.Time{}},
+		{"confirmed stopped after its start, engine start known", fmt.Errorf("docker start c1: %w", rt.ErrWontStayUp), 0, time.Unix(1_000_000, 0)},
+		{"starts and dies again under one known engine start", nil, maxRevives, time.Unix(1_000_000, 0)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fp := newFakePersister(nil)
@@ -254,7 +256,7 @@ func TestScanDestroysACasualtyThatWillNotStayUp(t *testing.T) {
 				t.Fatalf("create: %v", err)
 			}
 			d.mu.Lock()
-			c := &casualtyVMM{deadVMM: deadVMM{d.boxes[sb.ID].inst}, reviveErr: tc.reviveErr}
+			c := &casualtyVMM{deadVMM: deadVMM{d.boxes[sb.ID].inst}, reviveErr: tc.reviveErr, engine: tc.engine}
 			c.revived = c // comes back still dead and still a casualty
 			d.boxes[sb.ID].inst = c
 			d.mu.Unlock()
@@ -604,5 +606,45 @@ func TestScanTakesBackACasualtyRunningAgainAfterAFailedRevive(t *testing.T) {
 	}
 	if !retry.IsZero() {
 		t.Errorf("a pending retry at %v survived the take-back", retry)
+	}
+}
+
+// With dockerd's start unknown, a dockerd crash loop faster than any window
+// read as the sandbox dying again after each revive, and destroyed it. No
+// death counts there: each waits a backoff that grows to deathBackoffMax.
+func TestScanNeverCountsDeathsUnderAnUnknownEngineStart(t *testing.T) {
+	clk := &manualClock{t: time.Unix(1_000_000, 0)}
+	fp := newFakePersister(nil)
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, Clock: clk, IdleTimeout: 24 * time.Hour, HardTTL: 24 * time.Hour})
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	d.mu.Lock()
+	c := &casualtyVMM{deadVMM: deadVMM{d.boxes[sb.ID].inst}}
+	c.revived = c // every revive comes back and dies again by the next scan
+	d.boxes[sb.ID].inst = c
+	d.mu.Unlock()
+
+	var at []time.Time
+	c.onRevive = func() { at = append(at, clk.Now()) }
+	for range 60 * 60 / 8 { // an hour of scans 8 s apart
+		d.scanExits(ctx)
+		clk.Advance(8 * time.Second)
+	}
+	if info, ok := d.Get(sb.ID); !ok || info.State != StateRunning {
+		t.Fatalf("present %v, state %q: a dockerd crash loop destroyed a healthy sandbox", ok, info.State)
+	}
+	if len(at) < maxRevives+3 {
+		t.Fatalf("%d revives in an hour, want it kept reviving", len(at))
+	}
+	for i := 2; i < len(at); i++ {
+		if gap, prev := at[i].Sub(at[i-1]), at[i-1].Sub(at[i-2]); gap < prev {
+			t.Fatalf("revive gaps %v then %v: the backoff shrank", prev, gap)
+		}
+	}
+	if last := at[len(at)-1].Sub(at[len(at)-2]); last < deathBackoffMax || last > deathBackoffMax+8*time.Second {
+		t.Errorf("last revive gap %v, want the %v cap", last, deathBackoffMax)
 	}
 }
