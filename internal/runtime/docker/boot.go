@@ -131,9 +131,10 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 			envdToken, envdHash = sbtoken.Mint()
 			base = append(base, "-e", "ENVD_TOKEN_HASH="+envdHash)
 			// envd drops too: its terminal is a tenant surface. The log fd is
-			// opened by root before the drop.
+			// opened by root before the drop. Run under its reaper, as in a
+			// Firecracker guest, so a killed server is started again.
 			cmd = []string{"sh", "-c", handover + startIfPresent +
-				dropPrefix(runUser) + "/usr/local/bin/envd >/tmp/envd.log 2>&1 & exec sleep infinity"}
+				dropPrefix(runUser) + "/usr/local/bin/envd reap >/tmp/envd.log 2>&1 & exec sleep infinity"}
 		} else {
 			cmd = []string{"sh", "-c", handover + startIfPresent + "exec sleep infinity"}
 		}

@@ -47,7 +47,11 @@ func main() {
 		os.Exit(runWatch(os.Args[2:], os.Stdout))
 	}
 	if len(os.Args) > 1 && os.Args[1] == "reap" {
-		reapForever()
+		self, err := os.Executable()
+		if err != nil {
+			self = os.Args[0]
+		}
+		reapForever([]string{self})
 	}
 
 	// A fast-boot microVM has no entropy; without this Node and Python hang on getrandom().
@@ -63,7 +67,7 @@ func main() {
 	}
 
 	// A snapshot-restored guest has no boot hash and gets one over the credential channel.
-	hashes := newHashStore(readTokenHash())
+	hashes := persistedHashStore(pushedHashPath)
 
 	// Not fatal: Docker has no vsock and a cold-booted guest already has its
 	// hash from the cmdline. credErr is reported in the transport notice.

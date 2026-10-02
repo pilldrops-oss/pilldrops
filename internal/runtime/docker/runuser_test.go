@@ -209,7 +209,7 @@ func TestRunUserEnvKeepsToolchainsOffRootOwnedPaths(t *testing.T) {
 func TestBootImageDropsEnvdToo(t *testing.T) {
 	body := sourceContaining(t, "func (r *Runtime) bootImage(")
 	fn := bootImageBody(t, body)
-	envdIdx := strings.Index(fn, "/usr/local/bin/envd >/tmp/envd.log")
+	envdIdx := strings.Index(fn, "/usr/local/bin/envd reap >/tmp/envd.log")
 	if envdIdx < 0 {
 		t.Fatal("the envd launch line has moved; this test no longer checks anything")
 	}

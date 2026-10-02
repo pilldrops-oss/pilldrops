@@ -35,11 +35,38 @@ const (
 
 // hashStore holds this sandbox's envd token hash; readers call Get at call
 // time so a credential delivered after boot is visible immediately.
-type hashStore struct{ v atomic.Value }
+// path, when set, keeps a pushed hash on disk for a restarted server.
+type hashStore struct {
+	v    atomic.Value
+	path string
+}
 
 func newHashStore(hash string) *hashStore {
 	s := &hashStore{}
 	s.v.Store(hash)
+	return s
+}
+
+// pushedHashPath is where the guest server keeps the last pushed hash. A
+// restored guest gets its credential once, over vsock, so a server the
+// reaper restarts would otherwise refuse every call.
+const pushedHashPath = "/run/envd.token-hash"
+
+// persistedHashStore starts from the last pushed hash at path, which outranks
+// boot because a capture restored as another sandbox still carries the
+// capturing one's cmdline. Docker's env hash outranks both: it never pushes.
+func persistedHashStore(path string) *hashStore {
+	hash := strings.TrimSpace(os.Getenv("ENVD_TOKEN_HASH"))
+	if hash == "" {
+		if b, err := os.ReadFile(path); err == nil && validTokenHash(strings.TrimSpace(string(b))) {
+			hash = strings.TrimSpace(string(b))
+		}
+	}
+	if hash == "" {
+		hash = readTokenHash()
+	}
+	s := newHashStore(hash)
+	s.path = path
 	return s
 }
 
@@ -49,7 +76,15 @@ func (s *hashStore) Get() string {
 	return h
 }
 
-func (s *hashStore) Set(hash string) { s.v.Store(hash) }
+func (s *hashStore) Set(hash string) {
+	s.v.Store(hash)
+	if s.path == "" {
+		return
+	}
+	if err := os.WriteFile(s.path, []byte(hash), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "envd: keep pushed credential: %v\n", err)
+	}
+}
 
 // validTokenHash reports whether h is 64 lower-case hex characters, so a
 // mangled push cannot install a hash the node believes is live.

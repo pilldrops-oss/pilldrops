@@ -18,7 +18,6 @@ func TestInitScriptStartsEnvd(t *testing.T) {
 	}
 	init := string(b)
 	for _, want := range []string{
-		"/usr/local/bin/envd &",
 		"/etc/sandbox-env",
 		"/etc/resolv.conf",
 		"/etc/hosts",
@@ -27,6 +26,10 @@ func TestInitScriptStartsEnvd(t *testing.T) {
 		if !strings.Contains(init, want) {
 			t.Errorf("/sbin/init does not contain %q", want)
 		}
+	}
+	// The reaper starts the server; a second one from init could not bind.
+	if strings.Contains(init, "/usr/local/bin/envd &") {
+		t.Errorf("/sbin/init starts the envd server itself as well as the reaper:\n%s", init)
 	}
 	// A leftover placeholder would be written into the guest's PID 1 verbatim,
 	// and the in-tree-only start.sh line assumes a baked script this build has not.

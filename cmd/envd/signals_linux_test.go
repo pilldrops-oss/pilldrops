@@ -23,7 +23,7 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	if os.Getenv("ENVD_REAP_HELPER") == "1" {
-		reapForever()
+		reapForever(strings.Fields(os.Getenv("ENVD_REAP_SERVER")))
 	}
 	if os.Getenv("ENVD_SIGNAL_HELPER") == "1" {
 		unignoreInterrupt()
@@ -96,6 +96,44 @@ func TestReaperCollectsAnOrphanThatExits(t *testing.T) {
 		t.Fatal("PID 1 never started its child; the test proves nothing")
 	}
 	t.Fatalf("PID 1 still has children after the kill: %v", left)
+}
+
+// `pkill envd` killed the server and nothing started it again: exec answered
+// 503 for good while the sandbox said running.
+func TestReaperStartsTheServerAgainWhenItExits(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reaper := exec.Command(self)
+	reaper.Env = append(os.Environ(), "ENVD_REAP_HELPER=1", "ENVD_REAP_SERVER=/bin/sleep 300")
+	if err := reaper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reaper.Process.Kill(); _ = reaper.Wait() })
+
+	server := func() int {
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+			for _, c := range childrenOf(reaper.Process.Pid) {
+				if pid, _ := strconv.Atoi(strings.Fields(c)[0]); pid > 0 && !strings.HasSuffix(c, " Z") {
+					return pid
+				}
+			}
+		}
+		return 0
+	}
+	first := server()
+	if first == 0 {
+		t.Fatal("the reaper never started its server")
+	}
+	if err := syscall.Kill(first, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	second := server()
+	if second == 0 || second == first {
+		t.Fatalf("server after the kill = %d (first %d); it was not started again", second, first)
+	}
 }
 
 // childrenOf returns "pid state" for each process whose parent is ppid.
