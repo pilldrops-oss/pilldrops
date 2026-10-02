@@ -91,7 +91,7 @@ type Daemon struct {
 	mu      sync.RWMutex
 	boxes   map[string]*Sandbox
 	pending map[string]int // per-org in-flight create reservations
-	// rehoming holds one channel per sandbox a rehome is running for, closed
+	// rehoming holds one channel per sandbox a rehome or a destroy's teardown is running for, closed
 	// when it ends; guarded by mu.
 	rehoming map[string]chan struct{}
 	stop     chan struct{}

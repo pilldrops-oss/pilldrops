@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/artifact"
+	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 	"github.com/pilldrops-oss/pilldrops/internal/runtime/runtimetest"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 	"github.com/pilldrops-oss/pilldrops/internal/templates"
@@ -223,6 +224,98 @@ func TestDestroyKeepsACaptureAForkStillRunsOn(t *testing.T) {
 		}
 		if _, err := os.Stat(d.snapshotDir(tmpl)); !os.IsNotExist(err) {
 			t.Errorf("%s outlived its last user: %v", tmpl, err)
+		}
+	}
+}
+
+// slowStop is an instance whose teardown waits to be let go.
+type slowStop struct {
+	rt.Instance
+	stopping, release chan struct{}
+}
+
+func (s *slowStop) Stop(ctx context.Context) error {
+	close(s.stopping)
+	<-s.release
+	return s.Instance.Stop(ctx)
+}
+
+// gatedCreate holds the second record read, a rehome's Create, until released:
+// the rehome's capture is in place and nothing runs on it yet.
+type gatedCreate struct {
+	recordFake
+	mu            sync.Mutex
+	reads         int
+	held, release chan struct{}
+}
+
+func (g *gatedCreate) SandboxRecord(ctx context.Context, id string) (PersistedSandbox, bool, error) {
+	g.mu.Lock()
+	n := g.reads
+	g.reads++
+	g.mu.Unlock()
+	if n == 1 {
+		close(g.held)
+		<-g.release
+	}
+	return g.recordFake.SandboxRecord(ctx, id)
+}
+
+// A destroy forgets the sandbox before its teardown: a rehome of the same id
+// in that window staged a capture the teardown then removed, under the
+// sandbox the rehome went on to boot.
+func TestARehomeDuringADestroyKeepsItsCapture(t *testing.T) {
+	templates.SetDir(t.TempDir())
+	t.Cleanup(func() { templates.SetDir("") })
+	blobs, err := artifact.Open(artifact.KindFS, artifact.Options{Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	fp := &gatedCreate{recordFake: recordFake{newFakePersister(nil)}, held: make(chan struct{}), release: make(chan struct{})}
+	archive := &BlobArchive{Store: blobs}
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, SnapshotArchive: archive, IdleTimeout: time.Hour, HardTTL: time.Hour})
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := t.TempDir()
+	for _, name := range []string{"mem", "state", "rootfs.squashfs"} {
+		if err := os.WriteFile(filepath.Join(capture, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.PutPause(ctx, sb.ID, capture, "p1"); err != nil {
+		t.Fatal(err)
+	}
+	fp.mu.Lock()
+	fp.saved[sb.ID] = PersistedSandbox{ID: sb.ID, OrgID: "o", Template: "base", State: "paused", PauseArchive: "p1", CreatedAt: 100}
+	fp.reads = 0
+	fp.mu.Unlock()
+	slow := &slowStop{stopping: make(chan struct{}), release: make(chan struct{})}
+	d.mu.Lock()
+	slow.Instance = d.boxes[sb.ID].inst
+	d.boxes[sb.ID].inst = slow
+	d.mu.Unlock()
+
+	destroyed, rehomed := make(chan error, 1), make(chan error, 1)
+	go func() { destroyed <- d.Destroy(ctx, sb.ID) }()
+	<-slow.stopping
+	go func() { rehomed <- d.Rehome(ctx, sb.ID, "o") }()
+	select {
+	case <-fp.held: // the rehome raced into the teardown
+	case <-time.After(200 * time.Millisecond): // it waits for the teardown
+	}
+	close(slow.release)
+	if err := <-destroyed; err != nil {
+		t.Fatal(err)
+	}
+	close(fp.release)
+	<-rehomed
+
+	if info, ok := d.Get(sb.ID); ok && info.State == StateRunning {
+		if _, err := os.Stat(filepath.Join(d.snapshotDir(rehomeTemplate(sb.ID)), "rootfs.squashfs")); err != nil {
+			t.Fatalf("the rehomed sandbox runs on a capture the destroy removed: %v", err)
 		}
 	}
 }

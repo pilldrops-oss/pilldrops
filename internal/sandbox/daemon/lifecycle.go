@@ -356,6 +356,19 @@ func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState s
 	sb.inst = nil
 	sb.State = StateStopped
 	d.forget(id)
+	// A rehome of this id started once it is forgotten would stage a capture
+	// the teardown below removes: it waits for the teardown. Not taken when a
+	// rehome already holds the id, as when its own boot failed and destroys.
+	if _, busy := d.rehoming[id]; !busy {
+		done := make(chan struct{})
+		d.rehoming[id] = done
+		defer func() {
+			d.mu.Lock()
+			delete(d.rehoming, id)
+			d.mu.Unlock()
+			close(done)
+		}()
+	}
 	d.mu.Unlock()
 
 	// The sandbox is gone from d.boxes, so teardown must finish even if the
