@@ -195,6 +195,9 @@ func (d *Daemon) ResumeTimed(ctx context.Context, id string) (took time.Duration
 
 	d.mu.Lock()
 	if sb.State == StateRunning {
+		// Still a caller asking for it: activity, which a capture that woke
+		// the sandbox reads before putting it back to sleep.
+		sb.LastActiveAt = d.clock.Now()
 		d.mu.Unlock()
 		return 0, nil
 	}

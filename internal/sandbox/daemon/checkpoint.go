@@ -128,14 +128,48 @@ func (d *Daemon) captureInto(ctx context.Context, engine rt.Checkpointer, id, na
 	if !errors.Is(err, errCaptureNeedsWake) {
 		return info, err
 	}
+	before, _ := d.lastActive(id)
 	if err := d.Resume(ctx, id); err != nil {
 		return rt.CheckpointInfo{}, fmt.Errorf("wake the paused sandbox to capture it: %w", err)
 	}
+	woke, _ := d.lastActive(id)
 	info, err = d.captureOnce(ctx, engine, id, name, dir)
-	if perr := d.Pause(ctx, id); perr != nil {
-		d.log().Warn("capture: pausing again after the capture failed", "sandbox_id", id, "error", perr)
-	}
+	d.repauseIfUntouched(ctx, id, before, woke)
 	return info, err
+}
+
+func (d *Daemon) lastActive(id string) (time.Time, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	sb, ok := d.boxes[id]
+	if !ok {
+		return time.Time{}, false
+	}
+	return sb.LastActiveAt, true
+}
+
+// repauseIfUntouched puts a sandbox a capture woke back to sleep, unless its
+// owner used it meanwhile (its idle clock moved past the wake). The idle clock
+// goes back to before the wake, or a scheduled backup would keep an abandoned
+// sandbox alive forever, and the capture's running time is not metered.
+// ponytail: a usage flush that samples mid-capture still bills that slice;
+// pausing the meter for the capture needs a meter state of its own.
+func (d *Daemon) repauseIfUntouched(ctx context.Context, id string, before, woke time.Time) {
+	d.mu.Lock()
+	sb, ok := d.boxes[id]
+	untouched := ok && sb.State == StateRunning && sb.LastActiveAt.Equal(woke)
+	if untouched {
+		sb.LastActiveAt = before
+		sb.meter.resume(d.clock.Now())
+	}
+	d.mu.Unlock()
+	if !untouched {
+		d.log().Info("capture: the sandbox was used while awake for it; leaving it running", "sandbox_id", id)
+		return
+	}
+	if err := d.Pause(ctx, id); err != nil {
+		d.log().Warn("capture: pausing again after the capture failed", "sandbox_id", id, "error", err)
+	}
 }
 
 // errCaptureNeedsWake is a paused sandbox whose runtime captures only running ones.

@@ -794,10 +794,19 @@ func waitPending(t *testing.T, st *store.Store, id string) {
 	t.Fatal("the backup never reached pending")
 }
 
-// wakeCountRT counts the resumes that boot a paused sandbox again.
+// wakeCountRT counts the resumes that boot a paused sandbox again, and runs
+// onCapture inside each running capture.
 type wakeCountRT struct {
 	*runtimetest.Fake
-	wakes int
+	wakes     int
+	onCapture func()
+}
+
+func (r *wakeCountRT) Checkpoint(ctx context.Context, inst rt.Instance, dst rt.SnapshotRef) (rt.CheckpointInfo, error) {
+	if r.onCapture != nil {
+		r.onCapture()
+	}
+	return r.Fake.Checkpoint(ctx, inst, dst)
 }
 
 func (r *wakeCountRT) Restore(ctx context.Context, snap rt.SnapshotRef, spec rt.BootSpec) (rt.Instance, error) {
@@ -867,5 +876,76 @@ func TestBackupOfAPausedSandbox(t *testing.T) {
 				t.Errorf("wakes = %d; a runtime that cannot capture a pause snapshot is woken once", wake.wakes)
 			}
 		})
+	}
+}
+
+// A capture that wakes a paused sandbox must not pause it under its owner, nor
+// keep an abandoned one alive: a 15-minute backup schedule reset its idle
+// clock on every run.
+func TestCaptureWakeRestoresTheIdleClockAndLeavesAUsedSandboxRunning(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		used bool
+		want State
+	}{
+		{"abandoned: paused again, idle clock kept", false, StatePaused},
+		{"used during the capture: left running", true, StateRunning},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			st, err := store.Open(t.Context(), filepath.Join(dir, "state.db"))
+			if err != nil {
+				t.Fatalf("store: %v", err)
+			}
+			t.Cleanup(func() { st.Close() })
+			clk := &manualClock{t: time.Unix(1_000_000, 0)}
+			r := &wakeCountRT{Fake: runtimetest.NewFake()}
+			d := New(Config{
+				Runtime: r, Backups: st, Blobs: newCountingBlobs(), Clock: clk,
+				SnapshotDir: filepath.Join(dir, "snap"), IdleTimeout: time.Hour, HardTTL: 24 * time.Hour,
+			})
+			ctx := t.Context()
+			sb := createRunning(t, d)
+			if err := d.Pause(ctx, sb.ID); err != nil {
+				t.Fatalf("pause: %v", err)
+			}
+			idle, _ := d.lastActive(sb.ID)
+			clk.Advance(time.Hour)
+			if tc.used {
+				r.onCapture = func() {
+					clk.Advance(time.Second)
+					if _, err := d.Exec(ctx, sb.ID, rt.ExecSpec{Cmd: "true"}); err != nil {
+						t.Errorf("exec during the capture: %v", err)
+					}
+				}
+			}
+
+			row, err := d.Backup(ctx, sb.ID)
+			if err != nil {
+				t.Fatalf("backup: %v", err)
+			}
+			waitBackup(t, st, row.ID)
+			got, _ := d.Get(sb.ID)
+			if got.State != tc.want {
+				t.Fatalf("state after the backup = %s, want %s", got.State, tc.want)
+			}
+			if after, _ := d.lastActive(sb.ID); !tc.used && !after.Equal(idle) {
+				t.Errorf("idle clock = %v after the backup, want %v from before the wake", after, idle)
+			}
+		})
+	}
+}
+
+// A resume of a sandbox already running is still its owner asking for it.
+func TestResumeOfARunningSandboxIsActivity(t *testing.T) {
+	clk := &manualClock{t: time.Unix(1_000_000, 0)}
+	d := New(Config{Runtime: runtimetest.NewFake(), Clock: clk, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
+	sb := createRunning(t, d)
+	clk.Advance(time.Minute)
+	if err := d.Resume(t.Context(), sb.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := d.lastActive(sb.ID); !got.Equal(clk.Now()) {
+		t.Errorf("idle clock = %v, want %v", got, clk.Now())
 	}
 }
