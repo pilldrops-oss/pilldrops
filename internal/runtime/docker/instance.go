@@ -281,8 +281,14 @@ func (i *dockerInstance) FS() rt.FileSystem {
 
 // isKeepalive defines ka, true for the pid that is the container's keepalive:
 // the `sleep infinity` PID 1 (docker-init) runs, whose exit ends the container.
-const isKeepalive = `ka() { [ "$(tr '\0' ' ' < /proc/$1/cmdline 2>/dev/null)" = "sleep infinity " ] && ` +
-	`grep -qx 'PPid:[[:space:]]*1' /proc/$1/status 2>/dev/null; }; `
+// It is told from a tenant's orphaned `sleep infinity`, also PID 1's child, by
+// its start time (stat field 22): docker-init forked it at once, so it started
+// within a second (100 ticks) of PID 1. Fork time, so the shell's exec into
+// sleep after the workspace chown does not move it.
+const isKeepalive = `st() { set -- $(cat /proc/$1/stat 2>/dev/null); eval echo "\${22:-0}"; }; ` +
+	`ka() { [ "$(tr '\0' ' ' < /proc/$1/cmdline 2>/dev/null)" = "sleep infinity " ] && ` +
+	`grep -qx 'PPid:[[:space:]]*1' /proc/$1/status 2>/dev/null && ` +
+	`[ "$(st "$1")" -le $(( $(st 1) + 100 )) ]; }; `
 
 // procList prints "pid comm" for each process in the container's own pid
 // namespace, skipping itself and the keepalive. docker top reports host pids,

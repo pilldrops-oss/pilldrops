@@ -172,6 +172,34 @@ func TestLiveKeepaliveIsHiddenAndCannotBeSignalled(t *testing.T) {
 	if lv, ok := inst.(rt.Liveness); ok && !lv.Alive() {
 		t.Error("the container died after the refused signal")
 	}
+
+	// A tenant's own orphaned `sleep infinity` is also PID 1's child; it is
+	// listed and signalable.
+	time.Sleep(1500 * time.Millisecond)
+	res, err = inst.Exec(ctx, rt.ExecSpec{Cmd: `sh -c 'sleep infinity >/dev/null 2>&1 &'; sleep 0.5; ` +
+		`for d in /proc/[0-9]*; do [ "$(tr '\0' ' ' < $d/cmdline)" = "sleep infinity " ] && ` +
+		`[ ${d#/proc/} != ` + strconv.Itoa(keepalive) + ` ] && echo ${d#/proc/}; done`})
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	tenant, err := strconv.Atoi(strings.TrimSpace(res.Stdout))
+	if err != nil {
+		t.Fatalf("no tenant sleep found: %q", res.Stdout)
+	}
+	procs, err = inst.Procs()
+	if err != nil {
+		t.Fatalf("procs: %v", err)
+	}
+	listed := false
+	for _, p := range procs {
+		listed = listed || p.PID == tenant
+	}
+	if !listed {
+		t.Errorf("the tenant's orphaned sleep infinity (pid %d) is hidden: %+v", tenant, procs)
+	}
+	if err := inst.Signal(tenant, 9); err != nil {
+		t.Errorf("signal the tenant's sleep: %v", err)
+	}
 }
 
 // A container that dies underneath its sandbox must read as dead, or the
