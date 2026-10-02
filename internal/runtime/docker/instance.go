@@ -423,15 +423,11 @@ func (i *dockerInstance) state() (containerState, error) {
 // reads, before it is reported dead; a var so tests can shrink it.
 var deadConfirmAfter = 5 * time.Second
 
-// restartWindowBefore and restartWindowAfter bound, around dockerd's start
-// time, the stops a dockerd restart without live-restore causes: a graceful
-// one stops containers just before the new daemon starts, and dockerd's start
-// is read from btime, which is truncated to the second; after a crash the new
-// daemon kills the survivors just after it starts.
-const (
-	restartWindowBefore = 30 * time.Second
-	restartWindowAfter  = 60 * time.Second
-)
+// restartGrace is how long after dockerd's start a stop still counts as that
+// restart's doing: after a crash the new daemon stops the orphaned containers
+// just after it starts. A stop before its start, however long ago, was the old
+// daemon going away under the container.
+const restartGrace = 60 * time.Second
 
 // confirmDead decides whether a container read as stopped at now is dead: it
 // must stay stopped across two reads deadConfirmAfter apart.
@@ -445,14 +441,14 @@ func (i *dockerInstance) confirmDead(now time.Time) bool {
 	return now.Sub(i.deadSince) >= deadConfirmAfter
 }
 
-// restartCasualty reports whether a stop at finishedAt falls in the window a
-// dockerd restart at dockerdStart accounts for.
+// restartCasualty reports whether a stop at finishedAt was the doing of the
+// dockerd that started at dockerdStart. An unknown start or stop time is never
+// a casualty: the container is then judged by confirmDead like any exit.
 func restartCasualty(finishedAt, dockerdStart time.Time) bool {
 	if finishedAt.IsZero() || dockerdStart.IsZero() {
 		return false
 	}
-	return !finishedAt.Before(dockerdStart.Add(-restartWindowBefore)) &&
-		!finishedAt.After(dockerdStart.Add(restartWindowAfter))
+	return finishedAt.Before(dockerdStart.Add(restartGrace))
 }
 
 // OOMKilled implements rt.OOMKilledReporter.

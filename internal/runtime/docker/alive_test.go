@@ -23,26 +23,26 @@ func TestConfirmDeadNeedsTwoReadsApart(t *testing.T) {
 	}
 }
 
-// A dockerd restart without live-restore stops every container at once, just
-// before the new daemon starts (graceful) or just after (crash), and the
-// daemon's start time is only known to the second.
-func TestRestartCasualtyWindow(t *testing.T) {
+// A dockerd restart without live-restore stops every container: before the
+// new daemon starts, however long it stayed down (graceful, or an outage), or
+// just after it (a crash). On the rig a 60 s outage destroyed every sandbox.
+func TestRestartCasualty(t *testing.T) {
 	restarted := time.Now().Add(-10 * time.Minute)
 	for _, tc := range []struct {
 		name     string
 		stopped  time.Time
+		started  time.Time
 		casualty bool
 	}{
-		{"long before the restart", restarted.Add(-restartWindowBefore - time.Second), false},
-		{"at the window's early edge", restarted.Add(-restartWindowBefore), true},
-		{"just before the restart (graceful)", restarted.Add(-time.Second), true},
-		{"just after the restart (btime truncation)", restarted.Add(500 * time.Millisecond), true},
-		{"killed by the new daemon (crash)", restarted.Add(20 * time.Second), true},
-		{"at the window's late edge", restarted.Add(restartWindowAfter), true},
-		{"died on its own after the restart", restarted.Add(restartWindowAfter + time.Second), false},
+		{"stopped 10 min before dockerd started (outage)", restarted.Add(-10 * time.Minute), restarted, true},
+		{"just before the restart (graceful)", restarted.Add(-time.Second), restarted, true},
+		{"stopped 30 s after the start (crash)", restarted.Add(30 * time.Second), restarted, true},
+		{"died 5 min into the same dockerd", restarted.Add(5 * time.Minute), restarted, false},
+		{"dockerd's start unknown", restarted.Add(-time.Minute), time.Time{}, false},
+		{"stop time unknown", time.Time{}, restarted, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := restartCasualty(tc.stopped, restarted); got != tc.casualty {
+			if got := restartCasualty(tc.stopped, tc.started); got != tc.casualty {
 				t.Errorf("casualty = %v, want %v", got, tc.casualty)
 			}
 		})
