@@ -187,7 +187,14 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 	}
 	// Dead again under the engine of its maxRevives-th confirmed revive.
 	exhausted := sb.revives >= maxRevives
+	// Seen dead: not metered as running until a confirmed revive.
+	var u Usage
+	if sb.meter.running {
+		u = sb.meter.sample(now)
+		sb.meter.freeze(now)
+	}
 	d.mu.Unlock()
+	d.flushUsage(ctx, id, orgID, u)
 
 	if exhausted {
 		err = errors.New("died again after each of its last revives")
@@ -203,20 +210,13 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 		}
 		if err != nil && !errors.Is(err, rt.ErrWontStayUp) {
 			// Nothing read it stopped after a start: the engine is still
-			// settling. Not counted, never a crash; retried with backoff, and
-			// not metered as running while it is down.
+			// settling. Not counted, never a crash; retried with backoff.
 			d.mu.Lock()
 			sb.reviveFails++
 			wait := reviveBackoff(sb.reviveFails)
 			sb.reviveRetryAt = now.Add(wait)
-			var u Usage
-			if sb.meter.running {
-				u = sb.meter.sample(now)
-				sb.meter.freeze(now)
-			}
 			d.mu.Unlock()
 			release()
-			d.flushUsage(ctx, id, orgID, u)
 			d.log().Warn("revive failed; retrying", "sandbox_id", id, "in", wait, "error", err)
 			return
 		}

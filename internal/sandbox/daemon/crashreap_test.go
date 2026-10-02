@@ -185,11 +185,16 @@ type casualtyVMM struct {
 	stopped   bool
 	revives   int
 	engine    time.Time
+	// onRevive, if set, runs at the start of each Revive.
+	onRevive func()
 }
 
 func (*casualtyVMM) Casualty() bool             { return true }
 func (c *casualtyVMM) EngineStarted() time.Time { return c.engine }
 func (c *casualtyVMM) Revive(context.Context) (rt.Instance, error) {
+	if c.onRevive != nil {
+		c.onRevive()
+	}
 	c.revives++
 	return c.revived, c.reviveErr
 }
@@ -271,6 +276,47 @@ func TestScanDestroysACasualtyThatWillNotStayUp(t *testing.T) {
 				t.Errorf("history exit state = %q, want exited", got)
 			}
 		})
+	}
+}
+
+// The compute meter stops the moment the instance is seen dead, not once a
+// revive fails: a dockerd outage was billed as running on the rig.
+func TestScanStopsMeteringACasualtyBeforeItsRevive(t *testing.T) {
+	clk := &manualClock{t: time.Unix(1_000_000, 0)}
+	fp := newFakePersister(nil)
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, Clock: clk, IdleTimeout: time.Hour, HardTTL: 24 * time.Hour})
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	d.mu.Lock()
+	orig := d.boxes[sb.ID].inst
+	c := &casualtyVMM{deadVMM: deadVMM{orig}, revived: orig}
+	c.onRevive = func() {
+		d.mu.Lock()
+		running := d.boxes[sb.ID].meter.running
+		d.mu.Unlock()
+		if running {
+			t.Error("the revive ran while the dead sandbox was still metered as running")
+		}
+		clk.Advance(time.Minute) // a slow start: none of it is billed
+	}
+	d.boxes[sb.ID].inst = c
+	d.mu.Unlock()
+
+	clk.Advance(10 * time.Second)
+	d.scanExits(ctx)
+
+	d.mu.Lock()
+	m := d.boxes[sb.ID].meter
+	running, used := m.running, m.peek(clk.Now()).RunSeconds
+	d.mu.Unlock()
+	if !running {
+		t.Error("a revived sandbox is not metered")
+	}
+	if used != 10 {
+		t.Errorf("run seconds = %v, want 10: the time it was down was billed", used)
 	}
 }
 
