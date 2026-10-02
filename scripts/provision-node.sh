@@ -253,7 +253,14 @@ install -D -m 0755 bin/pilldrops-linux /opt/pilldrops/bin/pilldrops-linux
 # edited. Override settings with a drop-in (systemctl edit sandboxd) instead.
 for u in sandboxd.service sandbox-egress-restore.service; do
   if [ -e "/etc/systemd/system/$u" ]; then
-    log "$u already installed; left as is (override with: systemctl edit $u)"
+    if cmp -s "packaging/$u" "/etc/systemd/system/$u"; then
+      log "$u already installed and current"
+    else
+      log "WARNING: /etc/systemd/system/$u differs from packaging/$u and was left as is,"
+      log "         so changes to the packaged unit have NOT reached this node. To adopt them:"
+      log "         move your edits into a drop-in (systemctl edit $u), then"
+      log "         install -m 0644 packaging/$u /etc/systemd/system/$u && systemctl daemon-reload"
+    fi
   else
     log "Installing $u from packaging/"
     install -m 0644 "packaging/$u" "/etc/systemd/system/$u"
