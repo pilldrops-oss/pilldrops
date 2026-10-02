@@ -196,9 +196,23 @@ export function PreviewTab({
   defaultPort?: number
   outcome?: string
 }) {
-  const seed = String(defaultPort || 8000)
+  // No default yet means the port is still being resolved: nothing is loaded
+  // rather than a guess, since 8000 is wrong for a desktop. The default is
+  // followed as it resolves until the user picks a port of their own.
+  const seed = defaultPort ? String(defaultPort) : ''
   const [port, setPort] = useState(seed)
-  const [activePort, setActivePort] = useState(seed)
+  const [activePort, setActivePortRaw] = useState(seed)
+  const [followed, setFollowed] = useState(seed)
+  const [picked, setPicked] = useState(false)
+  if (seed !== followed && !picked) {
+    setFollowed(seed)
+    setPort(seed)
+    setActivePortRaw(seed)
+  }
+  function setActivePort(p: string) {
+    setPicked(true)
+    setActivePortRaw(p)
+  }
   const isRunning = status === 'running'
 
   const [detected, setDetected] = useState<PortStatus[] | null>(null)
@@ -229,6 +243,7 @@ export function PreviewTab({
   function previewBody() {
     if (!isRunning) return <NotRunningNotice status={status} what="preview your application" />
     if (!isPreviewCrossOrigin()) return <UnsafeEmbedNotice url={embedUrl} what="preview" />
+    if (!activePort) return <div className="empty">Finding the preview port…</div>
     return (
       <iframe
         className="preview-iframe"
@@ -680,6 +695,9 @@ export default function SandboxDetail() {
     setTabRaw(defaultTabFor(tplMeta.outcome))
   }, [tplMeta])
   const [loading, setLoading] = useState(!sandbox)
+  // The list row that opened this page lacks what names a desktop's port, so
+  // the preview waits for the GET instead of opening on a guess.
+  const [fetched, setFetched] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -692,6 +710,7 @@ export default function SandboxDetail() {
       // The GET now reports boot type/time itself, so it is trusted outright —
       // not only kept around from the create response that opened this page.
       setSandbox(data)
+      setFetched(true)
       setError(null)
     } catch (e) {
       setError((e as Error).message)
@@ -961,7 +980,7 @@ export default function SandboxDetail() {
           <PreviewTab
             id={id}
             status={sb.status}
-            defaultPort={previewPort}
+            defaultPort={fetched ? previewPort : undefined}
             outcome={tplMeta?.outcome}
           />
         )}
