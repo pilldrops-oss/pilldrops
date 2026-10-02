@@ -279,6 +279,18 @@ func (s *Store) ReviveLost(ctx context.Context, nodeID string, live map[string]s
 	return n, nil
 }
 
+// SandboxIDsOnTemplate returns the id of every stored sandbox on template, on
+// any node and in any state: a node keeps a capture while one names it.
+// ponytail: unindexed scan, run once per destroy of a capture's last loaded
+// user; index template if the table grows past what that read can afford.
+func (s *Store) SandboxIDsOnTemplate(ctx context.Context, template string) ([]string, error) {
+	return collectRows(ctx, s, `SELECT id FROM sandboxes WHERE template = ?`,
+		[]any{template}, scanInto(func(sc rowScanner) (string, error) {
+			var id string
+			return id, sc.Scan(&id)
+		}))
+}
+
 // SandboxByID returns one live sandbox row, any org.
 func (s *Store) SandboxByID(ctx context.Context, id string) (SandboxRecord, bool, error) {
 	return s.oneSandbox(ctx, `WHERE id = ?`, id)

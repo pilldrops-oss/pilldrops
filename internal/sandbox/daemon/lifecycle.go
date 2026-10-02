@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/observability"
@@ -418,7 +419,7 @@ func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState s
 	if err := os.RemoveAll(d.checkpointRoot(id)); err != nil {
 		d.log().Warn("destroy: checkpoint dir remove failed", "sandbox_id", id, "error", err)
 	}
-	d.removeUnusedCaptures(id, orgID, template)
+	d.removeCaptureIfUnused(ctx, orgID, template, id)
 	d.flushUsage(ctx, id, orgID, u)
 	if evict {
 		d.liveStats.forget(id)
@@ -555,34 +556,70 @@ func (d *Daemon) Refresh(ctx context.Context, id string) error {
 	return nil
 }
 
-// removeUnusedCaptures removes the captures a rehome or a move of sandbox id
-// booted it from, and the one it ran on, once nothing on this node runs on
-// them: a fork runs on its parent's template, so each destroy checks again. A
-// named snapshot is the snapshots API's to delete.
-// ponytail: checked against loaded sandboxes only; a record a restore has
-// not loaded yet is not consulted.
-func (d *Daemon) removeUnusedCaptures(id, orgID, template string) {
-	if templates.Dir() == "" {
-		return
-	}
-	captures := []string{rehomeTemplate(id), moveTemplate(orgID, id)}
-	if captureTemplate(orgID, template) && !slices.Contains(captures, template) {
-		captures = append(captures, template)
-	}
-	for _, tmpl := range captures {
-		if d.templateInUse(tmpl) {
-			continue
-		}
-		if err := os.RemoveAll(d.snapshotDir(tmpl)); err != nil {
-			d.log().Warn("destroy: capture template remove failed", "sandbox_id", id, "template", tmpl, "error", err)
-		}
+// templateUsers is the optional store lookup that finds every stored record
+// on a template, loaded on this node or not.
+type templateUsers interface {
+	SandboxIDsOnTemplate(ctx context.Context, template string) ([]string, error)
+}
+
+// holdTemplate registers a start on tmpl until the returned release: a capture
+// is never removed while something is booting from it and not yet in d.boxes.
+func (d *Daemon) holdTemplate(tmpl string) (release func()) {
+	d.captureMu.Lock()
+	d.starting[tmpl]++
+	d.captureMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			d.captureMu.Lock()
+			if d.starting[tmpl]--; d.starting[tmpl] <= 0 {
+				delete(d.starting, tmpl)
+			}
+			d.captureMu.Unlock()
+		})
 	}
 }
 
-// templateInUse reports a sandbox on this node, running or paused, on tmpl.
+// removeCaptureIfUnused removes tmpl, a rehome's or a move's capture, once no
+// sandbox uses it: none loaded here in any state, none starting on it, no
+// stored record but the one being destroyed (except), and no restore still
+// loading records. A fork runs on its parent's capture, so each destroy checks
+// again. A named snapshot is the snapshots API's to delete. captureMu is held
+// from the check through the removal, so no start can begin using tmpl between.
+// ponytail: one node-wide lock, held through a store read and a RemoveAll;
+// per-template locks if destroys ever queue behind it.
+func (d *Daemon) removeCaptureIfUnused(ctx context.Context, orgID, tmpl, except string) {
+	if templates.Dir() == "" || !captureTemplate(orgID, tmpl) {
+		return
+	}
+	d.captureMu.Lock()
+	defer d.captureMu.Unlock()
+	if d.starting[tmpl] > 0 || d.templateInUse(tmpl) {
+		return
+	}
+	if u, ok := d.cfg.Store.(templateUsers); ok {
+		ids, err := u.SandboxIDsOnTemplate(ctx, tmpl)
+		if err != nil {
+			d.log().Warn("capture template kept: its users could not be read", "template", tmpl, "error", err)
+			return
+		}
+		if slices.ContainsFunc(ids, func(id string) bool { return id != except }) {
+			return
+		}
+	}
+	if err := os.RemoveAll(d.snapshotDir(tmpl)); err != nil {
+		d.log().Warn("capture template remove failed", "template", tmpl, "error", err)
+	}
+}
+
+// templateInUse reports a sandbox on this node, in any state, on tmpl, or a
+// restore that has not loaded every record yet.
 func (d *Daemon) templateInUse(tmpl string) bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+	if d.gone != nil {
+		return true
+	}
 	for _, sb := range d.boxes {
 		if sb.Template == tmpl {
 			return true
@@ -591,12 +628,8 @@ func (d *Daemon) templateInUse(tmpl string) bool {
 	return false
 }
 
-// moveTemplate is the template a move of sandbox id in orgID lands it on.
-func moveTemplate(orgID, id string) string {
-	return store.SnapshotTemplateID(orgID, store.MoveSnapshotName(id))
-}
-
 // captureTemplate reports a rehome's or a move's capture of some sandbox of orgID.
 func captureTemplate(orgID, tmpl string) bool {
-	return strings.HasPrefix(tmpl, rehomeTemplate("")) || strings.HasPrefix(tmpl, moveTemplate(orgID, ""))
+	return strings.HasPrefix(tmpl, rehomePrefix) ||
+		strings.HasPrefix(tmpl, store.SnapshotTemplateID(orgID, store.MoveSnapshotName("")))
 }

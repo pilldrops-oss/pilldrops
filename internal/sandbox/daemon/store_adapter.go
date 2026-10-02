@@ -174,6 +174,11 @@ func (a StoreAdapter) SandboxRecord(ctx context.Context, id string) (PersistedSa
 	return persistedOf(r), true, nil
 }
 
+// SandboxIDsOnTemplate finds every stored record on a template.
+func (a StoreAdapter) SandboxIDsOnTemplate(ctx context.Context, template string) ([]string, error) {
+	return a.S.SandboxIDsOnTemplate(ctx, template)
+}
+
 func persistedOf(r store.SandboxRecord) PersistedSandbox {
 	return PersistedSandbox{
 		ID: r.ID, Template: r.Template, Name: r.Name, Slug: r.Slug, OrgID: r.OrgID, State: r.State,

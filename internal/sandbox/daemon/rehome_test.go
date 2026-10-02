@@ -132,48 +132,71 @@ func TestAConcurrentRehomeLeavesTheLiveSandboxsCapture(t *testing.T) {
 	close(gate.firstDone)
 	<-second
 
-	if info, ok := d.Get(id); !ok || info.State != StateRunning {
+	info, ok := d.Get(id)
+	if !ok || info.State != StateRunning {
 		t.Fatalf("present %v, state %q; want the rehomed sandbox running", ok, info.State)
 	}
-	if _, err := os.Stat(filepath.Join(templates.Dir(), "snap-rehome-"+id, "rootfs.squashfs")); err != nil {
+	if _, err := os.Stat(filepath.Join(d.snapshotDir(info.Template), "rootfs.squashfs")); err != nil {
 		t.Fatalf("the capture the rehomed sandbox runs from is gone: %v", err)
 	}
 }
 
-// A rehome's or a move's capture is a template of one sandbox: kept after its
-// destroy, every rehome and move filled the node's disk. A named snapshot the
-// owner saved outlives the sandbox.
-func TestDestroyRemovesTheSandboxsCaptureTemplates(t *testing.T) {
+// writeCapture lays down tmpl as a fetched or staged capture and returns its rootfs.
+func writeCapture(t *testing.T, d *Daemon, tmpl, content string) string {
+	t.Helper()
+	rootfs := filepath.Join(d.snapshotDir(tmpl), "rootfs.squashfs")
+	if err := os.MkdirAll(filepath.Dir(rootfs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfs, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return rootfs
+}
+
+func newCaptureDaemon(t *testing.T, cfg Config) (*Daemon, *fakePersister) {
+	t.Helper()
 	templates.SetDir(t.TempDir())
 	t.Cleanup(func() { templates.SetDir("") })
-	d := New(Config{Runtime: runtimetest.NewFake(), Store: newFakePersister(nil), IdleTimeout: time.Minute, HardTTL: time.Hour})
-	ctx := context.Background()
-	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "o"})
-	if err != nil {
-		t.Fatal(err)
+	fp := newFakePersister(nil)
+	if cfg.Runtime == nil {
+		cfg.Runtime = runtimetest.NewFake()
 	}
-	rehome := rehomeTemplate(sb.ID)
-	move := moveTemplate("o", sb.ID)
-	named := store.SnapshotTemplateID("o", "before-upgrade")
-	for _, tmpl := range []string{rehome, move, named} {
-		if err := os.MkdirAll(d.snapshotDir(tmpl), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(d.snapshotDir(tmpl), "rootfs.squashfs"), []byte(tmpl), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	if cfg.Store == nil {
+		cfg.Store = fp
 	}
+	cfg.IdleTimeout, cfg.HardTTL = time.Hour, time.Hour
+	return New(cfg), fp
+}
 
-	if err := d.Destroy(ctx, sb.ID); err != nil {
-		t.Fatal(err)
-	}
-	for _, tmpl := range []string{rehome, move} {
-		if _, err := os.Stat(d.snapshotDir(tmpl)); !os.IsNotExist(err) {
-			t.Errorf("%s survived its sandbox's destroy: %v", tmpl, err)
+// moveCapture is a template a move of id lands it on.
+func moveCapture(id string) string {
+	return store.SnapshotTemplateID("o", store.MoveSnapshotName(id)+"-0123abcd")
+}
+
+// A rehome's or a move's capture is a template of the sandbox it moved: kept
+// after its last user's destroy, every rehome and move filled the node's disk.
+// A named snapshot the owner saved outlives the sandbox.
+func TestDestroyRemovesTheCaptureItsLastUserRanOn(t *testing.T) {
+	d, _ := newCaptureDaemon(t, Config{})
+	ctx := context.Background()
+	named := store.SnapshotTemplateID("o", "before-upgrade")
+	for _, tmpl := range []string{rehomeTemplate("sb-1790000000000-0123abcd"), moveCapture("sb-1790000000000-0123abcd"), named} {
+		writeCapture(t, d, tmpl, tmpl)
+		sb, err := d.Create(ctx, CreateSpec{Template: tmpl, OrgID: "o"})
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if _, err := os.Stat(filepath.Join(d.snapshotDir(named), "rootfs.squashfs")); err != nil {
-		t.Errorf("the named snapshot %s went with the sandbox: %v", named, err)
+		if err := d.Destroy(ctx, sb.ID); err != nil {
+			t.Fatal(err)
+		}
+		_, err = os.Stat(d.snapshotDir(tmpl))
+		if tmpl == named && err != nil {
+			t.Errorf("the named snapshot %s went with the sandbox: %v", named, err)
+		}
+		if tmpl != named && !os.IsNotExist(err) {
+			t.Errorf("%s survived its last user's destroy: %v", tmpl, err)
+		}
 	}
 }
 
@@ -181,24 +204,12 @@ func TestDestroyRemovesTheSandboxsCaptureTemplates(t *testing.T) {
 // sandbox runs on that sandbox's capture: destroying the parent removed it,
 // and the fork's next resume or restart had no root image to boot.
 func TestDestroyKeepsACaptureAForkStillRunsOn(t *testing.T) {
-	templates.SetDir(t.TempDir())
-	t.Cleanup(func() { templates.SetDir("") })
-	d := New(Config{Runtime: runtimetest.NewFake(), Store: newFakePersister(nil), IdleTimeout: time.Hour, HardTTL: time.Hour})
+	d, _ := newCaptureDaemon(t, Config{})
 	ctx := context.Background()
-	for _, capture := range []func(id string) string{rehomeTemplate, func(id string) string { return moveTemplate("o", id) }} {
-		parent, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "o"})
+	for _, tmpl := range []string{rehomeTemplate("sb-1790000000000-0123abcd"), moveCapture("sb-1790000000000-0123abcd")} {
+		rootfs := writeCapture(t, d, tmpl, "root")
+		parent, err := d.Create(ctx, CreateSpec{Template: tmpl, OrgID: "o"})
 		if err != nil {
-			t.Fatal(err)
-		}
-		tmpl := capture(parent.ID)
-		d.mu.Lock()
-		d.boxes[parent.ID].Template = tmpl // as a rehome or a move leaves it
-		d.mu.Unlock()
-		rootfs := filepath.Join(d.snapshotDir(tmpl), "rootfs.squashfs")
-		if err := os.MkdirAll(filepath.Dir(rootfs), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(rootfs, []byte("root"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		fork, err := d.Fork(ctx, parent.ID, ForkSpec{})
@@ -225,6 +236,154 @@ func TestDestroyKeepsACaptureAForkStillRunsOn(t *testing.T) {
 		if _, err := os.Stat(d.snapshotDir(tmpl)); !os.IsNotExist(err) {
 			t.Errorf("%s outlived its last user: %v", tmpl, err)
 		}
+	}
+}
+
+// A sandbox rehomed back to a node where a fork of it still runs on its
+// earlier capture: the rehome replaced that capture under the fork.
+func TestARehomeBackLeavesTheCaptureAForkRunsOn(t *testing.T) {
+	blobs, err := artifact.Open(artifact.KindFS, artifact.Options{Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := &BlobArchive{Store: blobs}
+	fp := recordFake{newFakePersister(nil)}
+	d, _ := newCaptureDaemon(t, Config{Store: fp, SnapshotArchive: archive})
+	ctx := context.Background()
+	const id = "sb-1790000000000-0123abcd"
+	older := rehomeTemplate(id)
+	rootfs := writeCapture(t, d, older, "older")
+	parent, err := d.Create(ctx, CreateSpec{Template: older, OrgID: "o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork, err := d.Fork(ctx, parent.ID, ForkSpec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Destroy(ctx, parent.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	capture := t.TempDir()
+	for _, name := range []string{"mem", "state", "rootfs.squashfs"} {
+		if err := os.WriteFile(filepath.Join(capture, name), []byte("newer"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.PutPause(ctx, id, capture, "p2"); err != nil {
+		t.Fatal(err)
+	}
+	fp.mu.Lock()
+	fp.saved[id] = PersistedSandbox{ID: id, OrgID: "o", Template: older, State: "paused", PauseArchive: "p2", CreatedAt: 100}
+	fp.mu.Unlock()
+	if err := d.Rehome(ctx, id, "o"); err != nil {
+		t.Fatal(err)
+	}
+
+	info, _ := d.Get(id)
+	if info.Template == older {
+		t.Fatalf("the rehome landed on %s, the capture the fork runs on", older)
+	}
+	if got, err := os.ReadFile(rootfs); err != nil || string(got) != "older" {
+		t.Fatalf("the fork's capture after the rehome = %q, %v; want it untouched", got, err)
+	}
+	if err := d.Pause(ctx, fork.Child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Resume(ctx, fork.Child.ID); err != nil {
+		t.Fatalf("the fork does not resume after the rehome: %v", err)
+	}
+}
+
+// gatedBoot holds every Boot until released.
+type gatedBoot struct {
+	*runtimetest.Fake
+	booting, release chan struct{}
+}
+
+func (g *gatedBoot) Boot(ctx context.Context, spec rt.BootSpec) (rt.Instance, error) {
+	close(g.booting)
+	<-g.release
+	return g.Fake.Boot(ctx, spec)
+}
+
+// A create booting from a capture is not in d.boxes until its boot returns: a
+// destroy of the capture's last loaded user in that window removed it.
+func TestADestroyRacingAStartingCreateKeepsItsTemplate(t *testing.T) {
+	fake := runtimetest.NewFake()
+	d, _ := newCaptureDaemon(t, Config{Runtime: fake})
+	ctx := context.Background()
+	tmpl := moveCapture("sb-1790000000000-0123abcd")
+	rootfs := writeCapture(t, d, tmpl, "root")
+	parent, err := d.Create(ctx, CreateSpec{Template: tmpl, OrgID: "o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := &gatedBoot{Fake: fake, booting: make(chan struct{}), release: make(chan struct{})}
+	d.cfg.Runtime = gate
+	created := make(chan error, 1)
+	go func() {
+		_, err := d.Create(ctx, CreateSpec{Template: tmpl, OrgID: "o"})
+		created <- err
+	}()
+	<-gate.booting
+
+	if err := d.Destroy(ctx, parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(gate.release)
+	if err := <-created; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(rootfs); err != nil {
+		t.Fatalf("the capture a create was booting from went with the destroy: %v", err)
+	}
+}
+
+// Until a restore has loaded every record, a sandbox on a capture may not be
+// in d.boxes yet.
+func TestADestroyDuringAnUnfinishedRestoreRemovesNoCapture(t *testing.T) {
+	d, _ := newCaptureDaemon(t, Config{})
+	ctx := context.Background()
+	tmpl := moveCapture("sb-1790000000000-0123abcd")
+	rootfs := writeCapture(t, d, tmpl, "root")
+	sb, err := d.Create(ctx, CreateSpec{Template: tmpl, OrgID: "o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.mu.Lock()
+	d.gone = map[string]bool{} // as restoreFromStore leaves it on an unfinished pass
+	d.mu.Unlock()
+
+	if err := d.Destroy(ctx, sb.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(rootfs); err != nil {
+		t.Fatalf("a capture was removed while a restore was unfinished: %v", err)
+	}
+}
+
+// A stored record this node has not loaded (another node's, or one a restore
+// left) still runs on its capture.
+func TestAStoredRecordKeepsItsCapture(t *testing.T) {
+	d, fp := newCaptureDaemon(t, Config{})
+	ctx := context.Background()
+	tmpl := moveCapture("sb-1790000000000-0123abcd")
+	rootfs := writeCapture(t, d, tmpl, "root")
+	sb, err := d.Create(ctx, CreateSpec{Template: tmpl, OrgID: "o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp.mu.Lock()
+	fp.saved["sb-1790000000001-0123abcd"] = PersistedSandbox{ID: "sb-1790000000001-0123abcd", OrgID: "o", Template: tmpl, State: "paused"}
+	fp.mu.Unlock()
+
+	if err := d.Destroy(ctx, sb.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(rootfs); err != nil {
+		t.Fatalf("the capture a stored record names went with the destroy: %v", err)
 	}
 }
 
@@ -314,7 +473,7 @@ func TestARehomeDuringADestroyKeepsItsCapture(t *testing.T) {
 	<-rehomed
 
 	if info, ok := d.Get(sb.ID); ok && info.State == StateRunning {
-		if _, err := os.Stat(filepath.Join(d.snapshotDir(rehomeTemplate(sb.ID)), "rootfs.squashfs")); err != nil {
+		if _, err := os.Stat(filepath.Join(d.snapshotDir(info.Template), "rootfs.squashfs")); err != nil {
 			t.Fatalf("the rehomed sandbox runs on a capture the destroy removed: %v", err)
 		}
 	}

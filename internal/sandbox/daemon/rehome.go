@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -86,9 +88,13 @@ func (d *Daemon) Rehome(ctx context.Context, id, org string) error {
 	}
 	// The capture lands as a template of its own, whole, by one rename: a
 	// directory holding rootfs.squashfs is bootable, so it must never be seen
-	// half-written. Then the sandbox is created under its own id from it, the
-	// path a move's target takes, which carries its config from its record.
+	// half-written. Its name is new each time, so it never lands on a capture
+	// a fork of an earlier rehome still runs on. Then the sandbox is created
+	// under its own id from it, the path a move's target takes, which carries
+	// its config from its record.
 	tmpl := rehomeTemplate(id)
+	release := d.holdTemplate(tmpl)
+	defer release()
 	dir := d.snapshotDir(tmpl)
 	stage := dir + ".staging"
 	got, err := d.cfg.SnapshotArchive.Get(ctx, id, stage)
@@ -98,7 +104,6 @@ func (d *Daemon) Rehome(ctx context.Context, id, org string) error {
 	if !got {
 		return fmt.Errorf("%w: no archived snapshot of it", ErrNotRehomable)
 	}
-	_ = os.RemoveAll(dir)
 	if err := os.Rename(stage, dir); err != nil {
 		_ = os.RemoveAll(stage)
 		return fmt.Errorf("rehome %s: %w", id, err)
@@ -109,7 +114,8 @@ func (d *Daemon) Rehome(ctx context.Context, id, org string) error {
 	}); err != nil {
 		// Holding rootfs.squashfs, it would be listed to tenants as a template;
 		// the archive keeps the capture for a retry.
-		_ = os.RemoveAll(dir)
+		release()
+		d.removeCaptureIfUnused(context.WithoutCancel(ctx), r.OrgID, tmpl, id)
 		return fmt.Errorf("rehome %s: boot from its archive: %w", id, err)
 	}
 	// It runs here now and its record says so, but when its memory is being
@@ -122,8 +128,18 @@ func (d *Daemon) Rehome(ctx context.Context, id, org string) error {
 	return nil
 }
 
-// rehomeTemplate is the template a rehome of sandbox id lands its capture as.
-func rehomeTemplate(id string) string { return "snap-rehome-" + id }
+// rehomePrefix starts every rehome capture's template id.
+const rehomePrefix = "snap-rehome-"
+
+// rehomeTemplate names a new template for a rehome of sandbox id to land its
+// capture as.
+func rehomeTemplate(id string) string {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("sandboxd: crypto/rand failed: %v", err))
+	}
+	return rehomePrefix + id + "-" + hex.EncodeToString(b)
+}
 
 // ownerChecker is the optional store lookup that tells a node a record it
 // holds now belongs to another node.

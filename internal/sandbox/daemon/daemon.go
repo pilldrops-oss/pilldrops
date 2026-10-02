@@ -94,8 +94,13 @@ type Daemon struct {
 	// rehoming holds one channel per sandbox a rehome or a destroy's teardown is running for, closed
 	// when it ends; guarded by mu.
 	rehoming map[string]chan struct{}
-	stop     chan struct{}
-	stopOnce sync.Once
+	// captureMu guards starting, and is held by a capture's removal from its
+	// check through its RemoveAll; starting counts the boots in flight on each
+	// template.
+	captureMu sync.Mutex
+	starting  map[string]int
+	stop      chan struct{}
+	stopOnce  sync.Once
 	// revives tracks restore's background casualty revives; reviveStop, closed
 	// under mu, cancels them, and no revive is added once it is closed.
 	// gone names the sandboxes removed while a restore is unfinished, so a
@@ -174,7 +179,7 @@ func New(cfg Config) *Daemon {
 	_ = os.MkdirAll(cfg.SnapshotDir, 0o755)
 	d := &Daemon{
 		cfg: cfg, clock: cfg.Clock,
-		boxes: make(map[string]*Sandbox), pending: make(map[string]int), rehoming: make(map[string]chan struct{}), stop: make(chan struct{}), reviveStop: make(chan struct{}),
+		boxes: make(map[string]*Sandbox), pending: make(map[string]int), rehoming: make(map[string]chan struct{}), starting: make(map[string]int), stop: make(chan struct{}), reviveStop: make(chan struct{}),
 		metrics: newDaemonMetrics(),
 	}
 	// Anchor here so the first usage flush lands one full interval in, not on the first tick.
@@ -270,6 +275,8 @@ func (d *Daemon) Create(ctx context.Context, spec CreateSpec) (info SandboxInfo,
 	if err := rt.ValidateTemplateName(spec.Template); err != nil {
 		return SandboxInfo{}, err
 	}
+	// Until it is in d.boxes, nothing else says this boot uses the template.
+	defer d.holdTemplate(spec.Template)()
 	if spec.OrgID == "" {
 		spec.OrgID = "default"
 	}

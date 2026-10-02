@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestGetActiveSandboxRow(t *testing.T) {
 	st := openTemp(t)
@@ -73,5 +76,25 @@ func TestActiveSandboxRowsByOrg(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Fatalf("want 0 rows for unknown org, got %d", len(empty))
+	}
+}
+
+func TestSandboxIDsOnTemplate(t *testing.T) {
+	st := openTemp(t)
+	for _, r := range []SandboxRecord{
+		{ID: "sb-1", Template: "snap-rehome-x", OrgID: "org-a", NodeID: "n1", State: "running"},
+		{ID: "sb-2", Template: "snap-rehome-x", OrgID: "org-a", NodeID: "n2", State: "paused"},
+		{ID: "sb-3", Template: "base", OrgID: "org-a", State: "running"},
+	} {
+		if err := st.SaveSandbox(t.Context(), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids, err := st.SandboxIDsOnTemplate(t.Context(), "snap-rehome-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || !slices.Contains(ids, "sb-1") || !slices.Contains(ids, "sb-2") {
+		t.Fatalf("ids on snap-rehome-x = %v, want sb-1 and sb-2 on any node and state", ids)
 	}
 }

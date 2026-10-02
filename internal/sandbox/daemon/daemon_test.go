@@ -338,6 +338,18 @@ func (f *fakePersister) DeleteSandbox(ctx context.Context, id string) error {
 	return nil
 }
 
+func (f *fakePersister) SandboxIDsOnTemplate(_ context.Context, template string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var ids []string
+	for id, rec := range f.saved {
+		if rec.Template == template && !f.deleted[id] {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
 func (f *fakePersister) RecordUsage(ctx context.Context, _, _ string, u Usage) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
