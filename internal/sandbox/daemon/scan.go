@@ -175,10 +175,12 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 		release()
 		return
 	}
-	if now := d.clock.Now(); now.Sub(sb.revivedSince) > reviveWindow {
-		sb.revives, sb.revivedSince = 0, now
+	now := d.clock.Now()
+	if now.Sub(sb.lastRevive) > reviveWindow {
+		sb.revives = 0
 	}
 	sb.revives++
+	sb.lastRevive = now
 	exhausted := sb.revives > maxRevives
 	d.mu.Unlock()
 
@@ -225,11 +227,12 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 	}
 }
 
-// maxRevives bounds the casualty revives of one sandbox within reviveWindow:
-// a container that starts and dies again is a crash, not a casualty.
+// maxRevives bounds back-to-back casualty revives, each within reviveWindow
+// of the last: a container that starts and dies again is a crash, not a
+// casualty. One that stayed up longer than the window was a casualty again.
 const (
 	maxRevives   = 3
-	reviveWindow = 10 * time.Minute
+	reviveWindow = 2 * time.Minute
 )
 
 // reviveTimeout bounds one revive, start retries and app restart included.

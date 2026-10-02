@@ -301,6 +301,46 @@ func TestScanKeepsACasualtyWhoseReviveErrsWithoutAConfirmedStop(t *testing.T) {
 	}
 }
 
+// The count is of revives back to back: a healthy sandbox revived on each of
+// several dockerd restarts minutes apart was destroyed without a start attempt.
+func TestReviveCountResetsAfterARevivedSandboxStaysUp(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		apart     time.Duration
+		destroyed bool
+	}{
+		{"restarts three minutes apart", 3 * time.Minute, false},
+		{"dies again within seconds", 10 * time.Second, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := &manualClock{t: time.Unix(1_000_000, 0)}
+			fp := newFakePersister(nil)
+			d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, Clock: clk, IdleTimeout: time.Hour, HardTTL: time.Hour})
+			ctx := context.Background()
+			sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			for range maxRevives + 1 {
+				d.mu.Lock()
+				if box := d.boxes[sb.ID]; box != nil {
+					c := &casualtyVMM{deadVMM: deadVMM{box.inst}}
+					c.revived = c.Instance
+					box.inst = c
+				}
+				d.mu.Unlock()
+				d.scanExits(ctx)
+				clk.Advance(tc.apart)
+			}
+			_, present := d.Get(sb.ID)
+			if present == tc.destroyed {
+				t.Fatalf("present after %d deaths %v apart = %v, want destroyed %v (events %v)",
+					maxRevives+1, tc.apart, present, tc.destroyed, fp.events)
+			}
+		})
+	}
+}
+
 // envdDownVMM is a running instance nothing can exec into: its envd is down.
 type envdDownVMM struct {
 	rt.Instance
