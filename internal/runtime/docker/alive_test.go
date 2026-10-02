@@ -27,7 +27,7 @@ func TestConfirmDeadNeedsTwoReadsApart(t *testing.T) {
 // new daemon starts, however long it stayed down (graceful, or an outage), or
 // just after it (a crash). On the rig a 60 s outage destroyed every sandbox.
 func TestRestartCasualty(t *testing.T) {
-	restarted := time.Now().Add(-10 * time.Minute)
+	restarted := time.Now().Add(-time.Hour)
 	for _, tc := range []struct {
 		name     string
 		stopped  time.Time
@@ -37,7 +37,10 @@ func TestRestartCasualty(t *testing.T) {
 		{"stopped 10 min before dockerd started (outage)", restarted.Add(-10 * time.Minute), restarted, true},
 		{"just before the restart (graceful)", restarted.Add(-time.Second), restarted, true},
 		{"stopped 30 s after the start (crash)", restarted.Add(30 * time.Second), restarted, true},
-		{"died 5 min into the same dockerd", restarted.Add(5 * time.Minute), restarted, false},
+		{"stopped 2 min after the start (slow restore of many)", restarted.Add(2 * time.Minute), restarted, true},
+		{"just inside the grace", restarted.Add(restartGrace - time.Second), restarted, true},
+		{"at the end of the grace", restarted.Add(restartGrace), restarted, false},
+		{"died 10 min into the same dockerd", restarted.Add(10 * time.Minute), restarted, false},
 		{"dockerd's start unknown (rootless, snap, remote)", restarted.Add(5 * time.Minute), time.Time{}, true},
 		{"stop time unknown", time.Time{}, restarted, false},
 	} {

@@ -429,8 +429,10 @@ var deadConfirmAfter = 5 * time.Second
 // restartGrace is how long after dockerd's start a stop still counts as that
 // restart's doing: after a crash the new daemon stops the orphaned containers
 // just after it starts. A stop before its start, however long ago, was the old
-// daemon going away under the container.
-const restartGrace = 60 * time.Second
+// daemon going away under the container. Minutes, not seconds: a dockerd
+// restoring many containers after a crash stops some of them late, and a
+// truly broken one is still caught when its revive will not stay up.
+const restartGrace = 5 * time.Minute
 
 // confirmDead decides whether a container read as stopped at now is dead: it
 // must stay stopped across two reads deadConfirmAfter apart.
