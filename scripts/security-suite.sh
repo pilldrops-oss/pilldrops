@@ -301,7 +301,9 @@ expect_blocked "block.cgnat"             "100.64.0.1 (CGNAT)"                 "$
 # IPv4-family, so the fix is disabling the stack. /proc/net/if_inet6 lists
 # an address whenever the stack is up; with disable_ipv6=1 newer kernels keep
 # the file but leave it empty, so it is tested for content, not existence.
-expect_blocked "block.ipv6.stack"        "guest has NO IPv6 stack (/proc/net/if_inet6)" "$PROBE" 'test -s /proc/net/if_inet6' 1
+# grep, not test -s: a /proc file always reports size 0. rc 1 is an empty
+# file, rc 2 no file at all (no IPv6 in the kernel); both mean no stack.
+expect_blocked "block.ipv6.stack"        "guest has NO IPv6 stack (/proc/net/if_inet6)" "$PROBE" 'grep -q . /proc/net/if_inet6' 1 2
 expect_blocked "block.ipv6.linklocal"    "guest has no IPv6 address on any interface"   "$PROBE" 'ip -6 addr show scope link 2>/dev/null | grep -q inet6' 1
 # tcp/22 with a node-side control: the target must demonstrably accept tcp/22
 # from this network or "blocked" from the guest means nothing.
