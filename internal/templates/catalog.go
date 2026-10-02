@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
@@ -186,6 +187,23 @@ func Catalog() []Template {
 	}
 	for _, t := range disk {
 		if _, extra := byID[t.ID]; extra {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// Internal reports whether id is a node-internal template: a snapshot capture
+// (store.SnapshotTemplateID, a move's, a rehome's). Its id names its org and
+// sandbox, so no tenant catalogue lists it; resume and restore resolve it by id.
+func Internal(id string) bool { return strings.HasPrefix(id, "snap-") }
+
+// Listed is Catalog without the internal templates: what a tenant is shown.
+func Listed() []Template {
+	cat := Catalog()
+	out := make([]Template, 0, len(cat))
+	for _, t := range cat {
+		if !Internal(t.ID) {
 			out = append(out, t)
 		}
 	}

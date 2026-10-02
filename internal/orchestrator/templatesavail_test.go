@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -126,6 +127,54 @@ func TestTemplatesAvailableMatchesWhatACreateCanBoot(t *testing.T) {
 		id, _ := tpl["id"].(string)
 		if tpl["available"] != want[id] {
 			t.Errorf("%s: available = %v, want %v", id, tpl["available"], want[id])
+		}
+	}
+}
+
+// A node that still lists snapshot templates must not reach a tenant through
+// the control plane: their ids name another org's sandboxes.
+func TestTenantCataloguesHideSnapshotTemplatesFromAnyNode(t *testing.T) {
+	const snap = "snap-37a8eec1-move-sb-1790000000000-0123abcd"
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/images" {
+			_, _ = w.Write([]byte(`{"images":[{"id":"base"},{"id":"` + snap + `"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"id":"base"},{"id":"` + snap + `"}]`))
+	}))
+	t.Cleanup(node.Close)
+	st, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "tpl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	_, member, err := st.CreateKey(t.Context(), "m", "org-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := fleetServer("apikey", "nodetoken")
+	s.SetStore(st)
+	capy := cluster.Capacity{Cores: 8, MemTotalMB: 64000, MemAvailMB: 64000}
+	if err := s.reg.Upsert(cluster.NodeUpsert{ID: "n1", URL: node.URL, Key: "k-n1", Cap: capy}, s.now()); err != nil {
+		t.Fatal(err)
+	}
+	orch := httptest.NewServer(s.Routes())
+	t.Cleanup(orch.Close)
+
+	for _, path := range []string{"/v1/templates", "/v1/images"} {
+		req, _ := http.NewRequest(http.MethodGet, orch.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+member)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 || !strings.Contains(string(body), `"base"`) {
+			t.Fatalf("%s = %d %s, want 200 listing base", path, resp.StatusCode, body)
+		}
+		if strings.Contains(string(body), snap) {
+			t.Errorf("%s relayed the snapshot template: %s", path, body)
 		}
 	}
 }

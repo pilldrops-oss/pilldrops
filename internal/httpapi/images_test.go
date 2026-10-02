@@ -5,7 +5,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
+
+	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
 
 func doJSON(t *testing.T, method, url, key string, body any) (int, map[string]any) {
@@ -132,5 +138,59 @@ func TestImagePatchIsOperatorOnly(t *testing.T) {
 	if code, _ := doJSON(t, "PATCH", srv.URL+"/v1/images/base", opKey,
 		map[string]any{"published": true}); code != 200 {
 		t.Fatalf("operator key PATCH /v1/images/base = %d, want 200", code)
+	}
+}
+
+// Snapshot captures land in the template directory under ids that name their
+// org and sandbox; a tenant's catalogue must not show another org's.
+func TestTenantCataloguesHideSnapshotTemplates(t *testing.T) {
+	dir := t.TempDir()
+	for _, id := range []string{"snap-37a8eec1-move-sb-1790000000000-0123abcd", "mytool"} {
+		if err := os.MkdirAll(filepath.Join(dir, id), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, id, "rootfs.squashfs"), []byte(id), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	templates.SetDir(dir)
+	t.Cleanup(func() { templates.SetDir("") })
+	srv, _, key := newTestServerWithStore(t)
+
+	ids := func(path string, list func([]byte) []map[string]any) []string {
+		req, _ := http.NewRequest("GET", srv.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+key)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		var out []string
+		for _, e := range list(b) {
+			id, _ := e["id"].(string)
+			out = append(out, id)
+		}
+		return out
+	}
+	tmpls := ids("/v1/templates", func(b []byte) []map[string]any {
+		var v []map[string]any
+		_ = json.Unmarshal(b, &v)
+		return v
+	})
+	imgs := ids("/v1/images", func(b []byte) []map[string]any {
+		var v struct{ Images []map[string]any }
+		_ = json.Unmarshal(b, &v)
+		return v.Images
+	})
+	for name, got := range map[string][]string{"/v1/templates": tmpls, "/v1/images": imgs} {
+		if !slices.Contains(got, "mytool") {
+			t.Errorf("%s = %v, want the disk template mytool", name, got)
+		}
+		for _, id := range got {
+			if strings.HasPrefix(id, "snap-") {
+				t.Errorf("%s lists snapshot template %q", name, id)
+			}
+		}
 	}
 }

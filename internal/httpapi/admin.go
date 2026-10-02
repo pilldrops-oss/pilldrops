@@ -113,7 +113,7 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	cat := templates.Catalog()
+	cat := templates.Listed()
 	out := make([]templates.Template, 0, len(cat))
 	for _, t := range cat {
 		if f, ok := flags[t.ID]; ok && f.Published != nil && !*f.Published {

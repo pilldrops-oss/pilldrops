@@ -578,10 +578,6 @@ func (s *Server) fanOut(primary *cluster.Node, method, path string, body []byte,
 	}
 }
 
-func (s *Server) handleImagesList(w http.ResponseWriter, r *http.Request) {
-	s.proxyToNode(w, r, "GET", "/v1/images")
-}
-
 func (s *Server) handleHistoryList(w http.ResponseWriter, r *http.Request) {
 	if s.historyFromStore(w, r) {
 		return

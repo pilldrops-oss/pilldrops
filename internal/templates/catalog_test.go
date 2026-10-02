@@ -3,6 +3,7 @@ package templates
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
@@ -179,5 +180,37 @@ func TestCatalogIsTheBaseImages(t *testing.T) {
 		if !got[id] {
 			t.Errorf("catalog is missing base image %q", id)
 		}
+	}
+}
+
+// A snapshot capture's template id names its org and sandbox: no tenant
+// catalogue may list it, and the resume or restore that boots it must still
+// resolve it.
+func TestInternalTemplatesAreNotListedButStillResolve(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { SetDir("") })
+	const snap = "snap-37a8eec1-move-sb-1790000000000-0123abcd"
+	for _, id := range []string{snap, "snap-rehome-sb-1790000000000-0123abcd", "mytool"} {
+		if err := os.MkdirAll(filepath.Join(dir, id), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, id, "rootfs.squashfs"), []byte(id), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	SetDir(dir)
+
+	listed := map[string]bool{}
+	for _, tm := range Listed() {
+		listed[tm.ID] = true
+		if strings.HasPrefix(tm.ID, "snap-") {
+			t.Errorf("snapshot template %q listed", tm.ID)
+		}
+	}
+	if !listed["mytool"] || !listed["base"] {
+		t.Errorf("listed = %v, want the disk and built-in templates", listed)
+	}
+	if _, ok := Resolve(snap); !ok {
+		t.Fatal("a hidden snapshot template no longer resolves; resume and restore would fail")
 	}
 }

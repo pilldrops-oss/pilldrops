@@ -36,13 +36,42 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
+	// An older node lists internal templates; they never reach a tenant.
+	listed := make([]map[string]any, 0, len(cat))
 	for _, t := range cat {
 		id, _ := t["id"].(string)
+		if templates.Internal(id) {
+			continue
+		}
 		// The same Request a create of this template places with.
 		place := cluster.Request{Template: id, Runtime: templateRuntime(id), NoBuild: s.noReadyBuild(r.Context(), id)}
 		t["available"], _ = s.reg.TemplateSupport(place, now, cluster.NodeTTL)
+		listed = append(listed, t)
 	}
-	writeJSON(w, http.StatusOK, cat)
+	writeJSON(w, http.StatusOK, listed)
+}
+
+// handleImagesList relays a node's image list without its internal templates,
+// which an older node still lists.
+func (s *Server) handleImagesList(w http.ResponseWriter, r *http.Request) {
+	rec := httptest.NewRecorder()
+	s.proxyToNode(rec, r, http.MethodGet, "/v1/images")
+	var page struct {
+		Images []map[string]any `json:"images"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &page) != nil {
+		maps.Copy(w.Header(), rec.Header())
+		w.WriteHeader(rec.Code)
+		_, _ = w.Write(rec.Body.Bytes()) //nolint:errcheck // best-effort: headers are committed
+		return
+	}
+	listed := make([]map[string]any, 0, len(page.Images))
+	for _, img := range page.Images {
+		if id, _ := img["id"].(string); !templates.Internal(id) {
+			listed = append(listed, img)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"images": listed})
 }
 
 // noReadyBuild reports that the store knows tmpl has no ready build, so a node
@@ -67,7 +96,7 @@ func (s *Server) handlePublicTemplates(w http.ResponseWriter, r *http.Request) {
 // form). Env must be copied: the slice shares the catalogue's backing array,
 // so redacting in place would strip the authenticated endpoint too.
 func publicCatalog() []templates.Template {
-	cat := templates.Catalog()
+	cat := templates.Listed()
 	out := make([]templates.Template, 0, len(cat))
 	for _, t := range cat {
 		if len(t.Env) > 0 {

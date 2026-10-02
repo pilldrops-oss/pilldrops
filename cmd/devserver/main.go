@@ -1461,7 +1461,7 @@ func (m *DevManager) Destroy(_ context.Context, sandboxID string) {
 // catalog nodes serve.
 func serveCatalog(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	writeJSON(w, templates.Catalog())
+	writeJSON(w, templates.Listed())
 }
 
 // errPathEscapesRoot lets handlers answer 400 for a confinement escape and
