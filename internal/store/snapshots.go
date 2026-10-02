@@ -56,6 +56,13 @@ func SnapshotTemplateID(orgID, name string) string {
 // MoveSnapshotName is the snapshot a move of sandbox id captures it into.
 func MoveSnapshotName(id string) string { return "move-" + id }
 
+// ReservedSnapshotName reports a name the platform's own captures use: a
+// move's, and a rehome's on the node. The sandbox they moved runs on it, so no
+// tenant may save over one or create from one.
+func ReservedSnapshotName(name string) bool {
+	return strings.HasPrefix(name, MoveSnapshotName("")) || strings.HasPrefix(name, "rehome-")
+}
+
 // SnapshotBuildID is the build id a snapshot version publishes under. The
 // version is zero-padded into it on purpose.
 //

@@ -185,6 +185,10 @@ func (s *Server) handleSnapshotSave(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if store.ReservedSnapshotName(name) {
+		writeErr(w, http.StatusBadRequest, "snapshot names starting move- or rehome- are reserved for the platform's own captures")
+		return
+	}
 
 	org := fastOrg(r)
 	templateID := store.SnapshotTemplateID(org, name)

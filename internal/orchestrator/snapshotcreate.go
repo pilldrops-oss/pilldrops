@@ -44,6 +44,10 @@ func (s *Server) resolveSnapshotCreate(w http.ResponseWriter, r *http.Request, b
 		return out, false
 	}
 	view, err := st.LatestReadySnapshot(r.Context(), fastOrg(r), req.Snapshot)
+	// A move's capture is the moved sandbox's root image, not the org's to boot.
+	if err == nil && store.ReservedSnapshotName(req.Snapshot) {
+		err = store.ErrSnapshotNotFound
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrSnapshotNotFound) {
 			// One answer for "never existed", "still building" and "another

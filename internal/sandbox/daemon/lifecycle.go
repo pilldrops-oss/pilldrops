@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/observability"
@@ -403,15 +405,7 @@ func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState s
 	if err := os.RemoveAll(d.checkpointRoot(id)); err != nil {
 		d.log().Warn("destroy: checkpoint dir remove failed", "sandbox_id", id, "error", err)
 	}
-	// So do the captures a rehome or a move booted it from, each a template of
-	// this sandbox alone. A named snapshot is the snapshots API's to delete.
-	if templates.Dir() != "" {
-		for _, tmpl := range []string{rehomeTemplate(id), store.SnapshotTemplateID(orgID, store.MoveSnapshotName(id))} {
-			if err := os.RemoveAll(d.snapshotDir(tmpl)); err != nil {
-				d.log().Warn("destroy: capture template remove failed", "sandbox_id", id, "template", tmpl, "error", err)
-			}
-		}
-	}
+	d.removeUnusedCaptures(id, orgID, template)
 	d.flushUsage(ctx, id, orgID, u)
 	if evict {
 		d.liveStats.forget(id)
@@ -546,4 +540,50 @@ func (d *Daemon) Refresh(ctx context.Context, id string) error {
 
 	d.persistRec(ctx, rec)
 	return nil
+}
+
+// removeUnusedCaptures removes the captures a rehome or a move of sandbox id
+// booted it from, and the one it ran on, once nothing on this node runs on
+// them: a fork runs on its parent's template, so each destroy checks again. A
+// named snapshot is the snapshots API's to delete.
+// ponytail: checked against loaded sandboxes only; a record a restore has
+// not loaded yet is not consulted.
+func (d *Daemon) removeUnusedCaptures(id, orgID, template string) {
+	if templates.Dir() == "" {
+		return
+	}
+	captures := []string{rehomeTemplate(id), moveTemplate(orgID, id)}
+	if captureTemplate(orgID, template) && !slices.Contains(captures, template) {
+		captures = append(captures, template)
+	}
+	for _, tmpl := range captures {
+		if d.templateInUse(tmpl) {
+			continue
+		}
+		if err := os.RemoveAll(d.snapshotDir(tmpl)); err != nil {
+			d.log().Warn("destroy: capture template remove failed", "sandbox_id", id, "template", tmpl, "error", err)
+		}
+	}
+}
+
+// templateInUse reports a sandbox on this node, running or paused, on tmpl.
+func (d *Daemon) templateInUse(tmpl string) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	for _, sb := range d.boxes {
+		if sb.Template == tmpl {
+			return true
+		}
+	}
+	return false
+}
+
+// moveTemplate is the template a move of sandbox id in orgID lands it on.
+func moveTemplate(orgID, id string) string {
+	return store.SnapshotTemplateID(orgID, store.MoveSnapshotName(id))
+}
+
+// captureTemplate reports a rehome's or a move's capture of some sandbox of orgID.
+func captureTemplate(orgID, tmpl string) bool {
+	return strings.HasPrefix(tmpl, rehomeTemplate("")) || strings.HasPrefix(tmpl, moveTemplate(orgID, ""))
 }

@@ -152,7 +152,7 @@ func TestDestroyRemovesTheSandboxsCaptureTemplates(t *testing.T) {
 		t.Fatal(err)
 	}
 	rehome := rehomeTemplate(sb.ID)
-	move := store.SnapshotTemplateID("o", store.MoveSnapshotName(sb.ID))
+	move := moveTemplate("o", sb.ID)
 	named := store.SnapshotTemplateID("o", "before-upgrade")
 	for _, tmpl := range []string{rehome, move, named} {
 		if err := os.MkdirAll(d.snapshotDir(tmpl), 0o755); err != nil {
@@ -173,5 +173,56 @@ func TestDestroyRemovesTheSandboxsCaptureTemplates(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(d.snapshotDir(named), "rootfs.squashfs")); err != nil {
 		t.Errorf("the named snapshot %s went with the sandbox: %v", named, err)
+	}
+}
+
+// A fork runs on its parent's template, so a fork of a rehomed or moved
+// sandbox runs on that sandbox's capture: destroying the parent removed it,
+// and the fork's next resume or restart had no root image to boot.
+func TestDestroyKeepsACaptureAForkStillRunsOn(t *testing.T) {
+	templates.SetDir(t.TempDir())
+	t.Cleanup(func() { templates.SetDir("") })
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: newFakePersister(nil), IdleTimeout: time.Hour, HardTTL: time.Hour})
+	ctx := context.Background()
+	for _, capture := range []func(id string) string{rehomeTemplate, func(id string) string { return moveTemplate("o", id) }} {
+		parent, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "o"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tmpl := capture(parent.ID)
+		d.mu.Lock()
+		d.boxes[parent.ID].Template = tmpl // as a rehome or a move leaves it
+		d.mu.Unlock()
+		rootfs := filepath.Join(d.snapshotDir(tmpl), "rootfs.squashfs")
+		if err := os.MkdirAll(filepath.Dir(rootfs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(rootfs, []byte("root"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fork, err := d.Fork(ctx, parent.ID, ForkSpec{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := d.Destroy(ctx, parent.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(rootfs); err != nil {
+			t.Fatalf("%s: the capture the fork runs on went with its parent: %v", tmpl, err)
+		}
+		if err := d.Pause(ctx, fork.Child.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Resume(ctx, fork.Child.ID); err != nil {
+			t.Fatalf("the fork does not resume after its parent's destroy: %v", err)
+		}
+
+		if err := d.Destroy(ctx, fork.Child.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(d.snapshotDir(tmpl)); !os.IsNotExist(err) {
+			t.Errorf("%s outlived its last user: %v", tmpl, err)
+		}
 	}
 }

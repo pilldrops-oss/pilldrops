@@ -99,6 +99,13 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	{
 		var peek sandbox.Spec
 		_ = json.Unmarshal(body, &peek) //nolint:errcheck // best-effort peek; a malformed body fails for real when the node parses it
+		// snap-* ids are snapshot captures, booted only by naming the snapshot
+		// (or by this tier's own move); named directly, a tenant could boot
+		// another sandbox's capture.
+		if templates.Internal(peek.Template) && !moving {
+			writeErr(w, http.StatusBadRequest, "template "+peek.Template+" is a snapshot capture; create from a snapshot by its name instead")
+			return
+		}
 		if peek.Snapshot != "" {
 			resolved, ok := s.resolveSnapshotCreate(w, r, body, peek)
 			if !ok {

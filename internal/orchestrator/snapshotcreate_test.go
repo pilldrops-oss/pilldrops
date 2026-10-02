@@ -170,3 +170,48 @@ func TestCreateFromAnUnreadySnapshotIs404(t *testing.T) {
 		t.Fatalf("create from a ready snapshot answered %d %v", status, out["_raw"])
 	}
 }
+
+// A move's capture is the moved sandbox's root image, under an ordinary org
+// snapshot name: a tenant creating from it, or saving over it, or naming its
+// template outright, booted or replaced what that sandbox runs on.
+func TestAMovesCaptureIsNotATenantSnapshot(t *testing.T) {
+	f := newSnapshotCreateFleet(t)
+	name := store.MoveSnapshotName("sb-1")
+
+	// As the move itself captures one.
+	node, ok := f.s.reg.Node("node-fc")
+	if !ok {
+		t.Fatal("no capture node")
+	}
+	snap := store.Snapshot{OrgID: "default", Name: name, Runtime: "firecracker", SourceSandbox: "sb-1", CreatedAt: time.Now().Unix()}
+	if err := f.st.SaveSnapshot(t.Context(), &snap); err != nil {
+		t.Fatal(err)
+	}
+	tmpl := store.SnapshotTemplateID("default", name)
+	if err := f.st.BeginTemplateBuild(t.Context(), store.TemplateBuild{BuildID: snap.BuildID, TemplateID: tmpl,
+		OrgID: "default", CreatedAt: snap.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.captureSnapshot(t.Context(), node, "sb-1", snap, tmpl); err != nil {
+		t.Fatal(err)
+	}
+
+	if status, out := f.do(t, "POST", "/v1/sandboxes", "apikey", `{"snapshot":"`+name+`"}`); status != http.StatusNotFound {
+		t.Errorf("a create from a move's capture answered %d %v, want 404", status, out["_raw"])
+	}
+	if status, out := f.do(t, "POST", "/v1/sandboxes", "apikey", `{"template":"`+tmpl+`"}`); status != http.StatusBadRequest {
+		t.Errorf("a create naming a capture's template answered %d %v, want 400", status, out["_raw"])
+	}
+	for _, reserved := range []string{name, "move-mine", "rehome-sb-1"} {
+		if status, out := f.do(t, "POST", "/v1/sandboxes/sb-1/snapshot", "apikey", `{"name":"`+reserved+`"}`); status != http.StatusBadRequest {
+			t.Errorf("saving a snapshot named %s answered %d %v, want 400", reserved, status, out["_raw"])
+		}
+	}
+	// Positive control: an ordinary name still saves and creates.
+	if got := f.saveAndWait(t, "golden"); got["status"] != "ready" {
+		t.Fatalf("save: %v", got)
+	}
+	if status, out := f.do(t, "POST", "/v1/sandboxes", "apikey", `{"snapshot":"golden"}`); status != http.StatusCreated {
+		t.Fatalf("create from an ordinary snapshot answered %d %v", status, out["_raw"])
+	}
+}
