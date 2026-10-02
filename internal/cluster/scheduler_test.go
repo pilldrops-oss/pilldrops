@@ -28,8 +28,24 @@ func TestPickFiltersByRuntime(t *testing.T) {
 	if got == nil || got.ID != "kvm" {
 		t.Fatalf("Pick(runtime=firecracker) = %v, want kvm", got)
 	}
+}
+
+// An unpinned create landed on the docker node of a mixed fleet whenever it
+// was the better fit or the firecracker nodes ran hot: a container where a
+// microVM was expected.
+func TestPickPrefersFirecrackerForAnUnpinnedCreate(t *testing.T) {
+	now := time.Now()
+	ttl := 30 * time.Second
+	fc := runtimeNode("kvm", "firecracker", 64000, 40000, 20000, now)
+	fc.Cap.Cores, fc.Cap.Load1 = 8, 7.5                       // hot
+	dk := runtimeNode("box", "docker", 8000, 3000, 5000, now) // tighter fit, cool
+	dk.Cap.Cores = 8
+	if got := Pick([]*Node{fc, dk}, Request{MemMB: 1024}, now, ttl); got == nil || got.ID != "kvm" {
+		t.Fatalf("Pick(no runtime) = %v, want kvm", got)
+	}
+	fc.Cap.MemAvailMB = 100 // full
 	if got := Pick([]*Node{fc, dk}, Request{MemMB: 1024}, now, ttl); got == nil || got.ID != "box" {
-		t.Fatalf("Pick(any runtime) = %v, want box (best-fit)", got)
+		t.Fatalf("Pick(no runtime, firecracker full) = %v, want box as the fallback", got)
 	}
 }
 

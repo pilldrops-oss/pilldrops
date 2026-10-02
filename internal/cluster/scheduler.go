@@ -226,8 +226,21 @@ func (n *Node) fits(req Request) bool {
 // Pick chooses the best-fit schedulable node for req: least free RAM that still
 // fits, ties to lower load. Preference order is template held locally, then
 // in-zone, then fit, because a fetch costs seconds on the create path while a
-// worse fit costs megabytes. Returns nil if nothing fits.
+// worse fit costs megabytes. A create with no runtime pin goes to a
+// firecracker node when one fits, docker being the weaker isolation. Returns
+// nil if nothing fits.
 func Pick(nodes []*Node, req Request, now time.Time, ttl time.Duration) *Node {
+	if req.Runtime == "" {
+		vm := req
+		vm.Runtime = "firecracker"
+		if n := pick(nodes, vm, now, ttl); n != nil {
+			return n
+		}
+	}
+	return pick(nodes, req, now, ttl)
+}
+
+func pick(nodes []*Node, req Request, now time.Time, ttl time.Duration) *Node {
 	var holdsInZone, holdsAnyZone, fetchInZone, fetchAnyZone *Node
 
 	for _, n := range nodes {
