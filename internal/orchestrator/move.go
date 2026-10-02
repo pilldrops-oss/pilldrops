@@ -22,8 +22,10 @@ import (
 // the original. The id, its row (name, slug, env, owner, timers), its routes
 // and its history all stay the sandbox's; only the node changes.
 //
-// The snapshot is kept, named move-<id>: the moved sandbox runs from it as its
-// template, and a later resume or restart on the new node reads it again.
+// The snapshot is kept, named move-<id>-<nonce>: the moved sandbox runs from
+// it as its template, and a later resume or restart on the new node reads it
+// again. Each move's name is new, so its template never lands on a node's copy
+// of an earlier move's capture that a fork still runs on.
 //
 // ponytail: the source keeps running until the copy is up, so writes made to
 // it after the capture are lost; a pause before the capture closes that at the
@@ -132,7 +134,7 @@ func (s *Server) moveSandbox(ctx context.Context, st *store.Store, rec store.San
 	}
 
 	// 1. Capture into the artifact store, synchronously.
-	name := store.MoveSnapshotName(rec.ID)
+	name := store.MoveSnapshotName(rec.ID) + "-" + randHex4()
 	snap := store.Snapshot{OrgID: org, Name: name, Runtime: from.Runtime,
 		SourceSandbox: rec.ID, CreatedAt: s.now().Unix()}
 	if err := st.SaveSnapshot(ctx, &snap); err != nil {
@@ -205,16 +207,20 @@ const codeMoveInProgress = "move_in_progress"
 
 // shownTemplate is the template a sandbox is listed under. A moved sandbox
 // boots from its move snapshot's template id, which names the capture and not
-// what the owner created; it is shown as the template it ran before it moved.
+// what the owner created; it is shown as the template it ran before its first
+// move, which each move's capture records as the template it was taken from.
 func shownTemplate(ctx context.Context, st *store.Store, rec store.SandboxRecord) string {
-	name := store.MoveSnapshotName(rec.ID)
-	if rec.Template != store.SnapshotTemplateID(rec.OrgID, name) {
-		return rec.Template
+	shown := rec.Template
+	moves := store.SnapshotTemplateID(rec.OrgID, store.MoveSnapshotName(rec.ID))
+	for strings.HasPrefix(shown, moves) {
+		name := strings.TrimPrefix(shown, store.SnapshotTemplateID(rec.OrgID, ""))
+		t, err := st.FirstSnapshotTemplate(ctx, rec.OrgID, name)
+		if err != nil {
+			break
+		}
+		shown = t
 	}
-	if t, err := st.FirstSnapshotTemplate(ctx, rec.OrgID, name); err == nil {
-		return t
-	}
-	return rec.Template
+	return shown
 }
 
 // moveLockTTL outlasts the longest move: the capture's deadline plus the wait

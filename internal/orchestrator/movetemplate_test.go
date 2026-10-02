@@ -23,17 +23,21 @@ func TestAMovedSandboxIsListedUnderItsOriginalTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	moveTemplate := store.SnapshotTemplateID("org-a", store.MoveSnapshotName("sb1"))
-	// Moved twice: the second capture names the first move's template.
-	for _, captured := range []string{"python-3.11", moveTemplate} {
-		snap := store.Snapshot{OrgID: "org-a", Name: store.MoveSnapshotName("sb1"), Runtime: "firecracker", SourceSandbox: "sb1", CreatedAt: 1}
+	// Moved three times: each capture names the previous move's template. The
+	// first predates per-move names and still answers under the bare name.
+	names := []string{store.MoveSnapshotName("sb1"), store.MoveSnapshotName("sb1") + "-0123abcd", store.MoveSnapshotName("sb1") + "-4567cdef"}
+	captured := "python-3.11"
+	for _, name := range names {
+		snap := store.Snapshot{OrgID: "org-a", Name: name, Runtime: "firecracker", SourceSandbox: "sb1", CreatedAt: 1}
 		if err := st.SaveSnapshot(ctx, &snap); err != nil {
 			t.Fatal(err)
 		}
 		if err := st.UpdateSnapshotCapture(ctx, snap.ID, captured, 1, 512, nil); err != nil {
 			t.Fatal(err)
 		}
+		captured = store.SnapshotTemplateID("org-a", name)
 	}
+	moveTemplate := captured
 	for _, rec := range []store.SandboxRecord{
 		{ID: "sb1", Template: moveTemplate, OrgID: "org-a", State: "running", CreatedAt: 1, ExpiresAt: 2, UpdatedAt: 1},
 		{ID: "sb2", Template: "base", OrgID: "org-a", State: "running", CreatedAt: 1, ExpiresAt: 2, UpdatedAt: 1},

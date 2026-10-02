@@ -269,8 +269,8 @@ func TestAMoveCapturesCreatesElsewhereAndEvicts(t *testing.T) {
 		t.Fatalf("move answered %d %v, want 200 to node-create-fc", status, out["_raw"])
 	}
 	spec := f.fc.last(t)
-	if spec.ID != "sb-1" || spec.Snapshot != store.MoveSnapshotName("sb-1") {
-		t.Errorf("the target was asked for id %q from snapshot %q, want sb-1 from %s",
+	if spec.ID != "sb-1" || !strings.HasPrefix(spec.Snapshot, store.MoveSnapshotName("sb-1")+"-") {
+		t.Errorf("the target was asked for id %q from snapshot %q, want sb-1 from a %s-<nonce>",
 			spec.ID, spec.Snapshot, store.MoveSnapshotName("sb-1"))
 	}
 	if node, ok := f.s.reg.NodeFor("sb-1"); !ok || node.ID != "node-create-fc" {
@@ -281,5 +281,23 @@ func TestAMoveCapturesCreatesElsewhereAndEvicts(t *testing.T) {
 	f.node.mu.Unlock()
 	if len(evicted) != 1 || evicted[0] != "sb-1" {
 		t.Errorf("the source evicted %v, want [sb-1]", evicted)
+	}
+}
+
+// Every move of a sandbox captured under move-<id>, one template id: a move
+// back to a node replaced, under a fork still running on it, the capture an
+// earlier move had left there.
+func TestEachMoveCapturesUnderItsOwnTemplate(t *testing.T) {
+	f := newSnapshotCreateFleet(t)
+	var moved []string
+	for range 2 {
+		f.s.reg.Place("sb-1", "node-fc")
+		if status, out := f.do(t, "POST", "/v1/sandboxes/sb-1/move", "apikey", ""); status != http.StatusOK {
+			t.Fatalf("move answered %d %v", status, out["_raw"])
+		}
+		moved = append(moved, f.fc.last(t).Template)
+	}
+	if moved[0] == moved[1] {
+		t.Fatalf("two moves of sb-1 both landed on template %s", moved[0])
 	}
 }

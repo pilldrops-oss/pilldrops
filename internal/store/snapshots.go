@@ -53,7 +53,8 @@ func SnapshotTemplateID(orgID, name string) string {
 	return "snap-" + hex.EncodeToString(sum[:4]) + "-" + name
 }
 
-// MoveSnapshotName is the snapshot a move of sandbox id captures it into.
+// MoveSnapshotName starts the name of every snapshot a move of sandbox id
+// captures it into; each move adds its own suffix.
 func MoveSnapshotName(id string) string { return "move-" + id }
 
 // ReservedSnapshotName reports a name the platform's own captures use: a
