@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pilldrops-oss/pilldrops/internal/artifact"
 	"github.com/pilldrops-oss/pilldrops/internal/runtime/process"
+	"github.com/pilldrops-oss/pilldrops/internal/runtime/runtimetest"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox/daemon"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
@@ -200,6 +202,37 @@ func TestScheduledJobMissedOnItsOwnNodeSaysSandboxNotFound(t *testing.T) {
 	}
 	for id, wantDown := range map[string]bool{"sb-mine": false, "sb-unknown": false, "sb-theirs": true} {
 		_, _, err := api.cronRunner().RunInSandbox(t.Context(), "default", id, "true")
+		if err == nil || errors.Is(err, errOwnerDown) != wantDown {
+			t.Errorf("%s: %v, want owner-down = %v", id, err, wantDown)
+		}
+	}
+}
+
+// A scheduled backup fired for a down node's sandbox recorded "sandbox not
+// found", which reads as the sandbox being gone.
+func TestScheduledBackupOfADownNodeSaysOwnerDown(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(t.Context(), filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	blobs, err := artifact.NewFS(filepath.Join(dir, "blobs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := daemon.New(daemon.Config{
+		Runtime: runtimetest.NewFake(), Store: daemon.StoreAdapter{S: st, NodeID: "node-a"}, NodeID: "node-a",
+		Backups: st, Blobs: blobs, SnapshotDir: filepath.Join(dir, "snap"),
+		IdleTimeout: time.Hour, HardTTL: time.Hour,
+	})
+	api := New(d, st)
+	api.SetNodeID("node-a")
+	if err := st.SaveSandbox(t.Context(), store.SandboxRecord{ID: "sb-theirs", OrgID: "default", NodeID: "node-b", State: "lost"}); err != nil {
+		t.Fatal(err)
+	}
+	for id, wantDown := range map[string]bool{"sb-unknown": false, "sb-theirs": true} {
+		_, err := daemonCronRunner{api}.RunBackup(t.Context(), "default", id)
 		if err == nil || errors.Is(err, errOwnerDown) != wantDown {
 			t.Errorf("%s: %v, want owner-down = %v", id, err, wantDown)
 		}

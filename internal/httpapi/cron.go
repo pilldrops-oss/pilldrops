@@ -245,6 +245,9 @@ var (
 // and not for the upload.
 func (d daemonCronRunner) RunBackup(ctx context.Context, _, sandboxID string) (string, error) {
 	started, err := d.s.d.Backup(ctx, sandboxID)
+	if errors.Is(err, rt.ErrNotFound) && d.ownedElsewhere(ctx, sandboxID) {
+		return "", errOwnerDown
+	}
 	if err != nil {
 		return "", err
 	}
