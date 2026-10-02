@@ -130,7 +130,7 @@ func TestACarriedImageIsWhatIsCheckedNotTheLocalTemplate(t *testing.T) {
 	if path == "" {
 		t.Fatal("captureRootfs did not find the image the capture carries")
 	}
-	captured, err := m.digestOf(path)
+	captured, err := digestOf(path)
 	if err != nil {
 		t.Fatalf("digestOf: %v", err)
 	}

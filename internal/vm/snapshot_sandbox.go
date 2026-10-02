@@ -78,7 +78,7 @@ func (m *Manager) snapMetaOf(sandboxID string, sb *Sandbox) sandboxSnapMeta {
 	// Best effort: an unreadable root image must not fail a capture of a sandbox
 	// that is running perfectly well off it. A capture that records no digest is
 	// let through by checkRootfs, exactly as a pre-digest one is.
-	if sum, err := m.digestOf(image); err == nil {
+	if sum, err := digestOf(image); err == nil {
 		meta.RootfsDigest = sum
 	} else {
 		m.log.Warn("capture_rootfs_digest_failed",

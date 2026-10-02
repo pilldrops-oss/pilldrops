@@ -3,7 +3,10 @@
 package vm
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
@@ -44,5 +47,51 @@ func TestGoldenIsBuiltAtTheTemplateDefaultStorage(t *testing.T) {
 	}
 	if !restoreServes(1, 1, 512, 512, 1024, goldenStorageMB(cfg, "base")) {
 		t.Fatal("a default-size create of base is not served by its golden")
+	}
+}
+
+// A golden's memory holds its template image's block layout: rebake the
+// template under the same name and restoring the old golden reads EIO. On the
+// rig the first creates after a rebake all failed that way.
+func TestARebakedTemplateRetiresItsGolden(t *testing.T) {
+	cfg := Config{SnapshotDir: t.TempDir()}
+	rootfs := filepath.Join(cfg.SnapshotDir, "base", "rootfs.squashfs")
+	dir := snapshotDir("base", "v1", cfg)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfs, []byte("bake one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	baked, err := digestOf(rootfs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden := goldenIdentity{TapName: "fctap1", VMIP: "192.168.0.1", OverlayBase: "o.ext4",
+		StorageMB: goldenStorageMB(cfg, "base"), RootfsDigest: baked}
+	if err := writeGoldenIdentity(dir, golden); err != nil {
+		t.Fatal(err)
+	}
+	if !goldenCurrent(dir, cfg, "base") {
+		t.Fatal("a golden of the image the template has was not served")
+	}
+
+	if err := os.WriteFile(rootfs, []byte("bake two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(time.Second)
+	if err := os.Chtimes(rootfs, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if goldenCurrent(dir, cfg, "base") {
+		t.Fatal("the golden of the old image was served against the rebaked one")
+	}
+
+	golden.RootfsDigest = ""
+	if err := writeGoldenIdentity(dir, golden); err != nil {
+		t.Fatal(err)
+	}
+	if goldenCurrent(dir, cfg, "base") {
+		t.Fatal("a golden that records no image was served")
 	}
 }

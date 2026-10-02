@@ -41,6 +41,10 @@ type goldenIdentity struct {
 	// not the template's current default serves no default create, so it is
 	// rebuilt; one from before this was recorded (0) is too.
 	StorageMB int `json:"storage_mb,omitempty"`
+	// RootfsDigest is the template image the golden was taken against. Its
+	// memory holds that image's block layout, so a rebaked template's golden
+	// is rebuilt; one from before this was recorded ("") is too.
+	RootfsDigest string `json:"rootfs_digest,omitempty"`
 }
 
 const goldenIdentityFile = "golden.json"
@@ -99,9 +103,9 @@ func validateSnapshots(template string, cfg Config, log *zap.Logger) (bool, erro
 				return false, fmt.Errorf("refusing to serve golden snapshots for %s/%s: %w",
 					template, ver, err)
 			}
-			// Sealed first, so an unsealable golden is refused whatever its size.
-			if !goldenSized(dir, cfg, template) {
-				log.Info("golden_wrong_size_rebuilding", zap.String("template", template),
+			// Sealed first, so an unsealable golden is refused whatever it is.
+			if !goldenCurrent(dir, cfg, template) {
+				log.Info("golden_stale_rebuilding", zap.String("template", template),
 					zap.String("version", ver), zap.Int("want_storage_mb", goldenStorageMB(cfg, template)))
 				continue
 			}
@@ -128,8 +132,9 @@ func RestoreFromSnapshot(template, sandboxID string, cfg Config, log *zap.Logger
 	for _, ver := range snapshotVersions {
 		dir := snapshotDir(template, ver, cfg)
 		// A golden of another size would hand this sandbox that size's disk,
-		// past its cap; it is not a restore candidate until it is rebuilt.
-		if !snapshotValid(dir) || !goldenSized(dir, cfg, template) {
+		// past its cap, and one of another image reads EIO; neither is a
+		// restore candidate until it is rebuilt.
+		if !snapshotValid(dir) || !goldenCurrent(dir, cfg, template) {
 			continue
 		}
 		tried = true
@@ -223,6 +228,11 @@ func createOneSnapshot(template, snapDir string, cfg Config, log *zap.Logger) er
 	goldenID := goldenVMID(template, randomHex(4))
 	gvcpu, gmem := defaultResources(cfg, template)
 	gstorage := goldenStorageMB(cfg, template)
+	// Read before the boot: an image swapped during it is then recorded stale.
+	digest, err := digestOf(filepath.Join(cfg.SnapshotDir, template, "rootfs.squashfs"))
+	if err != nil {
+		return fmt.Errorf("digest the root image: %w", err)
+	}
 	vm, err := ColdBoot(template, goldenID, cfg, log, gvcpu, gmem, gstorage, "", nil) // the golden VM holds no token and no tenant policy
 	if err != nil {
 		return fmt.Errorf("cold boot: %w", err)
@@ -286,10 +296,11 @@ func createOneSnapshot(template, snapDir string, cfg Config, log *zap.Logger) er
 
 	// Written last so a half-written snapshot directory never looks valid.
 	id := goldenIdentity{
-		TapName:     vm.TapName,
-		VMIP:        vm.VMIP,
-		OverlayBase: filepath.Base(vm.OverlayPath),
-		StorageMB:   gstorage,
+		TapName:      vm.TapName,
+		VMIP:         vm.VMIP,
+		OverlayBase:  filepath.Base(vm.OverlayPath),
+		StorageMB:    gstorage,
+		RootfsDigest: digest,
 	}
 	if err := writeGoldenIdentity(snapDir, id); err != nil {
 		return fmt.Errorf("record golden identity: %w", err)
@@ -593,9 +604,14 @@ func bakedEnvdProtocol(rootfs string) (int, error) {
 	return envdproto.Scan(out), nil
 }
 
-// goldenSized reports whether the golden in dir was built at the size a default
-// create of template now asks for (see goldenStorageMB).
-func goldenSized(dir string, cfg Config, template string) bool {
+// goldenCurrent reports whether the golden in dir was built at the size a
+// default create of template now asks for (see goldenStorageMB) and against the
+// template image it now has.
+func goldenCurrent(dir string, cfg Config, template string) bool {
 	g, err := readGoldenIdentity(dir)
-	return err == nil && g.StorageMB == goldenStorageMB(cfg, template)
+	if err != nil || g.StorageMB != goldenStorageMB(cfg, template) {
+		return false
+	}
+	have, err := digestOf(filepath.Join(cfg.SnapshotDir, template, "rootfs.squashfs"))
+	return err == nil && have == g.RootfsDigest
 }

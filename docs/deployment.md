@@ -499,16 +499,15 @@ A production node refuses to start rather than run unsafely:
 > sandbox is the *worst* case, not a safe one, and a resume of one can take
 > minutes.
 >
-> **Rebaking a template without deleting its golden gives you a corrupt VM.**
-> A golden is a memory image captured against one exact `rootfs.squashfs`, and
-> the restored kernel keeps that file's block layout in its page cache. Publish
-> a new squashfs under the same id and the next create *restores* — then reads
-> the old offsets out of the new file and fails with `SQUASHFS error: Failed to
-> read block ...: -5`, surfacing as `envd not ready: ... open /root:
-> input/output error`. It looks exactly like disk corruption and the disk is
-> fine. Whenever you republish a template, `rm -rf
-> <SNAPSHOT_DIR>/<id>/snapshots` and restart the node; `scripts/build-template.sh`
-> does not do it for you.
+> **A rebaked template's goldens are rebuilt on their own.** A golden is a
+> memory image captured against one exact `rootfs.squashfs`, and the restored
+> kernel keeps that file's block layout in its page cache: restored over a new
+> squashfs under the same id, it fails with `SQUASHFS error: Failed to read
+> block ...: -5`, surfacing as `envd not ready: ... open /root: input/output
+> error`. Each golden records the digest of the image it was taken against, so
+> after a rebake the node stops serving it, cold boots the next creates and
+> builds new goldens in the background. A golden from before the digest was
+> recorded is rebuilt once the same way.
 >
 > **Golden restore serves exactly one storage size.** A golden snapshot bakes
 > its overlay at 20480 MB (`vm.DefaultOverlayMB`; the node advertises it as

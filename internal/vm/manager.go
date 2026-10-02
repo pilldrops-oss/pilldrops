@@ -99,11 +99,6 @@ type Manager struct {
 	diskPressure bool // set by monitor when disk >80%
 	log          *zap.Logger
 	mu           sync.RWMutex
-
-	// rootfsSums memoises root-image digests by path+size+mtime; its own lock so
-	// hashing a 200 MB image never holds the lock the active set is read under.
-	sumMu      sync.Mutex
-	rootfsSums map[string]string
 }
 
 // checkHostDeps fails at startup, naming the missing binary, instead of letting
