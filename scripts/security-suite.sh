@@ -298,9 +298,10 @@ expect_blocked "block.rfc1918.10"        "10.0.0.1 (RFC1918)"                 "$
 expect_blocked "block.rfc1918.172"       "172.17.0.1 (docker0 / RFC1918)"     "$PROBE" 'curl -s -o /dev/null -m 6 http://172.17.0.1/' 28 7
 expect_blocked "block.cgnat"             "100.64.0.1 (CGNAT)"                 "$PROBE" 'curl -s -o /dev/null -m 6 http://100.64.0.1/' 28 7
 # IPv6 is asserted absent, not filtered: every rule the platform installs is
-# IPv4-family, so the fix is disabling the stack. /proc/net/if_inet6 exists
-# whenever the stack is up.
-expect_blocked "block.ipv6.stack"        "guest has NO IPv6 stack (/proc/net/if_inet6)" "$PROBE" 'test -e /proc/net/if_inet6' 1
+# IPv4-family, so the fix is disabling the stack. /proc/net/if_inet6 lists
+# an address whenever the stack is up; with disable_ipv6=1 newer kernels keep
+# the file but leave it empty, so it is tested for content, not existence.
+expect_blocked "block.ipv6.stack"        "guest has NO IPv6 stack (/proc/net/if_inet6)" "$PROBE" 'test -s /proc/net/if_inet6' 1
 expect_blocked "block.ipv6.linklocal"    "guest has no IPv6 address on any interface"   "$PROBE" 'ip -6 addr show scope link 2>/dev/null | grep -q inet6' 1
 # tcp/22 with a node-side control: the target must demonstrably accept tcp/22
 # from this network or "blocked" from the guest means nothing.
