@@ -372,20 +372,18 @@ export default function Sandboxes() {
         </div>
       </div>
       <div className="panel">
-          <div className="ph">
+          <div className="ph sb-ph">
             <h2>Active</h2>
             <div className="rgt">
               <input
-                className="inp mono"
-                style={{ width: 150 }}
+                className="inp mono sb-search"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 placeholder="Search…"
                 aria-label="Search sandboxes"
               />
               <select
-                className="sel"
-                style={{ width: 130 }}
+                className="sel sb-sort"
                 value={sort}
                 onChange={e => setSort(e.target.value as SandboxSort)}
                 aria-label="Sort sandboxes"

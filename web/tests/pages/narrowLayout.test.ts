@@ -19,9 +19,14 @@ describe('400px layout (B10)', () => {
     expect(themeCss.length).toBeGreaterThan(1000)
   })
 
-  it('the sandbox list scrolls instead of clipping on a narrow panel', () => {
-    expect(declarationsFor(themeCss, '.sb-table-scroll')).toMatch(/overflow-x\s*:\s*auto/)
-    expect(declarationsFor(themeCss, '.sb-table-scroll .row')).toMatch(/min-width\s*:/)
+  it('the sandbox list fits the panel: a shrinkable name column, the rest hidden', () => {
+    expect(declarationsFor(themeCss, '.sb-table-scroll .row')).toMatch(/grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/)
+    expect(themeCss).toMatch(/\.sb-table-scroll \.row > :not\(:first-child\)[^{]*\{\s*display\s*:\s*none/)
+  })
+
+  it('the list toolbar wraps instead of running off the panel', () => {
+    expect(declarationsFor(themeCss, '.sb-ph .rgt')).toMatch(/flex-wrap\s*:\s*wrap/)
+    expect(declarationsFor(themeCss, '.sb-ph .sb-search')).toMatch(/min-width\s*:\s*0/)
   })
 
   it('the breadcrumb shrinks instead of overrunning the theme button', () => {
