@@ -3,6 +3,7 @@
 # Usage: full-feature-e2e.sh <base-url> <api-key> [operator-key]
 B="$1"; K="$2"; H="Authorization: Bearer $K"; OPK="${3:-}"
 pass=0; fail=0; skip=0
+mkdir -p /tmp/e2e-all
 declare -a FAILURES
 ok()   { echo "  ✅ $1"; pass=$((pass+1)); }
 bad()  { echo "  ❌ $1"; fail=$((fail+1)); FAILURES+=("$1"); }
