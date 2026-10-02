@@ -92,6 +92,10 @@ func (d *Daemon) scanExits(ctx context.Context) {
 		if t.lv.Alive() {
 			return
 		}
+		if rv, ok := t.lv.(rt.Reviver); ok && rv.Casualty() {
+			d.reviveCasualty(ctx, t.id, t.lv, rv)
+			return
+		}
 		reason := "exited"
 		if r, ok := t.lv.(rt.OOMKilledReporter); ok && r.OOMKilled() {
 			reason = "oom"
@@ -103,6 +107,50 @@ func (d *Daemon) scanExits(ctx context.Context) {
 			d.log().Warn("reaping a dead sandbox failed", "sandbox_id", t.id, "error", err)
 		}
 	})
+}
+
+// reviveCasualty starts again a sandbox its engine's restart stopped, rather
+// than reaping it. One that will not start is marked failed with an "exited"
+// event and kept, data and all: only a destroy removes it.
+func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness, rv rt.Reviver) {
+	sb, release, err := d.acquireOp(id)
+	if err != nil {
+		return
+	}
+	defer release()
+	d.mu.Lock()
+	lv, _ := sb.inst.(rt.Liveness)
+	current := lv == was && sb.State == StateRunning
+	orgID, template, startCmd, env := sb.OrgID, sb.Template, sb.StartCmd, sb.Env
+	d.mu.Unlock()
+	if !current {
+		return
+	}
+
+	inst, err := rv.Revive(ctx)
+	d.mu.Lock()
+	if err != nil {
+		sb.State = StateFailed
+	} else {
+		sb.inst = inst
+	}
+	rec := d.recordOf(sb)
+	d.mu.Unlock()
+	d.persistRec(ctx, rec)
+	if err != nil {
+		d.recordEvent(ctx, orgID, id, "exited", template)
+		d.log().Error("sandbox stopped by its engine restarting would not start again; marked failed, data kept",
+			"sandbox_id", id, "error", err)
+		return
+	}
+	// The container's own command came back with it; a registered server did not.
+	if startCmd != "" {
+		if err := inst.StartServer(ctx, startCmd, env); err != nil {
+			d.log().Warn("revive: app restart failed", "sandbox_id", id, "error", err)
+		}
+	}
+	d.recordEvent(ctx, orgID, id, "restarted", template)
+	d.log().Warn("sandbox stopped by its engine restarting was started again", "sandbox_id", id)
 }
 
 // scanConcurrency bounds how many sandboxes a scanner probes at once.

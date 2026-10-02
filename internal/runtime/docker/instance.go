@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -63,8 +62,8 @@ type dockerInstance struct {
 	// deadSince is the first of the consecutive reads that found it stopped.
 	deadMu    sync.Mutex
 	deadSince time.Time
-	// restartLogged keeps a restart casualty to one log line.
-	restartLogged bool
+	// casualty is what the last Alive read said: stopped by a dockerd restart.
+	casualty atomic.Bool
 }
 
 func (i *dockerInstance) ID() string { return i.id }
@@ -299,7 +298,60 @@ func (i *dockerInstance) Alive() bool {
 		return true
 	}
 	i.oomKilled.Store(st.OOMKilled)
-	return !i.confirmDead(time.Now(), st.FinishedAt, dockerdStarted())
+	// A dockerd restart stopped it: not dead, and the daemon revives it.
+	casualty := restartCasualty(st.FinishedAt, dockerdStarted())
+	i.casualty.Store(casualty)
+	return !casualty && !i.confirmDead(time.Now())
+}
+
+// Casualty implements rt.Reviver.
+func (i *dockerInstance) Casualty() bool { return i.casualty.Load() }
+
+// reviveTries and reviveBackoff bound the docker start of a restart casualty:
+// the new daemon can still be settling when the first one runs.
+var (
+	reviveTries   = 3
+	reviveBackoff = 2 * time.Second
+)
+
+// Revive implements rt.Reviver: start the container again and re-read its
+// published ports, which docker reallocates on a start, as Adopt does.
+func (i *dockerInstance) Revive(ctx context.Context) (rt.Instance, error) {
+	err := retryStart(ctx, func() error {
+		_, se, code, err := dockerOut(ctx, "start", i.cid)
+		if err == nil && code != 0 {
+			err = errors.New(strings.TrimSpace(se))
+		}
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("docker start %s: %w", i.cid, err)
+	}
+	host, _ := mappedPort(ctx, i.cid, appPort)
+	termHost, _ := mappedPort(ctx, i.cid, terminalPort)
+	return &dockerInstance{
+		id: i.id, cid: i.cid, host: host, termHost: termHost, envdToken: i.envdToken,
+		vcpu: i.vcpu, memMiB: i.memMiB, service: i.service, runUser: i.runUser,
+		start: time.Now(), eng: i.eng, ports: map[int]string{appPort: host},
+	}, nil
+}
+
+// retryStart runs start up to reviveTries times, reviveBackoff apart.
+func retryStart(ctx context.Context, start func() error) error {
+	var err error
+	for n := range reviveTries {
+		if n > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(reviveBackoff):
+			}
+		}
+		if err = start(); err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 func (i *dockerInstance) state() (containerState, error) {
@@ -338,23 +390,11 @@ const (
 	restartWindowAfter  = 60 * time.Second
 )
 
-// confirmDead decides whether a container read as stopped at now is dead. One
-// that stopped around dockerd's start was taken down by the daemon restarting,
-// not by the sandbox dying: it is never reaped, and is left for adoption or an
-// operator.
-func (i *dockerInstance) confirmDead(now, finishedAt, dockerdStart time.Time) bool {
+// confirmDead decides whether a container read as stopped at now is dead: it
+// must stay stopped across two reads deadConfirmAfter apart.
+func (i *dockerInstance) confirmDead(now time.Time) bool {
 	i.deadMu.Lock()
 	defer i.deadMu.Unlock()
-	if restartCasualty(finishedAt, dockerdStart) {
-		if !i.restartLogged {
-			i.restartLogged = true
-			slog.Warn("container stopped while dockerd restarted; not reaping it, adopt or remove it by hand",
-				"component", "docker", "sandbox_id", i.id, "container", i.cid,
-				"finished_at", finishedAt, "dockerd_started", dockerdStart)
-		}
-		i.deadSince = time.Time{}
-		return false
-	}
 	if i.deadSince.IsZero() {
 		i.deadSince = now
 		return false

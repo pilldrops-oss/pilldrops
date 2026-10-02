@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -172,5 +173,74 @@ func TestExitScanRunsWhenTheOtherScannersEatTheBudget(t *testing.T) {
 
 	if _, ok := d.Get(dead.ID); ok {
 		t.Fatal("the dead sandbox was not reaped: the exit scan got no budget")
+	}
+}
+
+// casualtyVMM is an instance a dockerd restart stopped.
+type casualtyVMM struct {
+	deadVMM
+	revived   rt.Instance
+	reviveErr error
+	stopped   bool
+}
+
+func (*casualtyVMM) Casualty() bool { return true }
+func (c *casualtyVMM) Revive(context.Context) (rt.Instance, error) {
+	return c.revived, c.reviveErr
+}
+func (c *casualtyVMM) Stop(context.Context) error { c.stopped = true; return nil }
+
+func TestScanRevivesARestartCasualtyAndKeepsOneThatWillNotStart(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		reviveErr error
+		state     State
+		event     string
+	}{
+		{"started again", nil, StateRunning, "restarted"},
+		{"will not start", errors.New("no such container"), StateFailed, "exited"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fp := newFakePersister(nil)
+			d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, IdleTimeout: time.Hour, HardTTL: time.Hour})
+			ctx := context.Background()
+			sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			d.mu.Lock()
+			orig := d.boxes[sb.ID].inst
+			c := &casualtyVMM{deadVMM: deadVMM{orig}, revived: orig, reviveErr: tc.reviveErr}
+			d.boxes[sb.ID].inst = c
+			d.mu.Unlock()
+
+			d.scanExits(ctx)
+
+			info, ok := d.Get(sb.ID)
+			if !ok {
+				t.Fatal("a restart casualty was reaped; its data is gone")
+			}
+			if info.State != tc.state {
+				t.Errorf("state = %q, want %q", info.State, tc.state)
+			}
+			if c.stopped {
+				t.Error("the casualty's container was stopped, which removes it")
+			}
+			if fp.countEvents(tc.event) != 1 {
+				t.Errorf("events = %v, want one %q", fp.events, tc.event)
+			}
+			if _, ok := fp.history[sb.ID]; ok {
+				t.Error("a kept sandbox went to history")
+			}
+			if got := fp.saved[sb.ID].State; got != string(tc.state) {
+				t.Errorf("persisted state = %q, want %q", got, tc.state)
+			}
+			d.mu.Lock()
+			swapped := d.boxes[sb.ID].inst == orig
+			d.mu.Unlock()
+			if tc.reviveErr == nil && !swapped {
+				t.Error("the revived instance did not replace the casualty")
+			}
+		})
 	}
 }
