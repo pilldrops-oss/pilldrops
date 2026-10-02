@@ -70,6 +70,9 @@ var (
 	// ErrImageNotPublished means the artifact store has no build for the tag.
 	// Not a failure: plain registry images answer this and fall through to a pull.
 	ErrImageNotPublished = errors.New("image is not published to the artifact store")
+	// ErrProtectedProcess means the pid is the sandbox's own keepalive, whose
+	// death ends the sandbox: the caller's input, so a 4xx.
+	ErrProtectedProcess = errors.New("that process keeps the sandbox alive and cannot be signalled")
 )
 
 // Resources is a per-sandbox CPU/RAM allocation.

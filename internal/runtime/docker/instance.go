@@ -279,11 +279,25 @@ func (i *dockerInstance) FS() rt.FileSystem {
 	return &dockerFS{cid: i.cid, eng: i.eng, user: i.runUser}
 }
 
+// isKeepalive defines ka, true for the pid that is the container's keepalive:
+// the `sleep infinity` PID 1 (docker-init) runs, whose exit ends the container.
+const isKeepalive = `ka() { [ "$(tr '\0' ' ' < /proc/$1/cmdline 2>/dev/null)" = "sleep infinity " ] && ` +
+	`grep -qx 'PPid:[[:space:]]*1' /proc/$1/status 2>/dev/null; }; `
+
 // procList prints "pid comm" for each process in the container's own pid
-// namespace, skipping itself. docker top reports host pids, which a kill run
-// inside the container (Signal, or the tenant's own shell) cannot address.
-const procList = `for d in /proc/[0-9]*; do p=${d#/proc/}; [ "$p" = $$ ] && continue; ` +
-	`{ read -r c < "$d/comm"; } 2>/dev/null && echo "$p $c"; done`
+// namespace, skipping itself and the keepalive. docker top reports host pids,
+// which a kill run inside the container (Signal, or the tenant's own shell)
+// cannot address.
+const procList = isKeepalive + `for d in /proc/[0-9]*; do p=${d#/proc/}; [ "$p" = $$ ] && continue; ` +
+	`{ read -r c < "$d/comm"; } 2>/dev/null || continue; [ "$c" = sleep ] && ka "$p" && continue; ` +
+	`echo "$p $c"; done`
+
+// signalScript kills $2 with signal $1 unless it is the keepalive, for which
+// it exits keepaliveExit.
+const (
+	signalScript  = isKeepalive + `ka "$2" && exit 64; kill -"$1" "$2"`
+	keepaliveExit = 64
+)
 
 // Alive implements rt.Liveness. An inspect that fails for any reason but a
 // missing container answers alive: reaping on a dockerd hiccup would destroy
@@ -480,9 +494,16 @@ func parseProcs(out string, header bool) []rt.Proc {
 func (i *dockerInstance) Signal(pid, sig int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, se, code, err := dockerOut(ctx, "exec", i.cid, "kill", "-"+strconv.Itoa(sig), strconv.Itoa(pid))
+	args := []string{"exec", i.cid, "kill", "-" + strconv.Itoa(sig), strconv.Itoa(pid)}
+	if !i.service { // only the platform's own command has a keepalive
+		args = []string{"exec", i.cid, "sh", "-c", signalScript, "sh", strconv.Itoa(sig), strconv.Itoa(pid)}
+	}
+	_, se, code, err := dockerOut(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("signal %d/%d: %w", pid, sig, err)
+	}
+	if !i.service && code == keepaliveExit {
+		return fmt.Errorf("pid %d: %w", pid, rt.ErrProtectedProcess)
 	}
 	if code != 0 {
 		return fmt.Errorf("signal %d/%d: %s", pid, sig, strings.TrimSpace(se))

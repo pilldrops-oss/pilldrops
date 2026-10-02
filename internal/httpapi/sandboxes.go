@@ -1284,6 +1284,8 @@ func statusForErr(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, rt.ErrPaused):
 		return http.StatusConflict
+	case errors.Is(err, rt.ErrProtectedProcess):
+		return http.StatusBadRequest
 	default:
 		return http.StatusServiceUnavailable
 	}

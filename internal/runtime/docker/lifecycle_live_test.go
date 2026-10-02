@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -126,6 +127,50 @@ func TestLiveSignalKillsAListedProcess(t *testing.T) {
 	}
 	if strings.TrimSpace(res.Stdout) != "gone" {
 		t.Errorf("pid %d is still there after SIGKILL: %s", pid, res.Stdout)
+	}
+}
+
+// The keepalive is the container's own command: listing it invited a kill
+// that ended the sandbox, so it is hidden and refused.
+func TestLiveKeepaliveIsHiddenAndCannotBeSignalled(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Skipf("docker runtime unavailable: %v", err)
+	}
+	ctx := t.Context()
+	inst, err := r.Boot(ctx, rt.BootSpec{
+		SandboxID: "sb-live-ka-" + time.Now().Format("150405"),
+		Template:  rt.Template{Name: "base", Image: "alpine:3"},
+		VCPU:      1, MemMiB: 256,
+	})
+	if err != nil {
+		t.Skipf("boot failed (image or daemon unavailable): %v", err)
+	}
+	t.Cleanup(func() { _ = inst.Stop(t.Context()) })
+
+	res, err := inst.Exec(ctx, rt.ExecSpec{Cmd: `for d in /proc/[0-9]*; do ` +
+		`[ "$(tr '\0' ' ' < $d/cmdline)" = "sleep infinity " ] && echo ${d#/proc/}; done`})
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	keepalive, err := strconv.Atoi(strings.TrimSpace(res.Stdout))
+	if err != nil {
+		t.Fatalf("no single keepalive found: %q", res.Stdout)
+	}
+	procs, err := inst.Procs()
+	if err != nil {
+		t.Fatalf("procs: %v", err)
+	}
+	for _, p := range procs {
+		if p.PID == keepalive {
+			t.Errorf("procs lists the keepalive (pid %d): %+v", keepalive, procs)
+		}
+	}
+	if err := inst.Signal(keepalive, 9); !errors.Is(err, rt.ErrProtectedProcess) {
+		t.Fatalf("signal the keepalive = %v, want ErrProtectedProcess", err)
+	}
+	if lv, ok := inst.(rt.Liveness); ok && !lv.Alive() {
+		t.Error("the container died after the refused signal")
 	}
 }
 
