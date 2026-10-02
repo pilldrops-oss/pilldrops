@@ -1,7 +1,6 @@
 package docker
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -132,12 +131,11 @@ func TestLiveAdoptRestartsAStoppedContainerWithItsData(t *testing.T) {
 		t.Skipf("docker runtime unavailable: %v", err)
 	}
 	ctx := t.Context()
-	id := "sb-reboot-" + time.Now().Format("150405")
+	id := liveSandboxID(t, "sb-reboot")
 	inst, err := r.Boot(ctx, rt.BootSpec{SandboxID: id, Template: rt.Template{Name: "base", Image: "alpine:3"}, VCPU: 1, MemMiB: 256})
 	if err != nil {
 		t.Skipf("boot: %v", err)
 	}
-	t.Cleanup(func() { _ = inst.Stop(context.Background()) })
 	if err := inst.FS().Write(ctx, "kept.txt", []byte("survives")); err != nil {
 		t.Fatalf("write: %v", err)
 	}

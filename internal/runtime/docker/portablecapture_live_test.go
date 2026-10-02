@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -102,12 +103,12 @@ func TestLiveCheckpointPausedTagsThePauseImage(t *testing.T) {
 		t.Skipf("docker runtime unavailable: %v", err)
 	}
 	ctx := t.Context()
-	id := "sb-live-pausedckpt"
+	id := liveSandboxID(t, "sb-live-pausedckpt")
 	inst, err := r.Boot(ctx, rt.BootSpec{SandboxID: id, Template: rt.Template{Name: "base", Image: "alpine:3"}, VCPU: 1, MemMiB: 256})
 	if err != nil {
 		t.Skipf("boot: %v", err)
 	}
-	t.Cleanup(func() { _ = r.DeleteSnapshot(t.Context(), id, rt.SnapshotRef{}) })
+	t.Cleanup(func() { _ = r.DeleteSnapshot(context.Background(), id, rt.SnapshotRef{}) })
 	snap := rt.SnapshotRef{Path: filepath.Join(t.TempDir(), "snap")}
 	if err := inst.Snapshot(ctx, snap); err != nil {
 		t.Fatalf("pause snapshot: %v", err)

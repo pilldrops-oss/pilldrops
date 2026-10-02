@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -10,6 +11,22 @@ import (
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
 
+// liveSandboxID returns a sandbox id unique to this run and, when the test
+// ends, force-removes every container booted under it: Boot can fail after
+// docker run, and t.Context is already cancelled when cleanups run.
+func liveSandboxID(t *testing.T, prefix string) string {
+	id := prefix + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		out, _, _, _ := dockerOut(ctx, "ps", "-aq", "--filter", "label=sandboxd.id="+id)
+		if cids := strings.Fields(out); len(cids) > 0 {
+			_, _, _, _ = dockerOut(ctx, append([]string{"rm", "-f", "--"}, cids...)...)
+		}
+	})
+	return id
+}
+
 func TestLiveRuntimeLifecycle(t *testing.T) {
 	r, err := New()
 	if err != nil {
@@ -18,14 +35,13 @@ func TestLiveRuntimeLifecycle(t *testing.T) {
 	ctx := t.Context()
 
 	inst, err := r.Boot(ctx, rt.BootSpec{
-		SandboxID: "sb-live-" + time.Now().Format("150405"),
+		SandboxID: liveSandboxID(t, "sb-live"),
 		Template:  rt.Template{Name: "base", Image: "alpine:3"},
 		VCPU:      1, MemMiB: 256,
 	})
 	if err != nil {
 		t.Skipf("boot failed (image or daemon unavailable): %v", err)
 	}
-	t.Cleanup(func() { _ = inst.Stop(t.Context()) })
 
 	res, err := inst.Exec(ctx, rt.ExecSpec{Cmd: "echo out; echo err 1>&2; exit 3"})
 	if err != nil {
@@ -92,14 +108,13 @@ func TestLiveSignalKillsAListedProcess(t *testing.T) {
 	}
 	ctx := t.Context()
 	inst, err := r.Boot(ctx, rt.BootSpec{
-		SandboxID: "sb-live-sig-" + time.Now().Format("150405"),
+		SandboxID: liveSandboxID(t, "sb-live-sig"),
 		Template:  rt.Template{Name: "base", Image: "alpine:3"},
 		VCPU:      1, MemMiB: 256,
 	})
 	if err != nil {
 		t.Skipf("boot failed (image or daemon unavailable): %v", err)
 	}
-	t.Cleanup(func() { _ = inst.Stop(t.Context()) })
 
 	if _, err := inst.Exec(ctx, rt.ExecSpec{Cmd: "sleep 777", Detach: true}); err != nil {
 		t.Fatalf("exec: %v", err)
@@ -139,14 +154,13 @@ func TestLiveKeepaliveIsHiddenAndCannotBeSignalled(t *testing.T) {
 	}
 	ctx := t.Context()
 	inst, err := r.Boot(ctx, rt.BootSpec{
-		SandboxID: "sb-live-ka-" + time.Now().Format("150405"),
+		SandboxID: liveSandboxID(t, "sb-live-ka"),
 		Template:  rt.Template{Name: "base", Image: "alpine:3"},
 		VCPU:      1, MemMiB: 256,
 	})
 	if err != nil {
 		t.Skipf("boot failed (image or daemon unavailable): %v", err)
 	}
-	t.Cleanup(func() { _ = inst.Stop(t.Context()) })
 
 	res, err := inst.Exec(ctx, rt.ExecSpec{Cmd: `for d in /proc/[0-9]*; do ` +
 		`[ "$(tr '\0' ' ' < $d/cmdline)" = "sleep infinity " ] && echo ${d#/proc/}; done`})
@@ -211,14 +225,13 @@ func TestLiveAliveSeesAContainerThatDied(t *testing.T) {
 	}
 	ctx := t.Context()
 	inst, err := r.Boot(ctx, rt.BootSpec{
-		SandboxID: "sb-live-dead-" + time.Now().Format("150405"),
+		SandboxID: liveSandboxID(t, "sb-live-dead"),
 		Template:  rt.Template{Name: "base", Image: "alpine:3"},
 		VCPU:      1, MemMiB: 256,
 	})
 	if err != nil {
 		t.Skipf("boot failed (image or daemon unavailable): %v", err)
 	}
-	t.Cleanup(func() { _ = inst.Stop(t.Context()) })
 	lv := inst.(rt.Liveness)
 	if !lv.Alive() {
 		t.Fatal("a running container reads as dead")
@@ -248,14 +261,13 @@ func TestLiveProcsWithoutAShell(t *testing.T) {
 	}
 	ctx := t.Context()
 	inst, err := r.Boot(ctx, rt.BootSpec{
-		SandboxID: "sb-live-nosh-" + time.Now().Format("150405"),
+		SandboxID: liveSandboxID(t, "sb-live-nosh"),
 		Template:  rt.Template{Name: "base", Image: "alpine:3"},
 		VCPU:      1, MemMiB: 256,
 	})
 	if err != nil {
 		t.Skipf("boot failed (image or daemon unavailable): %v", err)
 	}
-	t.Cleanup(func() { _ = inst.Stop(t.Context()) })
 	cid := inst.(*dockerInstance).cid
 	if _, se, code, err := dockerOut(ctx, "exec", "-u", "0", cid, "rm", "/bin/sh"); err != nil || code != 0 {
 		t.Fatalf("remove /bin/sh: %v %d %s", err, code, se)
