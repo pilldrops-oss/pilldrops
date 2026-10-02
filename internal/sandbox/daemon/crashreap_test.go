@@ -553,3 +553,56 @@ func TestScanRevivesUnderAnUnknownEngineStartForEveryRestart(t *testing.T) {
 		t.Errorf("restarted events = %d, want %d", n, restarts)
 	}
 }
+
+// backVMM is a casualty whose container is running again: a revive's start
+// erred, yet went through.
+type backVMM struct {
+	*casualtyVMM
+	alive bool
+}
+
+func (b *backVMM) Alive() bool { return b.alive }
+
+// A revive whose start erred leaves the sandbox unmetered and waiting out a
+// backoff. If its container then comes back on its own, no scan revived it
+// again: the meter stayed frozen and its ports stale for good.
+func TestScanTakesBackACasualtyRunningAgainAfterAFailedRevive(t *testing.T) {
+	clk := &manualClock{t: time.Unix(1_000_000, 0)}
+	fp := newFakePersister(nil)
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, Clock: clk, IdleTimeout: time.Hour, HardTTL: 24 * time.Hour})
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	d.mu.Lock()
+	orig := d.boxes[sb.ID].inst
+	b := &backVMM{casualtyVMM: &casualtyVMM{deadVMM: deadVMM{orig}, reviveErr: errors.New("Cannot connect to the Docker daemon")}}
+	d.boxes[sb.ID].inst = b
+	d.mu.Unlock()
+
+	d.scanExits(ctx)
+	d.mu.Lock()
+	down := !d.boxes[sb.ID].meter.running && !d.boxes[sb.ID].reviveRetryAt.IsZero()
+	d.mu.Unlock()
+	if !down {
+		t.Fatal("setup: the failed revive did not leave the sandbox down")
+	}
+
+	b.alive, b.reviveErr, b.revived = true, nil, orig
+	d.scanExits(ctx) // inside the backoff: it is running, so nothing to wait for
+
+	d.mu.Lock()
+	s := d.boxes[sb.ID]
+	inst, metered, retry := s.inst, s.meter.running, s.reviveRetryAt
+	d.mu.Unlock()
+	if inst != orig {
+		t.Error("the instance was not re-read, so its ports stay stale")
+	}
+	if !metered {
+		t.Error("a sandbox running again is not metered")
+	}
+	if !retry.IsZero() {
+		t.Errorf("a pending retry at %v survived the take-back", retry)
+	}
+}

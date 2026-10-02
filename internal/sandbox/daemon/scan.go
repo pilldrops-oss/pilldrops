@@ -126,6 +126,9 @@ func (d *Daemon) scanExits(ctx context.Context) {
 	forEachTarget(ctx, len(targets), scanConcurrency, func(i int) {
 		t := targets[i]
 		if t.lv.Alive() {
+			if rv, ok := t.lv.(rt.Reviver); ok && d.downAfterRevive(t.id, t.lv) {
+				d.readopt(ctx, t.id, t.lv, rv)
+			}
 			return
 		}
 		if rv, ok := t.lv.(rt.Reviver); ok && rv.Casualty() {
@@ -169,7 +172,7 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 	d.mu.Lock()
 	lv, _ := sb.inst.(rt.Liveness)
 	current := lv == was && sb.State == StateRunning
-	orgID, template, startCmd, env := sb.OrgID, sb.Template, sb.StartCmd, sb.Env
+	orgID, template := sb.OrgID, sb.Template
 	if !current {
 		d.mu.Unlock()
 		release()
@@ -223,23 +226,7 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 			return
 		}
 		if err == nil {
-			d.mu.Lock()
-			sb.inst = inst
-			sb.revives++
-			sb.reviveEngine, sb.revivedAt = engine, d.clock.Now()
-			sb.reviveFails, sb.reviveRetryAt = 0, time.Time{}
-			if !sb.meter.running {
-				sb.meter.resume(d.clock.Now())
-			}
-			rec := d.recordOf(sb)
-			d.mu.Unlock()
-			d.persistRec(ctx, rec)
-			// The container's own command came back with it; a registered server did not.
-			if startCmd != "" {
-				if err := inst.StartServer(ctx, startCmd, env); err != nil {
-					d.log().Warn("revive: app restart failed", "sandbox_id", id, "error", err)
-				}
-			}
+			d.adoptRevived(ctx, sb, id, inst, engine)
 			release()
 			d.recordEvent(ctx, orgID, id, "restarted", template)
 			d.log().Warn("sandbox stopped by its engine restarting was started again", "sandbox_id", id)
@@ -255,6 +242,69 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 		!errors.Is(err, rt.ErrNotFound) && !errors.Is(err, errNoLongerDead) {
 		d.log().Warn("destroying a sandbox that would not stay up failed", "sandbox_id", id, "error", err)
 	}
+}
+
+// adoptRevived makes inst, started again under engine, the sandbox's instance:
+// metered again, its retry state cleared, its registered server started again
+// (the container's own command came back with it; a registered server did
+// not). The caller holds the sandbox's op lock.
+func (d *Daemon) adoptRevived(ctx context.Context, sb *Sandbox, id string, inst rt.Instance, engine time.Time) {
+	d.mu.Lock()
+	sb.inst = inst
+	sb.revives++
+	sb.reviveEngine, sb.revivedAt = engine, d.clock.Now()
+	sb.reviveFails, sb.reviveRetryAt = 0, time.Time{}
+	if !sb.meter.running {
+		sb.meter.resume(d.clock.Now())
+	}
+	rec := d.recordOf(sb)
+	startCmd, env := sb.StartCmd, sb.Env
+	d.mu.Unlock()
+	d.persistRec(ctx, rec)
+	if startCmd != "" {
+		if err := inst.StartServer(ctx, startCmd, env); err != nil {
+			d.log().Warn("revive: app restart failed", "sandbox_id", id, "error", err)
+		}
+	}
+}
+
+// downAfterRevive reports a running sandbox still on instance was whose
+// revive left it down: unmetered, or waiting out a revive's backoff.
+func (d *Daemon) downAfterRevive(id string, was rt.Liveness) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	sb, ok := d.boxes[id]
+	if !ok {
+		return false
+	}
+	lv, _ := sb.inst.(rt.Liveness)
+	return lv == was && sb.State == StateRunning && (!sb.meter.running || !sb.reviveRetryAt.IsZero())
+}
+
+// readopt takes back a sandbox found running while a revive that erred left
+// it down: the start went through after all, and nothing would revive it
+// again. Revive re-reads its ports, which moved with that start (starting a
+// running container is a no-op), and the meter resumes.
+func (d *Daemon) readopt(ctx context.Context, id string, was rt.Liveness, rv rt.Reviver) {
+	ctx, cancel := context.WithTimeout(ctx, reviveTimeout)
+	defer cancel()
+	sb, release, err := d.acquireOp(id)
+	if err != nil {
+		return
+	}
+	defer release()
+	// Rechecked under the op lock: a revive that was running took it back.
+	if !d.downAfterRevive(id, was) {
+		return
+	}
+	inst, err := rv.Revive(ctx)
+	if err != nil {
+		d.log().Warn("a sandbox running again after a failed revive could not be taken back; retrying",
+			"sandbox_id", id, "error", err)
+		return
+	}
+	d.adoptRevived(ctx, sb, id, inst, rv.EngineStarted())
+	d.log().Warn("sandbox running again after a failed revive was taken back", "sandbox_id", id)
 }
 
 // unknownEngineCrashWindow is how soon after its last revive a death counts
