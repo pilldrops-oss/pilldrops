@@ -87,7 +87,7 @@ func (s *Server) listFromStore(w http.ResponseWriter, r *http.Request) bool {
 		out = append(out, storeSandboxJSON{
 			// Slug: the name every other verb accepts in place of the id, and
 			// the list is where a caller goes looking for it.
-			ID: rec.ID, Template: rec.Template, Name: rec.Name, Slug: rec.Slug, OrgID: rec.OrgID, State: rec.State,
+			ID: rec.ID, Template: shownTemplate(r.Context(), st, rec), Name: rec.Name, Slug: rec.Slug, OrgID: rec.OrgID, State: rec.State,
 			CreatedBy: rec.CreatedBy, Visibility: rec.Visibility,
 			CreatedAt:    time.Unix(rec.CreatedAt, 0).UTC(),
 			ExpiresAt:    time.Unix(rec.ExpiresAt, 0).UTC(),

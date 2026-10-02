@@ -181,6 +181,16 @@ func (s *Store) UpdateSnapshotCapture(ctx context.Context, id, template string, 
 	return nil
 }
 
+// FirstSnapshotTemplate is the template the earliest captured version of a
+// name was taken from. For a move snapshot that is what the sandbox ran before
+// it first moved: every later move captures the move template itself.
+func (s *Store) FirstSnapshotTemplate(ctx context.Context, orgID, name string) (string, error) {
+	var template string
+	err := s.queryRow(ctx, `SELECT template FROM snapshots
+		WHERE org_id = ? AND name = ? AND template <> '' ORDER BY version LIMIT 1`, orgID, name).Scan(&template)
+	return template, err
+}
+
 // snapshotSelect is the join every read shares: the registry row plus the
 // build's status and size. A version whose row is deleted reports "deleted"
 // whatever the build still says, since its objects are gone.

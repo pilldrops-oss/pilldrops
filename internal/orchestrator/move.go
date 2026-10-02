@@ -132,7 +132,7 @@ func (s *Server) moveSandbox(ctx context.Context, st *store.Store, rec store.San
 	}
 
 	// 1. Capture into the artifact store, synchronously.
-	name := "move-" + rec.ID
+	name := moveSnapshotName(rec.ID)
 	snap := store.Snapshot{OrgID: org, Name: name, Runtime: from.Runtime,
 		SourceSandbox: rec.ID, CreatedAt: s.now().Unix()}
 	if err := st.SaveSnapshot(ctx, &snap); err != nil {
@@ -202,6 +202,22 @@ func (s *Server) moveSandbox(ctx context.Context, st *store.Store, rec store.San
 }
 
 const codeMoveInProgress = "move_in_progress"
+
+func moveSnapshotName(id string) string { return "move-" + id }
+
+// shownTemplate is the template a sandbox is listed under. A moved sandbox
+// boots from its move snapshot's template id, which names the capture and not
+// what the owner created; it is shown as the template it ran before it moved.
+func shownTemplate(ctx context.Context, st *store.Store, rec store.SandboxRecord) string {
+	name := moveSnapshotName(rec.ID)
+	if rec.Template != store.SnapshotTemplateID(rec.OrgID, name) {
+		return rec.Template
+	}
+	if t, err := st.FirstSnapshotTemplate(ctx, rec.OrgID, name); err == nil {
+		return t
+	}
+	return rec.Template
+}
 
 // moveLockTTL outlasts the longest move: the capture's deadline plus the wait
 // for the target's fetch. A holder that dies frees it when this runs out.
