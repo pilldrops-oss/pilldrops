@@ -784,9 +784,25 @@ func (f *fcFS) Write(ctx context.Context, p string, data []byte) error {
 	return pathRefusal(p, f.be.WriteFile(ctx, f.id, p, data))
 }
 
-// List uses NUL-delimited records because a filename may contain tabs or newlines.
+// listCmd lists p with NUL-delimited records because a filename may contain
+// tabs or newlines. find lists nothing for a file, so a file is refused as on
+// docker rather than answered as an empty directory.
+func listCmd(root, p string) string {
+	return confineShell(root, p) +
+		`[ -e "$p" ] || { echo "No such file or directory" >&2; exit 1; }; ` +
+		`[ -d "$p" ] || { echo "Not a directory" >&2; exit 1; }; ` +
+		"find " + shellQuote(p) + ` -maxdepth 1 -mindepth 1 -printf '%y\t%s\t%f\0'`
+}
+
+// removeCmd removes p, but never the sandbox home itself.
+func removeCmd(root, p string) string {
+	return confineShell(root, p) +
+		`[ "$p" = ` + shellQuote(root) + ` ] && { echo "refusing to remove the sandbox home" >&2; exit 1; }; ` +
+		"rm -rf " + shellQuote(p)
+}
+
 func (f *fcFS) List(ctx context.Context, p string) ([]rt.DirEntry, error) {
-	out, err := f.run(ctx, p, confineShell(fcHomeDir, p)+"find "+shellQuote(p)+` -maxdepth 1 -mindepth 1 -printf '%y\t%s\t%f\0'`)
+	out, err := f.run(ctx, p, listCmd(fcHomeDir, p))
 	if err != nil {
 		return nil, err
 	}
@@ -816,7 +832,7 @@ func (f *fcFS) Move(ctx context.Context, src, dst string) error {
 	return err
 }
 func (f *fcFS) Remove(ctx context.Context, p string) error {
-	_, err := f.run(ctx, p, confineShell(fcHomeDir, p)+"rm -rf "+shellQuote(p))
+	_, err := f.run(ctx, p, removeCmd(fcHomeDir, p))
 	return err
 }
 

@@ -186,9 +186,15 @@ func (c *countingReader) Read(b []byte) (int, error) {
 	return n, err
 }
 
+// refuseRemoveHome is the refusal of a remove of the sandbox home itself, on every runtime.
+const refuseRemoveHome = "refusing to remove the sandbox home"
+
 // listScript prints one line per entry: name\ttype(d|f)\tsize\tmtimeEpoch.
-// POSIX sh only, so it works on every slim base image.
-const listScript = `cd "$1" || exit 1
+// POSIX sh only, so it works on every slim base image. A missing path and a
+// file are told apart, as on firecracker, so both answer 404 and 400 alike.
+const listScript = `[ -e "$1" ] || { echo "list: No such file or directory" >&2; exit 1; }
+[ -d "$1" ] || { echo "list: Not a directory" >&2; exit 1; }
+cd "$1" || exit 1
 for e in * .*; do
   [ -e "$e" ] || continue
   case "$e" in .|..) continue;; esac
@@ -241,6 +247,10 @@ func (d *dockerFS) Move(ctx context.Context, src, dst string) error {
 }
 
 func (d *dockerFS) Remove(ctx context.Context, p string) error {
+	// rm -rf of the home empties it before failing on the directory itself.
+	if d.abs(p) == containerWorkdir {
+		return fmt.Errorf("%w: remove %s: %s", fs.ErrInvalid, p, refuseRemoveHome)
+	}
 	_, se, code, err := d.exec(ctx, "rm", "-rf", "--", d.abs(p))
 	if err != nil || code != 0 {
 		return fsFail("remove "+p, err, code, se)
