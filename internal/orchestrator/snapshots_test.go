@@ -34,6 +34,8 @@ type fakeSnapshotNode struct {
 	// captures counts capture requests; exports names the directories deleted.
 	captures int
 	deleted  []string
+	// evicted names the sandboxes the control plane evicted after a move.
+	evicted []string
 	// payload is what the node claims it captured.
 	payload string
 	// rootfs, when set, is the root image every capture was taken against: the
@@ -103,6 +105,14 @@ func newFakeSnapshotNode(t *testing.T) *fakeSnapshotNode {
 	mux.HandleFunc("DELETE /v1/sandboxes/{id}/snapshot-export/{build}", func(w http.ResponseWriter, r *http.Request) {
 		n.mu.Lock()
 		n.deleted = append(n.deleted, r.PathValue("build"))
+		n.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("DELETE /v1/sandboxes/{id}", func(w http.ResponseWriter, r *http.Request) {
+		n.mu.Lock()
+		if r.URL.Query().Get("evict") == "1" {
+			n.evicted = append(n.evicted, r.PathValue("id"))
+		}
 		n.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	})

@@ -44,8 +44,10 @@ func (s *Server) resolveSnapshotCreate(w http.ResponseWriter, r *http.Request, b
 		return out, false
 	}
 	view, err := st.LatestReadySnapshot(r.Context(), fastOrg(r), req.Snapshot)
-	// A move's capture is the moved sandbox's root image, not the org's to boot.
-	if err == nil && store.ReservedSnapshotName(req.Snapshot) {
+	// A move's capture is the moved sandbox's root image, not the org's to boot;
+	// only this tier's own move creates from it.
+	_, moving := r.Context().Value(moveCtxKey{}).(moveCtx)
+	if err == nil && store.ReservedSnapshotName(req.Snapshot) && !moving {
 		err = store.ErrSnapshotNotFound
 	}
 	if err != nil {

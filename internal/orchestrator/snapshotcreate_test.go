@@ -33,9 +33,14 @@ func newCreateRecorder(t *testing.T, id string) *createRecorder {
 		n.mu.Lock()
 		n.got = append(n.got, spec)
 		n.mu.Unlock()
+		// A move pins the id; the node honours it.
+		created := "sb-child-" + id
+		if spec.ID != "" {
+			created = spec.ID
+		}
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck // test
-			"id": "sb-child-" + id, "app_url": "http://" + id + "/preview",
+			"id": created, "app_url": "http://" + id + "/preview",
 			"boot_type": "snapshot", "boot_ms": 42,
 		})
 	})
@@ -249,5 +254,32 @@ func TestAMovesCaptureIsNotListedOrDeletableByATenant(t *testing.T) {
 	}
 	if status, _ := f.do(t, "DELETE", "/v1/snapshots/golden", "apikey", ""); status != http.StatusOK {
 		t.Errorf("DELETE of an ordinary snapshot answered %d, want 200", status)
+	}
+}
+
+// A whole move through the public route: capture on the source, create from
+// the capture on another node under the same id, evict the original. Hiding
+// move captures from tenants once refused the move's own create with a 404,
+// and no test drove a move end to end.
+func TestAMoveCapturesCreatesElsewhereAndEvicts(t *testing.T) {
+	f := newSnapshotCreateFleet(t)
+
+	status, out := f.do(t, "POST", "/v1/sandboxes/sb-1/move", "apikey", "")
+	if status != http.StatusOK || out["to"] != "node-create-fc" {
+		t.Fatalf("move answered %d %v, want 200 to node-create-fc", status, out["_raw"])
+	}
+	spec := f.fc.last(t)
+	if spec.ID != "sb-1" || spec.Snapshot != store.MoveSnapshotName("sb-1") {
+		t.Errorf("the target was asked for id %q from snapshot %q, want sb-1 from %s",
+			spec.ID, spec.Snapshot, store.MoveSnapshotName("sb-1"))
+	}
+	if node, ok := f.s.reg.NodeFor("sb-1"); !ok || node.ID != "node-create-fc" {
+		t.Errorf("sb-1 routes to %v after the move, want node-create-fc", node)
+	}
+	f.node.mu.Lock()
+	evicted := f.node.evicted
+	f.node.mu.Unlock()
+	if len(evicted) != 1 || evicted[0] != "sb-1" {
+		t.Errorf("the source evicted %v, want [sb-1]", evicted)
 	}
 }
