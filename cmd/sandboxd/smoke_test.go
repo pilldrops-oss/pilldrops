@@ -74,8 +74,10 @@ func TestSmokeOneCallDeployAndPreview(t *testing.T) {
 		t.Fatalf("create response has no app_url (expected a ?ptok=-bearing preview link): %v", created)
 	}
 
+	// A deadline, not a count: under a loaded race run the app's interpreter
+	// can take well over five seconds to bind.
 	var got string
-	for i := 0; i < 50; i++ {
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
 		r, err := http.Get(previewURL)
 		if err == nil {
 			b, _ := io.ReadAll(r.Body)
