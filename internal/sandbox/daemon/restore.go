@@ -300,14 +300,21 @@ func (d *Daemon) Shutdown(ctx context.Context) {
 	}
 	d.mu.RUnlock()
 
-	canSnapshot := d.cfg.Runtime != nil && d.cfg.Runtime.Capabilities().Snapshot
+	var caps rt.Caps
+	if d.cfg.Runtime != nil {
+		caps = d.cfg.Runtime.Capabilities()
+	}
 	// A runtime whose instances outlive the daemon and are adopted by the next
 	// one loses nothing by leaving a sandbox running; stopping it after a
 	// failed pause left no snapshot and no instance, and the restart dropped it.
 	_, adoptable := d.cfg.Runtime.(rt.Adopter)
+	// A pause that keeps no memory (docker's commit) gives such an instance
+	// nothing the adopted container does not, and on the rig its commits ran
+	// out the stop window for 7 of 9 containers.
+	pause := caps.Snapshot && (caps.MemoryRestore || !adoptable)
 	pauseCtx := context.WithValue(ctx, shutdownKey{}, true)
 	for _, id := range ids {
-		if canSnapshot {
+		if pause {
 			if err := d.Pause(pauseCtx, id); err == nil {
 				continue
 			} else {
