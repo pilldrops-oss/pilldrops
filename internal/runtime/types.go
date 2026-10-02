@@ -73,6 +73,9 @@ var (
 	// ErrProtectedProcess means the pid is the sandbox's own keepalive, whose
 	// death ends the sandbox: the caller's input, so a 4xx.
 	ErrProtectedProcess = errors.New("that process keeps the sandbox alive and cannot be signalled")
+	// ErrWontStayUp means a revive's start succeeded and a state read then
+	// showed the instance stopped again: a crash, not an engine still settling.
+	ErrWontStayUp = errors.New("would not stay up after restart")
 )
 
 // Resources is a per-sandbox CPU/RAM allocation.

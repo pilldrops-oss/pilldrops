@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
 
 func TestConfirmDeadNeedsTwoReadsApart(t *testing.T) {
@@ -86,8 +88,8 @@ func TestStayedUpConfirmsTheContainerIsStillRunning(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := stayedUp(ctx, time.Millisecond, func() (containerState, error) { return tc.st, tc.readErr })
-			if (err != nil) != tc.wantErr {
-				t.Errorf("err = %v, want error %v", err, tc.wantErr)
+			if (err != nil) != tc.wantErr || (err != nil && !errors.Is(err, rt.ErrWontStayUp)) {
+				t.Errorf("err = %v, want rt.ErrWontStayUp %v", err, tc.wantErr)
 			}
 		})
 	}

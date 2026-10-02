@@ -146,8 +146,10 @@ func (d *Daemon) scanExits(ctx context.Context) {
 }
 
 // reviveCasualty starts again a sandbox its engine's restart stopped, rather
-// than reaping it. One that will not start, or has been revived maxRevives
-// times within reviveWindow, is a crash: destroyed with an "exited" event.
+// than reaping it. One confirmed stopped again right after its start
+// (rt.ErrWontStayUp), or revived maxRevives times within reviveWindow, is a
+// crash: destroyed with an "exited" event. Any other revive error (dockerd
+// still settling) leaves it for the next scan, which the count bounds.
 func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness, rv rt.Reviver) {
 	// Its own deadline: a docker start with retries plus the app's readiness
 	// wait outlasts the scan and restore budgets its callers run on.
@@ -190,6 +192,11 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 			// as it was, so the next start adopts and starts it again.
 			release()
 			d.log().Info("revive cancelled by the daemon stopping", "sandbox_id", id)
+			return
+		}
+		if err != nil && !errors.Is(err, rt.ErrWontStayUp) {
+			release()
+			d.log().Warn("revive failed; retrying on the next scan", "sandbox_id", id, "error", err)
 			return
 		}
 		if err == nil {

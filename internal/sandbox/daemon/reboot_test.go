@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -42,7 +43,7 @@ func rebooted(t *testing.T, ids []string, wontStart map[string]bool) *rebootRT {
 		}
 		c := &casualtyVMM{deadVMM: deadVMM{inst}, revived: inst}
 		if wontStart[id] {
-			c.revived, c.reviveErr = nil, errors.New("docker start: exit 1")
+			c.revived, c.reviveErr = nil, fmt.Errorf("docker start: %w", rt.ErrWontStayUp)
 		}
 		r.stopped[id] = c
 	}

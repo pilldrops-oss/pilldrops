@@ -368,7 +368,7 @@ func stayedUp(ctx context.Context, settle time.Duration, state func() (container
 	case <-time.After(settle):
 	}
 	if st, err := state(); err == nil && !st.Running {
-		return errors.New("would not stay up after restart: exited right after start")
+		return fmt.Errorf("%w: exited right after start", rt.ErrWontStayUp)
 	}
 	return nil
 }

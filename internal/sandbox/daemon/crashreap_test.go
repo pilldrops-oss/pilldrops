@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -232,7 +233,7 @@ func TestScanDestroysACasualtyThatWillNotStayUp(t *testing.T) {
 		reviveErr error
 		restarted int
 	}{
-		{"start fails", errors.New("would not stay up after restart"), 0},
+		{"confirmed stopped after its start", fmt.Errorf("docker start c1: %w", rt.ErrWontStayUp), 0},
 		{"starts and dies again", nil, maxRevives},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -266,6 +267,37 @@ func TestScanDestroysACasualtyThatWillNotStayUp(t *testing.T) {
 				t.Errorf("history exit state = %q, want exited", got)
 			}
 		})
+	}
+}
+
+// A revive that fails for any reason but a confirmed stop is dockerd still
+// settling: destroying on it destroyed healthy sandboxes.
+func TestScanKeepsACasualtyWhoseReviveErrsWithoutAConfirmedStop(t *testing.T) {
+	fp := newFakePersister(nil)
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, IdleTimeout: time.Hour, HardTTL: time.Hour})
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	d.mu.Lock()
+	orig := d.boxes[sb.ID].inst
+	c := &casualtyVMM{deadVMM: deadVMM{orig}, reviveErr: errors.New("Cannot connect to the Docker daemon")}
+	d.boxes[sb.ID].inst = c
+	d.mu.Unlock()
+
+	d.scanExits(ctx)
+
+	if info, ok := d.Get(sb.ID); !ok || info.State != StateRunning {
+		t.Fatalf("present %v, state %q: a revive that could not reach dockerd destroyed the sandbox", ok, info.State)
+	}
+	if c.stopped || fp.countEvents("exited") != 0 {
+		t.Errorf("stopped %v, events %v; want nothing destroyed", c.stopped, fp.events)
+	}
+	c.reviveErr, c.revived = nil, orig
+	d.scanExits(ctx)
+	if fp.countEvents("restarted") != 1 {
+		t.Errorf("events = %v, want the next scan to revive it", fp.events)
 	}
 }
 
