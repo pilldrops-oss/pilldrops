@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,7 +46,7 @@ func (r *Runtime) Adopt(ctx context.Context, sandboxID string) (rt.Instance, boo
 	if cid == "" {
 		return nil, false
 	}
-	primary := appPort
+	primary := adoptedPrimaryPort(ctx, cid)
 	host, _ := mappedPort(ctx, cid, primary)
 	termHost, _ := mappedPort(ctx, cid, terminalPort)
 	cmdOut, _, _, _ := dockerOut(ctx, "inspect", "-f", "{{join .Config.Cmd \" \"}}", cid)
@@ -53,8 +54,9 @@ func (r *Runtime) Adopt(ctx context.Context, sandboxID string) (rt.Instance, boo
 	inst := &dockerInstance{
 		id: sandboxID, cid: cid, host: host, termHost: termHost, service: service,
 		runUser: r.adoptedRunUser(ctx, cid, service), start: time.Now(),
-		eng:   r.eng,
-		ports: map[int]string{primary: host},
+		eng:     r.eng,
+		primary: primary,
+		ports:   map[int]string{primary: host},
 	}
 	inst.casualty.Store(!live)
 	return inst, true
@@ -77,6 +79,21 @@ func pickAdoptable(psOut string) (cid string, live bool) {
 		}
 	}
 	return cid, false
+}
+
+// primaryPortLabel records a container's primary port for Adopt.
+const primaryPortLabel = "sandboxd.port"
+
+// adoptedPrimaryPort reads the primary port bootImage labelled the container
+// with; a container booted before the label falls back to appPort.
+func adoptedPrimaryPort(ctx context.Context, cid string) int {
+	out, _, code, err := dockerOut(ctx, "inspect", "-f", `{{index .Config.Labels "`+primaryPortLabel+`"}}`, cid)
+	if err == nil && code == 0 {
+		if p, perr := strconv.Atoi(strings.TrimSpace(out)); perr == nil && p > 0 {
+			return p
+		}
+	}
+	return appPort
 }
 
 // adoptedRunUser reads the run user from the sandboxd.runuser label. The label

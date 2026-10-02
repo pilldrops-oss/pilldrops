@@ -53,6 +53,8 @@ type dockerInstance struct {
 	execs   int64
 	// eng is nil when the Engine socket was unreachable; every path then uses the CLI.
 	eng *engine
+	// primary is the port previews default to: appPort, or a service's first.
+	primary int
 	// ports caches `docker port` answers, seeded with the primary port; a
 	// mapping is fixed for the container's life, so one lookup per port suffices.
 	portsMu sync.Mutex
@@ -327,12 +329,12 @@ func (i *dockerInstance) Revive(ctx context.Context) (rt.Instance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("docker start %s: %w", i.cid, err)
 	}
-	host, _ := mappedPort(ctx, i.cid, appPort)
+	host, _ := mappedPort(ctx, i.cid, i.primary)
 	termHost, _ := mappedPort(ctx, i.cid, terminalPort)
 	return &dockerInstance{
 		id: i.id, cid: i.cid, host: host, termHost: termHost, envdToken: i.envdToken,
 		vcpu: i.vcpu, memMiB: i.memMiB, service: i.service, runUser: i.runUser,
-		start: time.Now(), eng: i.eng, ports: map[int]string{appPort: host},
+		start: time.Now(), eng: i.eng, primary: i.primary, ports: map[int]string{i.primary: host},
 	}, nil
 }
 

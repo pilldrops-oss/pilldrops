@@ -18,6 +18,8 @@ import (
 //	                 status=running filter keeps the running ones
 //	all              every sandboxd container id, for the sweep
 //	label-<cid>      the container's sandboxd.id; absent = inspect fails
+//	port-<cid>       the container's sandboxd.port label
+//	pub-<cid>-<port> the host address docker published that port on
 const fakeDocker = `#!/bin/sh
 d=$FAKE_DOCKER_DIR
 all="$*"
@@ -34,9 +36,10 @@ inspect)
 	case "$*" in
 	*sandboxd.id*) [ -f "$d/label-$last" ] || { echo "Error: No such object: $last" >&2; exit 1; }; cat "$d/label-$last" ;;
 	*sandboxd.runuser*) echo 1000 ;;
+	*sandboxd.port*) cat "$d/port-$last" 2>/dev/null || echo "<no value>" ;;
 	*) echo "sh -c sleep infinity" ;;
 	esac ;;
-port) exit 1 ;;
+port) cat "$d/pub-$2-${3%/tcp}" 2>/dev/null || exit 1 ;;
 esac
 exit 0
 `
@@ -153,5 +156,38 @@ func TestLiveAdoptRestartsAStoppedContainerWithItsData(t *testing.T) {
 	got, err := revived.FS().Read(ctx, "kept.txt")
 	if err != nil || string(got) != "survives" {
 		t.Fatalf("after restart: %q, %v; want the file written before the stop", got, err)
+	}
+}
+
+// A service template's preview is its first declared port. Adopt and Revive
+// re-read appPort only, which a service does not publish: no preview.
+func TestAdoptAndReviveKeepAServicesPrimaryPort(t *testing.T) {
+	defer func(b time.Duration) { reviveBackoff = b }(reviveBackoff)
+	reviveBackoff = time.Millisecond
+	fakeDockerCLI(t, map[string]string{
+		"ps-sb-svc":   "c1 exited\n",
+		"port-c1":     "3000\n",
+		"pub-c1-3000": "127.0.0.1:41000\n",
+	})
+	inst, ok := (&Runtime{}).Adopt(t.Context(), "sb-svc")
+	if !ok {
+		t.Fatal("not adopted")
+	}
+	revived, err := inst.(rt.Reviver).Revive(t.Context())
+	if err != nil {
+		t.Fatalf("revive: %v", err)
+	}
+	for name, i := range map[string]rt.Instance{"adopted": inst, "revived": revived} {
+		got, err := i.(*dockerInstance).ListenTarget(3000)
+		if err != nil || got != "127.0.0.1:41000" {
+			t.Errorf("%s: port 3000 -> %q, %v; want 127.0.0.1:41000", name, got, err)
+		}
+	}
+}
+
+// The other half: bootImage writes the label Adopt reads.
+func TestBootLabelsThePrimaryPort(t *testing.T) {
+	if !strings.Contains(sourceContaining(t, "func (r *Runtime) bootImage("), `"--label", primaryPortLabel+"="+strconv.Itoa(primary)`) {
+		t.Error("bootImage does not label the container with its primary port; Adopt falls back to appPort")
 	}
 }

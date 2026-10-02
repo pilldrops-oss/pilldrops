@@ -65,6 +65,13 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 	// Labelled on the container so Adopt can recover it without a BootSpec;
 	// otherwise a restart silently returns the adopted sandbox to uid 0.
 	base = append(base, "--label", "sandboxd.runuser="+runUser)
+	// A service's primary port is its first declared one, which a re-attach
+	// has no BootSpec to read; the label carries it to Adopt.
+	primary := appPort
+	if service && len(spec.Template.Ports) > 0 {
+		primary = spec.Template.Ports[0]
+	}
+	base = append(base, "--label", primaryPortLabel+"="+strconv.Itoa(primary))
 	// Before the template's own env so an explicit value still wins.
 	for _, e := range runUserEnv(runUser) {
 		base = append(base, "-e", e)
@@ -170,10 +177,6 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 	}
 	cid := strings.TrimSpace(out)
 
-	primary := appPort
-	if service && len(spec.Template.Ports) > 0 {
-		primary = spec.Template.Ports[0]
-	}
 	// Before the container is handed out: a sandbox is never returned without
 	// the identity its row promises. Zero on a resume, which delivers nothing.
 	if spec.Identity.Token != "" {
@@ -193,9 +196,10 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 		id: spec.SandboxID, cid: cid, host: host, termHost: termHost,
 		envdToken: envdToken,
 		vcpu:      spec.VCPU, memMiB: spec.MemMiB, service: service, runUser: runUser,
-		start: time.Now(),
-		eng:   r.eng,
-		ports: map[int]string{primary: host},
+		start:   time.Now(),
+		eng:     r.eng,
+		primary: primary,
+		ports:   map[int]string{primary: host},
 	}, nil
 }
 
