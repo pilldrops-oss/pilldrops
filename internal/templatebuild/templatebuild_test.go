@@ -27,6 +27,10 @@ func TestInitScriptStartsEnvd(t *testing.T) {
 			t.Errorf("/sbin/init does not contain %q", want)
 		}
 	}
+	// A hash baked into the image would outrank the cold boot's credential.
+	if rm := strings.Index(init, "rm -f /run/envd.token-hash"); rm < 0 || rm > strings.Index(init, "exec /usr/local/bin/envd reap") {
+		t.Error("/sbin/init does not remove a stale /run/envd.token-hash before envd starts")
+	}
 	// The reaper starts the server; a second one from init could not bind.
 	if strings.Contains(init, "/usr/local/bin/envd &") {
 		t.Errorf("/sbin/init starts the envd server itself as well as the reaper:\n%s", init)
