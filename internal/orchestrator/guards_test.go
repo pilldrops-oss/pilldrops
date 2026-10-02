@@ -101,3 +101,30 @@ func TestOrgAssertKeyGuard(t *testing.T) {
 		})
 	}
 }
+
+// The rig's orchestrator started without VAULT_SECRET_KEY and only refused
+// provider keys later, when one was connected.
+func TestVaultKeyGuard(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		clustered, dev, plain bool
+		key                   string
+		wantRefusal           bool
+	}{
+		{"clustered, no key", true, false, false, "", true},
+		{"clustered, key set", true, false, false, "abc123", false},
+		{"clustered, dev-insecure", true, true, false, "", false},
+		{"clustered, plaintext vault allowed", true, false, true, "", false},
+		{"standalone, no key", false, false, false, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := VaultKeyGuardError(tc.clustered, tc.dev, tc.plain, tc.key)
+			if (err != nil) != tc.wantRefusal {
+				t.Fatalf("err = %v, want refusal %v", err, tc.wantRefusal)
+			}
+			if tc.wantRefusal && !strings.Contains(err.Error(), "VAULT_SECRET_KEY") {
+				t.Errorf("the refusal must name the setting; got %q", err)
+			}
+		})
+	}
+}

@@ -237,6 +237,8 @@ port filters nothing. `network_advisories` says so on a domain-only allow list.
 | `ORCHESTRATOR_API_KEY` | **yes** | the operator/fleet key. Also the secret behind browser preview tokens — unset means preview gating **fails closed**, not off |
 | `ORCHESTRATOR_TOKEN` | **yes** in a fleet | signs `X-Org-Override` and the node-hop preview token; without it those relays refuse. Nodes no longer present it — each presents its own derived heartbeat token |
 | `NODE_KEY_SECRET` | **yes** in a fleet | control-plane only, **never** on a node. Derives every per-node credential. The orchestrator **refuses to start** without it when `ORCHESTRATOR_TOKEN` is set |
+| `ORG_ASSERT_KEY` | **yes** in a fleet | Ed25519 seed (`openssl rand -hex 32`) that signs `X-Org-Override`; nodes get only the public half at join. The orchestrator **refuses to start** without it when `ORCHESTRATOR_TOKEN` is set. See *The two secrets that stop one node compromising the fleet* |
+| `VAULT_SECRET_KEY` | **yes** in a fleet | encrypts tenants' provider API keys (`vault_secrets`); control plane only, **never** on a node (`openssl rand -hex 32`). The orchestrator **refuses to start** without it when `ORCHESTRATOR_TOKEN` is set, unless `ALLOW_PLAINTEXT_VAULT=1` (dev only). See *At-rest keys* |
 | `SANDBOXD_DATABASE_URL` | **yes** in a fleet | Postgres. Without it the orchestrator still boots but serves **no** projects, threads, vault or launch stats, and **admission is disabled** — see the warning below |
 | `PORTAL_SANDBOX_DOMAIN` | for previews | the wildcard domain. Unset disables host ingress entirely, and with it custom domains (`GET /v1/capabilities` reports `custom_domains: false`) |
 | `TRUSTED_PROXY_CIDRS` | with a TLS terminator | comma-separated CIDRs whose `X-Forwarded-For` is believed. Unset means the header is ignored everywhere |
@@ -952,9 +954,9 @@ analytics tag into them; both are off unless set.
 | `VAULT_SECRET_KEY` | **yes** | **never** | `vault_secrets` — tenants' provider API keys |
 
 `VAULT_SECRET_KEY` is the one at-rest key the control plane keeps to itself, and
-it is deliberately absent from the node join bundle. Without it set, connecting
-a provider key is **refused** rather than stored unencrypted — which is what
-used to happen, silently. `ALLOW_PLAINTEXT_VAULT=1` restores the old behaviour
+it is deliberately absent from the node join bundle. A clustered control plane
+**refuses to start** without it; unclustered, connecting a provider key is
+**refused** rather than stored unencrypted — which is what used to happen, silently. `ALLOW_PLAINTEXT_VAULT=1` restores the old behaviour
 for local development and should never be set on a shared deployment.
 
 Generate one with `openssl rand -hex 32`.
