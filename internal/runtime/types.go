@@ -338,10 +338,13 @@ type OOMKilledReporter interface {
 // Reviver is an optional Liveness companion. Casualty reports that the last
 // Alive read found the instance stopped by its own engine restarting (dockerd
 // without live-restore) rather than dead; Revive starts it again and returns
-// the instance to use from then on, its published ports re-read.
+// the instance to use from then on, its published ports re-read. EngineStarted
+// is when the engine now running started, zero when unknown: a death under the
+// same engine as the last revive is the instance's own doing.
 type Reviver interface {
 	Casualty() bool
 	Revive(ctx context.Context) (Instance, error)
+	EngineStarted() time.Time
 }
 
 // Instance is one running sandbox's compute. It is nil while paused/stopped.

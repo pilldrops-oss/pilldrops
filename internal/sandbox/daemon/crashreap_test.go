@@ -184,9 +184,11 @@ type casualtyVMM struct {
 	reviveErr error
 	stopped   bool
 	revives   int
+	engine    time.Time
 }
 
-func (*casualtyVMM) Casualty() bool { return true }
+func (*casualtyVMM) Casualty() bool             { return true }
+func (c *casualtyVMM) EngineStarted() time.Time { return c.engine }
 func (c *casualtyVMM) Revive(context.Context) (rt.Instance, error) {
 	c.revives++
 	return c.revived, c.reviveErr
@@ -269,6 +271,35 @@ func TestScanDestroysACasualtyThatWillNotStayUp(t *testing.T) {
 				t.Errorf("history exit state = %q, want exited", got)
 			}
 		})
+	}
+}
+
+// Each death a new dockerd start caused is the daemon's doing, however close
+// together: on the rig four restarts under 2 min apart destroyed every sandbox.
+func TestScanNeverCountsDeathsEachUnderANewEngineStart(t *testing.T) {
+	fp := newFakePersister(nil)
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, IdleTimeout: time.Hour, HardTTL: time.Hour})
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	d.mu.Lock()
+	c := &casualtyVMM{deadVMM: deadVMM{d.boxes[sb.ID].inst}, engine: time.Unix(1_000_000, 0)}
+	c.revived = c
+	d.boxes[sb.ID].inst = c
+	d.mu.Unlock()
+
+	const restarts = 2*maxRevives + 1
+	for range restarts {
+		d.scanExits(ctx)
+		c.engine = c.engine.Add(90 * time.Second)
+	}
+	if info, ok := d.Get(sb.ID); !ok || info.State != StateRunning {
+		t.Fatalf("present %v, state %q: dockerd restarts destroyed a healthy sandbox", ok, info.State)
+	}
+	if n := fp.countEvents("restarted"); n != restarts {
+		t.Errorf("restarted events = %d, want %d", n, restarts)
 	}
 }
 

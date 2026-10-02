@@ -147,9 +147,8 @@ func (d *Daemon) scanExits(ctx context.Context) {
 
 // reviveCasualty starts again a sandbox its engine's restart stopped, rather
 // than reaping it. One confirmed stopped again right after its start
-// (rt.ErrWontStayUp), or dead again after maxRevives confirmed revives each
-// within reviveWindow of the last, is a crash: destroyed with an "exited"
-// event. Any other revive error (dockerd still settling) is retried with
+// (rt.ErrWontStayUp), or dead again after maxRevives confirmed revives under
+// the same engine start, is a crash: destroyed with an "exited" event. Any other revive error (dockerd still settling) is retried with
 // backoff and never counted.
 func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness, rv rt.Reviver) {
 	// Its own deadline: a docker start with retries plus the app's readiness
@@ -182,10 +181,11 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 		release()
 		return
 	}
-	if now.Sub(sb.lastRevive) > reviveWindow {
+	engine := rv.EngineStarted()
+	if !engine.Equal(sb.reviveEngine) {
 		sb.revives = 0
 	}
-	// Dead again within reviveWindow of its maxRevives-th confirmed revive.
+	// Dead again under the engine of its maxRevives-th confirmed revive.
 	exhausted := sb.revives >= maxRevives
 	d.mu.Unlock()
 
@@ -224,7 +224,7 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 			d.mu.Lock()
 			sb.inst = inst
 			sb.revives++
-			sb.lastRevive = now
+			sb.reviveEngine = engine
 			sb.reviveFails, sb.reviveRetryAt = 0, time.Time{}
 			if !sb.meter.running {
 				sb.meter.resume(d.clock.Now())
@@ -255,13 +255,9 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 	}
 }
 
-// maxRevives bounds back-to-back casualty revives, each within reviveWindow
-// of the last: a container that starts and dies again is a crash, not a
-// casualty. One that stayed up longer than the window was a casualty again.
-const (
-	maxRevives   = 3
-	reviveWindow = 2 * time.Minute
-)
+// maxRevives bounds casualty revives under one engine start: a container that
+// starts and dies again is a crash, not a casualty.
+const maxRevives = 3
 
 // reviveBackoffBase and reviveBackoffMax space the retries of a revive whose
 // start failed without a confirmed stop: doubling from one scan's worth.

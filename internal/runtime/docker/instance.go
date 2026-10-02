@@ -329,6 +329,9 @@ func (i *dockerInstance) Alive() bool {
 // Casualty implements rt.Reviver.
 func (i *dockerInstance) Casualty() bool { return i.casualty.Load() }
 
+// EngineStarted implements rt.Reviver.
+func (*dockerInstance) EngineStarted() time.Time { return dockerdStarted() }
+
 // reviveTries and reviveBackoff bound the docker start of a restart casualty:
 // the new daemon can still be settling when the first one runs.
 var (

@@ -176,11 +176,11 @@ type Sandbox struct {
 	// probeFails counts the scans in a row whose exec into probeInst failed.
 	probeFails int
 	probeInst  rt.Instance
-	// revives counts casualty revives each within reviveWindow of the one
-	// before (lastRevive): a container that starts and dies again is bounded
-	// to maxRevives, one that stayed up between engine restarts starts afresh.
-	revives    int
-	lastRevive time.Time
+	// revives counts casualty revives under the engine that started at
+	// reviveEngine: a container that dies again under the same engine is
+	// bounded to maxRevives; a new engine start was the engine's doing.
+	revives      int
+	reviveEngine time.Time
 	// reviveFails counts revives in a row whose start failed without a
 	// confirmed stop; reviveRetryAt is when the next one may run.
 	reviveFails   int

@@ -120,7 +120,8 @@ type slowStartVMM struct {
 	deaf bool
 }
 
-func (*slowStartVMM) Casualty() bool { return true }
+func (*slowStartVMM) Casualty() bool           { return true }
+func (*slowStartVMM) EngineStarted() time.Time { return time.Time{} }
 func (s *slowStartVMM) Revive(ctx context.Context) (rt.Instance, error) {
 	if s.deaf {
 		time.Sleep(s.took)
