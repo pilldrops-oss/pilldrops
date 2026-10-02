@@ -3,9 +3,11 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/pilldrops-oss/pilldrops/internal/auth/orgassert"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
@@ -318,5 +320,44 @@ func TestAuthCacheServesRepeatCalls(t *testing.T) {
 	}
 	if code, _ := do(t, "GET", srv.URL+"/v1/usage", key, ""); code != 200 {
 		t.Fatalf("cached call after external revoke = %d, want 200 (cache hit)", code)
+	}
+}
+
+// The control plane relays the operator acting as itself with an assertion that
+// names no key; that operator still sees the node keys, a relayed member does not.
+func TestRelayedOperatorSeesOperatorKeys(t *testing.T) {
+	srv, st, _ := newTestServerWithStore(t)
+	nodeKey, _, err := st.CreateKeyWithRole(t.Context(), "node", "default", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, orchKey, err := st.CreateKeyWithRole(t.Context(), "orch", "default", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := func(principal ...string) bool {
+		req, _ := http.NewRequest("GET", srv.URL+"/v1/keys", nil)
+		req.Header.Set("Authorization", "Bearer "+orchKey)
+		req.Header.Set("X-Org-Override", orgassert.Sign([]byte(testOrgOverrideSecret), "default", testNodeID, "GET", "/v1/keys", time.Now(), principal...))
+		if len(principal) == 2 {
+			req.Header.Set("X-Key-Id", principal[0])
+			req.Header.Set("X-Key-Role", principal[1])
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var keys []store.KeyInfo
+		if err := json.NewDecoder(resp.Body).Decode(&keys); err != nil {
+			t.Fatalf("decode keys (%d): %v", resp.StatusCode, err)
+		}
+		return slices.ContainsFunc(keys, func(k store.KeyInfo) bool { return k.ID == nodeKey.ID })
+	}
+	if !listed() {
+		t.Error("the operator acting as itself through the control plane does not see the node key")
+	}
+	if listed("k-member", "user") {
+		t.Error("a member relayed by the control plane sees the node key")
 	}
 }

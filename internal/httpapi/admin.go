@@ -19,7 +19,7 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A member never sees the fleet's operator and node keys in its org.
-	if !operatorPrincipal(r) {
+	if !operatorCaller(r) {
 		keys = slices.DeleteFunc(keys, func(k store.KeyInfo) bool { return k.Role == "operator" })
 	}
 	writeJSON(w, http.StatusOK, keys)

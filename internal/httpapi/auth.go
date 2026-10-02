@@ -195,12 +195,18 @@ func (s *Server) auth(next http.HandlerFunc) http.Handler {
 // the wire key, since that hop asserts no role to check.
 func (s *Server) authAdmin(next http.HandlerFunc) http.Handler {
 	return s.auth(func(w http.ResponseWriter, r *http.Request) {
-		if roleOf(r) != "operator" || (keyIDOf(r) != "" && !operatorPrincipal(r)) {
+		if !operatorCaller(r) {
 			writeErr(w, http.StatusForbidden, "operator role required")
 			return
 		}
 		next(w, r)
 	})
+}
+
+// operatorCaller is authAdmin's rule: an operator key here, or the control
+// plane's operator acting as itself, or a forwarded caller asserted operator.
+func operatorCaller(r *http.Request) bool {
+	return roleOf(r) == "operator" && (keyIDOf(r) == "" || operatorPrincipal(r))
 }
 
 // orgID pulls the authenticated org from the request context ("default" if absent).
