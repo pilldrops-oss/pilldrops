@@ -23,10 +23,10 @@ func TestAMovedSandboxIsListedUnderItsOriginalTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	moveTemplate := store.SnapshotTemplateID("org-a", moveSnapshotName("sb1"))
+	moveTemplate := store.SnapshotTemplateID("org-a", store.MoveSnapshotName("sb1"))
 	// Moved twice: the second capture names the first move's template.
 	for _, captured := range []string{"python-3.11", moveTemplate} {
-		snap := store.Snapshot{OrgID: "org-a", Name: moveSnapshotName("sb1"), Runtime: "firecracker", SourceSandbox: "sb1", CreatedAt: 1}
+		snap := store.Snapshot{OrgID: "org-a", Name: store.MoveSnapshotName("sb1"), Runtime: "firecracker", SourceSandbox: "sb1", CreatedAt: 1}
 		if err := st.SaveSnapshot(ctx, &snap); err != nil {
 			t.Fatal(err)
 		}

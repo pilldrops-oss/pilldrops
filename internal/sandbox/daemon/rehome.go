@@ -88,7 +88,7 @@ func (d *Daemon) Rehome(ctx context.Context, id, org string) error {
 	// directory holding rootfs.squashfs is bootable, so it must never be seen
 	// half-written. Then the sandbox is created under its own id from it, the
 	// path a move's target takes, which carries its config from its record.
-	tmpl := "snap-rehome-" + id
+	tmpl := rehomeTemplate(id)
 	dir := d.snapshotDir(tmpl)
 	stage := dir + ".staging"
 	got, err := d.cfg.SnapshotArchive.Get(ctx, id, stage)
@@ -121,6 +121,9 @@ func (d *Daemon) Rehome(ctx context.Context, id, org string) error {
 	d.log().Info("sandbox rehomed from its archive", "sandbox_id", id, "previous_node", r.NodeID)
 	return nil
 }
+
+// rehomeTemplate is the template a rehome of sandbox id lands its capture as.
+func rehomeTemplate(id string) string { return "snap-rehome-" + id }
 
 // ownerChecker is the optional store lookup that tells a node a record it
 // holds now belongs to another node.

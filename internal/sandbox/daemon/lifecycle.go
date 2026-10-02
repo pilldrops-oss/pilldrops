@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/observability"
+	"github.com/pilldrops-oss/pilldrops/internal/store"
+	"github.com/pilldrops-oss/pilldrops/internal/templates"
 	"go.opentelemetry.io/otel/attribute"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
@@ -400,6 +402,15 @@ func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState s
 	// Checkpoints die with the sandbox; one that outlives it is add-named-snapshots.
 	if err := os.RemoveAll(d.checkpointRoot(id)); err != nil {
 		d.log().Warn("destroy: checkpoint dir remove failed", "sandbox_id", id, "error", err)
+	}
+	// So do the captures a rehome or a move booted it from, each a template of
+	// this sandbox alone. A named snapshot is the snapshots API's to delete.
+	if templates.Dir() != "" {
+		for _, tmpl := range []string{rehomeTemplate(id), store.SnapshotTemplateID(orgID, store.MoveSnapshotName(id))} {
+			if err := os.RemoveAll(d.snapshotDir(tmpl)); err != nil {
+				d.log().Warn("destroy: capture template remove failed", "sandbox_id", id, "template", tmpl, "error", err)
+			}
+		}
 	}
 	d.flushUsage(ctx, id, orgID, u)
 	if evict {

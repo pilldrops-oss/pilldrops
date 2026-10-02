@@ -12,6 +12,7 @@ import (
 
 	"github.com/pilldrops-oss/pilldrops/internal/artifact"
 	"github.com/pilldrops-oss/pilldrops/internal/runtime/runtimetest"
+	"github.com/pilldrops-oss/pilldrops/internal/store"
 	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
 
@@ -135,5 +136,42 @@ func TestAConcurrentRehomeLeavesTheLiveSandboxsCapture(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(templates.Dir(), "snap-rehome-"+id, "rootfs.squashfs")); err != nil {
 		t.Fatalf("the capture the rehomed sandbox runs from is gone: %v", err)
+	}
+}
+
+// A rehome's or a move's capture is a template of one sandbox: kept after its
+// destroy, every rehome and move filled the node's disk. A named snapshot the
+// owner saved outlives the sandbox.
+func TestDestroyRemovesTheSandboxsCaptureTemplates(t *testing.T) {
+	templates.SetDir(t.TempDir())
+	t.Cleanup(func() { templates.SetDir("") })
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: newFakePersister(nil), IdleTimeout: time.Minute, HardTTL: time.Hour})
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rehome := rehomeTemplate(sb.ID)
+	move := store.SnapshotTemplateID("o", store.MoveSnapshotName(sb.ID))
+	named := store.SnapshotTemplateID("o", "before-upgrade")
+	for _, tmpl := range []string{rehome, move, named} {
+		if err := os.MkdirAll(d.snapshotDir(tmpl), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d.snapshotDir(tmpl), "rootfs.squashfs"), []byte(tmpl), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := d.Destroy(ctx, sb.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, tmpl := range []string{rehome, move} {
+		if _, err := os.Stat(d.snapshotDir(tmpl)); !os.IsNotExist(err) {
+			t.Errorf("%s survived its sandbox's destroy: %v", tmpl, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(d.snapshotDir(named), "rootfs.squashfs")); err != nil {
+		t.Errorf("the named snapshot %s went with the sandbox: %v", named, err)
 	}
 }

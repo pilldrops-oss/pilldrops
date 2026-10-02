@@ -53,6 +53,9 @@ func SnapshotTemplateID(orgID, name string) string {
 	return "snap-" + hex.EncodeToString(sum[:4]) + "-" + name
 }
 
+// MoveSnapshotName is the snapshot a move of sandbox id captures it into.
+func MoveSnapshotName(id string) string { return "move-" + id }
+
 // SnapshotBuildID is the build id a snapshot version publishes under. The
 // version is zero-padded into it on purpose.
 //
