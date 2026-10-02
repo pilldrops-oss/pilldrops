@@ -37,27 +37,38 @@ func TestStartServerAndListenTarget(t *testing.T) {
 		t.Fatalf("listen target = %q, %v", target, err)
 	}
 
+	// Deadlines, not fixed waits: python's start and its exit after Stop both
+	// stretch under -race and a loaded machine.
+	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
+	get := func() (string, error) {
+		resp, err := client.Get("http://" + target + "/")
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+		b, err := io.ReadAll(resp.Body)
+		return string(b), err
+	}
 	var body string
-	for i := 0; i < 50; i++ {
-		resp, err := http.Get("http://" + target + "/")
-		if err == nil {
-			b, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			body = string(b)
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if body, err = get(); err == nil {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
 	if body != "hello-preview" {
-		t.Fatalf("preview body = %q, want hello-preview", body)
+		t.Fatalf("preview body = %q (%v), want hello-preview", body, err)
 	}
 
 	if err := inst.Stop(ctx); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	time.Sleep(200 * time.Millisecond)
-	if _, err := http.Get("http://" + target + "/"); err == nil {
-		t.Fatalf("server still responding after Stop")
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if _, err := get(); err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("server still responding 10s after Stop")
+		}
 	}
 }
 
