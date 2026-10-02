@@ -30,32 +30,53 @@ func (r *Runtime) Restore(ctx context.Context, snap rt.SnapshotRef, spec rt.Boot
 	return r.bootImage(ctx, spec, img)
 }
 
-// Adopt reattaches to a still-running container from a previous daemon process,
-// matched by the sandboxd.id label. A container with no published port still adopts.
+// Adopt reattaches to the container a previous daemon process left for
+// sandboxID, matched by the sandboxd.id label. A stopped one adopts too, marked
+// a casualty for the daemon to start again: a host reboot stops every container,
+// and one not adopted was swept, its writable layer with it. A container with no
+// published port still adopts.
 func (r *Runtime) Adopt(ctx context.Context, sandboxID string) (rt.Instance, bool) {
-	out, _, code, err := dockerOut(ctx, "ps", "-q",
-		"--filter", "label=sandboxd.id="+sandboxID, "--filter", "status=running")
+	out, _, code, err := dockerOut(ctx, "ps", "-a",
+		"--filter", "label=sandboxd.id="+sandboxID, "--format", "{{.ID}} {{.State}}")
 	if err != nil || code != 0 {
 		return nil, false
 	}
-	cid := strings.TrimSpace(out)
+	cid, live := pickAdoptable(out)
 	if cid == "" {
 		return nil, false
-	}
-	if i := strings.IndexByte(cid, '\n'); i >= 0 {
-		cid = cid[:i]
 	}
 	primary := appPort
 	host, _ := mappedPort(ctx, cid, primary)
 	termHost, _ := mappedPort(ctx, cid, terminalPort)
 	cmdOut, _, _, _ := dockerOut(ctx, "inspect", "-f", "{{join .Config.Cmd \" \"}}", cid)
 	service := !strings.Contains(cmdOut, "sleep infinity")
-	return &dockerInstance{
+	inst := &dockerInstance{
 		id: sandboxID, cid: cid, host: host, termHost: termHost, service: service,
 		runUser: r.adoptedRunUser(ctx, cid, service), start: time.Now(),
 		eng:   r.eng,
 		ports: map[int]string{primary: host},
-	}, true
+	}
+	inst.casualty.Store(!live)
+	return inst, true
+}
+
+// pickAdoptable picks from `ps -a` lines ("<id> <state>") a live container
+// first, else any. A docker-paused one is live: it is a standby sandbox, thawed
+// by the daemon, and `docker start` refuses it.
+func pickAdoptable(psOut string) (cid string, live bool) {
+	for _, line := range strings.Split(psOut, "\n") {
+		id, state, _ := strings.Cut(strings.TrimSpace(line), " ")
+		if id == "" {
+			continue
+		}
+		if state == "running" || state == "paused" {
+			return id, true
+		}
+		if cid == "" {
+			cid = id
+		}
+	}
+	return cid, false
 }
 
 // adoptedRunUser reads the run user from the sandboxd.runuser label. The label
@@ -88,8 +109,9 @@ func (r *Runtime) SweepUnknown(known []string) {
 	}
 	out, _, _, _ := dockerOut(ctx, "ps", "-aq", "--filter", "label=sandboxd=1")
 	for _, cid := range strings.Fields(out) {
-		id, _, _, _ := dockerOut(ctx, "inspect", "-f", `{{index .Config.Labels "sandboxd.id"}}`, cid)
-		if keep[strings.TrimSpace(id)] {
+		id, _, code, err := dockerOut(ctx, "inspect", "-f", `{{index .Config.Labels "sandboxd.id"}}`, cid)
+		// An unreadable label is not an unknown sandbox: rm -f is unrecoverable.
+		if err != nil || code != 0 || keep[strings.TrimSpace(id)] {
 			continue
 		}
 		_, _, _, _ = dockerOut(ctx, "rm", "-f", cid)

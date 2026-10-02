@@ -8,8 +8,9 @@ import (
 )
 
 // restoreFromStore reloads persisted sandboxes after a restart. Running records
-// with a live instance are adopted; records with a snapshot come back paused;
-// stopped, expired or unrestorable records this node owns are dropped.
+// whose instance still exists, live or stopped, are adopted; records with a
+// snapshot come back paused; stopped, expired or unrestorable records this node
+// owns are dropped. A record is never dropped while its instance exists.
 func (d *Daemon) restoreFromStore(ctx context.Context) {
 	if d.cfg.Store == nil {
 		return
@@ -61,15 +62,25 @@ func (d *Daemon) restoreFromStore(ctx context.Context) {
 		// since the state it came back in is "running".
 		// "lost" is the control plane's mark on a node it reaped (store.StateLost).
 		// This node is back, so a VM that survived is adopted, not swept.
-		if (r.State == string(StateRunning) || r.State == string(StateStandby) || r.State == "lost") && adopter != nil {
+		// "failed" is a sandbox whose instance would not start again; its
+		// container still holds its data, so it is adopted and retried, never swept.
+		if (r.State == string(StateRunning) || r.State == string(StateStandby) ||
+			r.State == "lost" || r.State == string(StateFailed)) && adopter != nil {
 			if inst, ok := adopter.Adopt(context.Background(), r.ID); ok {
-				if fr, isFreezer := inst.(rt.Freezer); isFreezer && r.State == string(StateStandby) {
+				// A stopped instance (a host reboot) is started again the way the
+				// exit scan starts one a dockerd restart stopped.
+				rv, stopped := inst.(rt.Reviver)
+				stopped = stopped && rv.Casualty()
+				if fr, isFreezer := inst.(rt.Freezer); isFreezer && r.State == string(StateStandby) && !stopped {
 					if err := fr.Thaw(context.Background()); err != nil {
 						d.log().Warn("restore: thaw of an adopted standby sandbox failed",
 							"sandbox_id", r.ID, "error", err)
 					}
 				}
 				d.adoptRunning(ctx, r, inst, now)
+				if lv, ok := inst.(rt.Liveness); ok && stopped {
+					d.reviveCasualty(ctx, r.ID, lv, rv)
+				}
 				continue
 			}
 		}
