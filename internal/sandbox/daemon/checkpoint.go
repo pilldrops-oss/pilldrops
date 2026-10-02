@@ -111,15 +111,37 @@ func validCheckpointName(name string) error {
 	return nil
 }
 
-// captureInto runs the engine's capture of a running sandbox into dir, which
-// this call creates and the caller then owns. It holds opMu for the duration,
-// so nothing else touches the machine while it stands still, and it removes
-// dir on failure rather than leaving a half-written capture behind.
+// captureInto runs the engine's capture of a sandbox into dir, which this call
+// creates and the caller then owns. It holds opMu for the duration, so nothing
+// else touches the machine while it stands still, and it removes dir on
+// failure rather than leaving a half-written capture behind.
 //
 // Checkpoints and backups both go through here. One pause path means one set
 // of rules about which states a capture is legal from, and a fix to the
 // resume-on-failure shape cannot land in one caller and miss the other.
+//
+// A paused sandbox (every firecracker one after a node restart) is captured
+// from its pause snapshot when the runtime can, else woken, captured and
+// paused again: refusing it silently broke every scheduled backup.
 func (d *Daemon) captureInto(ctx context.Context, engine rt.Checkpointer, id, name, dir string) (rt.CheckpointInfo, error) {
+	info, err := d.captureOnce(ctx, engine, id, name, dir)
+	if !errors.Is(err, errCaptureNeedsWake) {
+		return info, err
+	}
+	if err := d.Resume(ctx, id); err != nil {
+		return rt.CheckpointInfo{}, fmt.Errorf("wake the paused sandbox to capture it: %w", err)
+	}
+	info, err = d.captureOnce(ctx, engine, id, name, dir)
+	if perr := d.Pause(ctx, id); perr != nil {
+		d.log().Warn("capture: pausing again after the capture failed", "sandbox_id", id, "error", perr)
+	}
+	return info, err
+}
+
+// errCaptureNeedsWake is a paused sandbox whose runtime captures only running ones.
+var errCaptureNeedsWake = errors.New("paused sandbox must be woken to capture")
+
+func (d *Daemon) captureOnce(ctx context.Context, engine rt.Checkpointer, id, name, dir string) (rt.CheckpointInfo, error) {
 	sb, release, err := d.acquireOp(id)
 	if err != nil {
 		return rt.CheckpointInfo{}, err
@@ -127,19 +149,29 @@ func (d *Daemon) captureInto(ctx context.Context, engine rt.Checkpointer, id, na
 	defer release()
 
 	d.mu.Lock()
-	if sb.State != StateRunning {
-		st := sb.State
-		d.mu.Unlock()
+	st, inst, snap := sb.State, sb.inst, sb.Snapshot
+	d.mu.Unlock()
+	paused, fromSnapshot := engine.(rt.PausedCheckpointer)
+	switch {
+	case st == StateRunning:
+	case st == StatePaused && fromSnapshot:
+	case st == StatePaused:
+		return rt.CheckpointInfo{}, errCaptureNeedsWake
+	default:
 		return rt.CheckpointInfo{}, fmt.Errorf("cannot checkpoint from state %s", st)
 	}
-	inst := sb.inst
-	d.mu.Unlock()
 
 	_ = os.RemoveAll(dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return rt.CheckpointInfo{}, fmt.Errorf("checkpoint dir: %w", err)
 	}
-	info, err := engine.Checkpoint(ctx, inst, rt.SnapshotRef{Path: dir, Name: name})
+	dst := rt.SnapshotRef{Path: dir, Name: name}
+	var info rt.CheckpointInfo
+	if st == StatePaused {
+		info, err = paused.CheckpointPaused(ctx, id, snap, dst)
+	} else {
+		info, err = engine.Checkpoint(ctx, inst, dst)
+	}
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return rt.CheckpointInfo{}, fmt.Errorf("checkpoint: %w", err)

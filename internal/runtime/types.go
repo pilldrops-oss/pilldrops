@@ -530,6 +530,13 @@ type Checkpointer interface {
 	RestoreCheckpoint(ctx context.Context, inst Instance, src SnapshotRef, spec BootSpec) (Instance, error)
 }
 
+// PausedCheckpointer is an optional Checkpointer capability: capture a paused
+// sandbox from its pause snapshot, without starting it. A runtime without it
+// has its paused sandboxes woken for the capture and paused again.
+type PausedCheckpointer interface {
+	CheckpointPaused(ctx context.Context, sandboxID string, snap, dst SnapshotRef) (CheckpointInfo, error)
+}
+
 // PortableCapture is an optional Runtime capability: make a capture directory
 // self-contained, so every byte a restore needs is inside it and it can be
 // moved to another machine, and undo that on arrival.

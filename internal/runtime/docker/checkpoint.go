@@ -37,6 +37,27 @@ func (r *Runtime) Checkpoint(ctx context.Context, inst rt.Instance, dst rt.Snaps
 	if _, se, code, err := dockerOut(ctx, "commit", i.cid, tag); err != nil || code != 0 {
 		return rt.CheckpointInfo{}, fmt.Errorf("commit checkpoint: %w %s", err, strings.TrimSpace(se))
 	}
+	return recordCheckpointImage(ctx, dst, tag)
+}
+
+// CheckpointPaused implements rt.PausedCheckpointer. A paused docker sandbox
+// is its committed pause image, so the capture is a second tag on it.
+func (r *Runtime) CheckpointPaused(ctx context.Context, sandboxID string, snap, dst rt.SnapshotRef) (rt.CheckpointInfo, error) {
+	src, err := os.ReadFile(snap.Path)
+	if err != nil {
+		return rt.CheckpointInfo{}, fmt.Errorf("read pause snapshot tag: %w", err)
+	}
+	tag := ckptImageTag(sandboxID, dst.Name)
+	if _, se, code, err := dockerOut(ctx, "tag", strings.TrimSpace(string(src)), tag); err != nil || code != 0 {
+		return rt.CheckpointInfo{}, fmt.Errorf("tag checkpoint: %w %s", err, strings.TrimSpace(se))
+	}
+	return recordCheckpointImage(ctx, dst, tag)
+}
+
+var _ rt.PausedCheckpointer = (*Runtime)(nil)
+
+// recordCheckpointImage names the checkpoint's image in its directory.
+func recordCheckpointImage(ctx context.Context, dst rt.SnapshotRef, tag string) (rt.CheckpointInfo, error) {
 	if err := os.WriteFile(filepath.Join(dst.Path, ckptTagFile), []byte(tag), 0o600); err != nil {
 		return rt.CheckpointInfo{}, err
 	}

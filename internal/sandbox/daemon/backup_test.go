@@ -793,3 +793,79 @@ func waitPending(t *testing.T, st *store.Store, id string) {
 	}
 	t.Fatal("the backup never reached pending")
 }
+
+// wakeCountRT counts the resumes that boot a paused sandbox again.
+type wakeCountRT struct {
+	*runtimetest.Fake
+	wakes int
+}
+
+func (r *wakeCountRT) Restore(ctx context.Context, snap rt.SnapshotRef, spec rt.BootSpec) (rt.Instance, error) {
+	r.wakes++
+	return r.Fake.Restore(ctx, snap, spec)
+}
+
+// snapshotCaptureRT captures a paused sandbox from its pause snapshot, as
+// docker does from its committed pause image.
+type snapshotCaptureRT struct {
+	*wakeCountRT
+	fromSnapshot int
+}
+
+func (r *snapshotCaptureRT) CheckpointPaused(_ context.Context, _ string, _, dst rt.SnapshotRef) (rt.CheckpointInfo, error) {
+	r.fromSnapshot++
+	return rt.CheckpointInfo{Kind: "disk"}, os.WriteFile(filepath.Join(dst.Path, "payload"), []byte("paused"), 0o600)
+}
+
+// After a node restart every firecracker sandbox comes back paused, and each
+// scheduled backup of one failed with "cannot checkpoint from state paused".
+func TestBackupOfAPausedSandbox(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		fromSnapshot bool
+	}{
+		{"woken, captured and paused again", false},
+		{"captured from its pause snapshot", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			st, err := store.Open(t.Context(), filepath.Join(dir, "state.db"))
+			if err != nil {
+				t.Fatalf("store: %v", err)
+			}
+			t.Cleanup(func() { st.Close() })
+			wake := &wakeCountRT{Fake: runtimetest.NewFake()}
+			snapRT := &snapshotCaptureRT{wakeCountRT: wake}
+			var runtime rt.Runtime = wake
+			if tc.fromSnapshot {
+				runtime = snapRT
+			}
+			d := New(Config{
+				Runtime: runtime, Backups: st, Blobs: newCountingBlobs(),
+				SnapshotDir: filepath.Join(dir, "snap"), IdleTimeout: time.Minute, HardTTL: time.Hour,
+			})
+			ctx := t.Context()
+			sb := createRunning(t, d)
+			if err := d.Pause(ctx, sb.ID); err != nil {
+				t.Fatalf("pause: %v", err)
+			}
+
+			row, err := d.Backup(ctx, sb.ID)
+			if err != nil {
+				t.Fatalf("backup of a paused sandbox: %v", err)
+			}
+			if b := waitBackup(t, st, row.ID); b.Status != store.BackupReady {
+				t.Fatalf("backup = %+v, want ready", b)
+			}
+			if got, _ := d.Get(sb.ID); got.State != StatePaused {
+				t.Errorf("sandbox is %s after the backup, want paused", got.State)
+			}
+			if tc.fromSnapshot && (snapRT.fromSnapshot != 1 || wake.wakes != 0) {
+				t.Errorf("snapshot captures = %d, wakes = %d; want one capture and no wake", snapRT.fromSnapshot, wake.wakes)
+			}
+			if !tc.fromSnapshot && wake.wakes != 1 {
+				t.Errorf("wakes = %d; a runtime that cannot capture a pause snapshot is woken once", wake.wakes)
+			}
+		})
+	}
+}
