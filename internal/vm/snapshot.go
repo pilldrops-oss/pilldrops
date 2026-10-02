@@ -220,7 +220,7 @@ func RebuildSnapshots(template string, cfg Config, log *zap.Logger) (err error) 
 }
 
 func createOneSnapshot(template, snapDir string, cfg Config, log *zap.Logger) error {
-	goldenID := "golden-" + template + "-" + randomHex(4)
+	goldenID := goldenVMID(template, randomHex(4))
 	gvcpu, gmem := defaultResources(cfg, template)
 	gstorage := goldenStorageMB(cfg, template)
 	vm, err := ColdBoot(template, goldenID, cfg, log, gvcpu, gmem, gstorage, "", nil) // the golden VM holds no token and no tenant policy

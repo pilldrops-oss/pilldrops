@@ -3,6 +3,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +29,18 @@ func goldenEnvdCheck(level int) error {
 			level, envdproto.VsockCredential)
 	}
 	return nil
+}
+
+// goldenVMID builds the golden VM's jailer --id. The jailer accepts only letters,
+// digits and '-', so a template such as "python-3.11" cannot go in verbatim.
+func goldenVMID(template, suffix string) string {
+	safe := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' {
+			return r
+		}
+		return '-'
+	}, template)
+	return "golden-" + safe + "-" + suffix
 }
 
 // goldenBuilds remembers, per template, whether a golden build is running and

@@ -59,3 +59,10 @@ func TestGoldenRefusalHoldsUntilTheTemplateIsRebuilt(t *testing.T) {
 		t.Fatal("a rebuilt template (new rootfs) must be retried at once")
 	}
 }
+
+func TestGoldenVMIDIsJailerLegal(t *testing.T) {
+	id := goldenVMID("python-3.11", "ab12cd34")
+	if id != "golden-python-3-11-ab12cd34" {
+		t.Fatalf("golden id = %q; the jailer rejects any char but letters, digits and '-'", id)
+	}
+}
