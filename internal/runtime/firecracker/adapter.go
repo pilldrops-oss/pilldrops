@@ -874,8 +874,6 @@ func (r *fcRuntime) Adopt(_ context.Context, sandboxID string) (rt.Instance, err
 	}, nil
 }
 
-var _ rt.Adopter = (*fcRuntime)(nil)
-
 // SweepUnknown implements rt.Sweeper: once the daemon has adopted what it
 // owns, every VM still held for adoption belongs to nothing and is removed.
 func (r *fcRuntime) SweepUnknown([]string) { r.be.KillUnadopted() }

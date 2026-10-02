@@ -25,8 +25,11 @@ func (d *Daemon) Start() {
 	restoreCancel()
 	// After the store is read, so a checkpoint is only swept when its sandbox is
 	// genuinely gone rather than merely not restored yet.
+	var retry restoreRetry
 	if restored {
 		d.sweepCheckpoints()
+	} else {
+		retry.failed(d.clock.Now())
 	}
 
 	go func() {
@@ -36,9 +39,11 @@ func (d *Daemon) Start() {
 			select {
 			case <-ticker.C:
 				tickCtx, tickCancel := context.WithTimeout(ctx, reconcileBudget)
-				if !restored {
+				if !restored && retry.due(d.clock.Now()) {
 					if restored = d.restoreFromStore(tickCtx); restored {
 						d.sweepCheckpoints()
+					} else {
+						retry.failed(d.clock.Now())
 					}
 				}
 				start := d.clock.Now()
@@ -250,3 +255,21 @@ type usageBatchWriter interface {
 // restoreBudget bounds reading persisted sandboxes back at boot; a var so
 // tests can shrink it.
 var restoreBudget = 60 * time.Second
+
+// restoreRetryMax caps the wait between restore retries.
+const restoreRetryMax = 30 * time.Second
+
+// restoreRetry spaces out retries of an unfinished restore, doubling from a
+// second to restoreRetryMax: with docker down for good, every tick reloaded
+// the store and logged an error.
+type restoreRetry struct {
+	wait time.Duration
+	next time.Time
+}
+
+func (b *restoreRetry) due(now time.Time) bool { return !now.Before(b.next) }
+
+func (b *restoreRetry) failed(now time.Time) {
+	b.wait = min(max(2*b.wait, time.Second), restoreRetryMax)
+	b.next = now.Add(b.wait)
+}

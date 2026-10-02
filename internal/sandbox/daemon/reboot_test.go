@@ -342,3 +342,23 @@ func TestRestoreRetryDoesNotResurrectADestroyedSandbox(t *testing.T) {
 		t.Error("the retry did not restore sb-b")
 	}
 }
+
+func TestRestoreRetryBacksOff(t *testing.T) {
+	var b restoreRetry
+	now := time.Now()
+	var waits []time.Duration
+	for range 8 {
+		b.failed(now)
+		waits = append(waits, b.next.Sub(now))
+		if b.due(now) || !b.due(b.next) {
+			t.Fatalf("due before or not at the scheduled retry (wait %v)", b.wait)
+		}
+		now = b.next
+	}
+	want := []time.Duration{1, 2, 4, 8, 16, 30, 30, 30}
+	for i, w := range want {
+		if waits[i] != w*time.Second {
+			t.Fatalf("waits = %v, want %v seconds", waits, want)
+		}
+	}
+}
