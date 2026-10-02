@@ -341,6 +341,35 @@ func TestReviveCountResetsAfterARevivedSandboxStaysUp(t *testing.T) {
 	}
 }
 
+// answersAfterRevive is a casualty whose revive reports a confirmed stop and
+// which then answers: the destroy that follows must re-check, not assume.
+type answersAfterRevive struct {
+	casualtyVMM
+	probes int
+}
+
+func (a *answersAfterRevive) Alive() bool { a.probes++; return a.probes > 1 }
+
+func TestCrashDestroyRechecksTheSandboxIsStillDown(t *testing.T) {
+	fp := newFakePersister(nil)
+	d := New(Config{Runtime: runtimetest.NewFake(), Store: fp, IdleTimeout: time.Hour, HardTTL: time.Hour})
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	d.mu.Lock()
+	a := &answersAfterRevive{casualtyVMM: casualtyVMM{deadVMM: deadVMM{d.boxes[sb.ID].inst}, reviveErr: rt.ErrWontStayUp}}
+	d.boxes[sb.ID].inst = a
+	d.mu.Unlock()
+
+	d.scanExits(ctx)
+
+	if _, ok := d.Get(sb.ID); !ok {
+		t.Fatal("destroyed a sandbox that answered by the time the destroy ran")
+	}
+}
+
 // envdDownVMM is a running instance nothing can exec into: its envd is down.
 type envdDownVMM struct {
 	rt.Instance

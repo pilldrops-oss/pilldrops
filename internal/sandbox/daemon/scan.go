@@ -222,7 +222,10 @@ func (d *Daemon) reviveCasualty(ctx context.Context, id string, was rt.Liveness,
 	release()
 	d.log().Error("sandbox would not stay up after restart; destroying it as a crash",
 		"sandbox_id", id, "error", err)
-	if err := d.destroy(ctx, id, false, "exited", nil); err != nil && !errors.Is(err, rt.ErrNotFound) {
+	// was, not nil: destroy re-checks under the op lock that the sandbox still
+	// runs that instance and it still reads stopped.
+	if err := d.destroy(ctx, id, false, "exited", was); err != nil &&
+		!errors.Is(err, rt.ErrNotFound) && !errors.Is(err, errNoLongerDead) {
 		d.log().Warn("destroying a sandbox that would not stay up failed", "sandbox_id", id, "error", err)
 	}
 }
