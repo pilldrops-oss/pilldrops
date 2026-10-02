@@ -297,3 +297,48 @@ func TestStopDuringRevivesIsBounded(t *testing.T) {
 		}
 	}
 }
+
+// partListRT cannot look up the ids in failing, as when dockerd answers some
+// calls and not others while it starts.
+type partListRT struct {
+	*rebootRT
+	failing map[string]bool
+}
+
+func (r *partListRT) Adopt(ctx context.Context, id string) (rt.Instance, error) {
+	if r.failing[id] {
+		return nil, errors.New("docker ps: Cannot connect to the Docker daemon")
+	}
+	return r.rebootRT.Adopt(ctx, id)
+}
+
+// A retry pass works from rows it read before a destroy that came after the
+// first pass restored the sandbox; it must not bring the sandbox back.
+func TestRestoreRetryDoesNotResurrectADestroyedSandbox(t *testing.T) {
+	r := &partListRT{rebootRT: rebooted(t, []string{"sb-a", "sb-b"}, nil), failing: map[string]bool{"sb-b": true}}
+	// The fake store keeps returning both rows: the retry's read predates the destroy.
+	fp := newFakePersister([]PersistedSandbox{
+		runningRec("sb-a", time.Now().Add(time.Hour)), runningRec("sb-b", time.Now().Add(time.Hour)),
+	})
+	d := New(Config{Runtime: r, Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
+	ctx := context.Background()
+	if d.restoreFromStore(ctx) {
+		t.Fatal("the first pass finished although sb-b could not be looked up")
+	}
+	d.revives.Wait()
+	if err := d.Destroy(ctx, "sb-a"); err != nil {
+		t.Fatalf("destroy: %v", err)
+	}
+
+	r.failing = nil
+	if !d.restoreFromStore(ctx) {
+		t.Fatal("the retry did not finish")
+	}
+	d.revives.Wait()
+	if _, ok := d.Get("sb-a"); ok {
+		t.Error("the retry brought back a sandbox destroyed after the first pass")
+	}
+	if _, ok := d.Get("sb-b"); !ok {
+		t.Error("the retry did not restore sb-b")
+	}
+}

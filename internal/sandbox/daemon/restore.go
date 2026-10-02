@@ -22,6 +22,11 @@ func (d *Daemon) restoreFromStore(ctx context.Context) bool {
 	if d.cfg.Store == nil {
 		return true
 	}
+	d.mu.Lock()
+	if d.gone == nil {
+		d.gone = map[string]bool{}
+	}
+	d.mu.Unlock()
 	recs, err := d.cfg.Store.LoadSandboxes(ctx)
 	if err != nil {
 		d.log().Error("restore: load sandboxes failed; retrying", "error", err)
@@ -120,7 +125,9 @@ func (d *Daemon) restoreFromStore(ctx context.Context) bool {
 							"sandbox_id", r.ID, "error", err)
 					}
 				}
-				d.adoptRunning(ctx, r, inst, now)
+				if !d.adoptRunning(ctx, r, inst, now) {
+					continue
+				}
 				if lv, ok := inst.(rt.Liveness); ok && stopped {
 					casualties = append(casualties, casualty{r.ID, lv, rv})
 				}
@@ -147,7 +154,10 @@ func (d *Daemon) restoreFromStore(ctx context.Context) bool {
 		sb.meter.freeze(now)
 
 		d.mu.Lock()
-		d.boxes[r.ID] = sb
+		if !d.claim(r.ID, sb) {
+			d.mu.Unlock()
+			continue
+		}
 		rec := d.recordOf(sb)
 		d.mu.Unlock()
 		d.persistRec(ctx, rec) // state may have changed from running to paused
@@ -189,7 +199,29 @@ func (d *Daemon) restoreFromStore(ctx context.Context) bool {
 		d.mu.RUnlock()
 		sw.SweepUnknown(known)
 	}
+	d.mu.Lock()
+	d.gone = nil
+	d.mu.Unlock()
 	return true
+}
+
+// claim adds a restored sandbox unless it is in d.boxes already or was removed
+// while this restore was unfinished. The caller holds d.mu.
+func (d *Daemon) claim(id string, sb *Sandbox) bool {
+	if _, ok := d.boxes[id]; ok || d.gone[id] {
+		return false
+	}
+	d.boxes[id] = sb
+	return true
+}
+
+// forget removes a sandbox from d.boxes, remembering it while a restore is
+// unfinished. The caller holds d.mu.
+func (d *Daemon) forget(id string) {
+	delete(d.boxes, id)
+	if d.gone != nil {
+		d.gone[id] = true
+	}
 }
 
 // sandboxFromRecord rebuilds what a persisted record describes, minus the three
@@ -225,14 +257,18 @@ func (d *Daemon) sandboxFromRecord(r PersistedSandbox, now time.Time) *Sandbox {
 }
 
 // adoptRunning reattaches a live instance to its persisted record as running.
-func (d *Daemon) adoptRunning(ctx context.Context, r PersistedSandbox, inst rt.Instance, now time.Time) {
+// false means the sandbox was restored already, or removed since its row was read.
+func (d *Daemon) adoptRunning(ctx context.Context, r PersistedSandbox, inst rt.Instance, now time.Time) bool {
 	sb := d.sandboxFromRecord(r, now)
 	sb.State = StateRunning
 	sb.inst = inst
 	sb.LastActiveAt = now
 
 	d.mu.Lock()
-	d.boxes[r.ID] = sb
+	if !d.claim(r.ID, sb) {
+		d.mu.Unlock()
+		return false
+	}
 	rec := d.recordOf(sb)
 	d.mu.Unlock()
 	// The daemon restarted; the runtime membership table is empty even though
@@ -244,6 +280,7 @@ func (d *Daemon) adoptRunning(ctx context.Context, r PersistedSandbox, inst rt.I
 	}
 	d.persistRec(ctx, rec)
 	d.log().Info("sandbox restored as running (adopted live instance)", "sandbox_id", r.ID)
+	return true
 }
 
 // Shutdown pauses every running sandbox so the next Start can restore it, then

@@ -95,6 +95,10 @@ type Daemon struct {
 	stopOnce sync.Once
 	// revives tracks restore's background casualty revives; reviveStop, closed
 	// under mu, cancels them, and no revive is added once it is closed.
+	// gone names the sandboxes removed while a restore is unfinished, so a
+	// retry pass reading rows loaded before the removal does not bring one
+	// back. Guarded by mu; nil once a restore completes.
+	gone           map[string]bool
 	revives        sync.WaitGroup
 	reviveStop     chan struct{}
 	reviveStopOnce sync.Once

@@ -233,7 +233,7 @@ func (d *Daemon) ResumeTimed(ctx context.Context, id string) (took time.Duration
 	if o, ok := d.cfg.Store.(ownerChecker); ok {
 		if elsewhere, err := o.OwnedElsewhere(ctx, id); err == nil && elsewhere {
 			d.mu.Lock()
-			delete(d.boxes, id)
+			d.forget(id)
 			d.mu.Unlock()
 			d.log().Warn("resume refused: this sandbox was rehomed to another node while this one was away",
 				"sandbox_id", id)
@@ -348,7 +348,7 @@ func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState s
 	sb.unpin = nil
 	sb.inst = nil
 	sb.State = StateStopped
-	delete(d.boxes, id)
+	d.forget(id)
 	d.mu.Unlock()
 
 	// The sandbox is gone from d.boxes, so teardown must finish even if the
