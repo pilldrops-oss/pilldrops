@@ -37,6 +37,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pilldrops-oss/pilldrops/internal/apispec"
 	"github.com/pilldrops-oss/pilldrops/internal/config"
 
 	"github.com/go-chi/chi/v5"
@@ -49,7 +50,6 @@ import (
 
 	"github.com/pilldrops-oss/pilldrops/internal/auth/previewtoken"
 	"github.com/pilldrops-oss/pilldrops/internal/auth/sbtoken"
-	"github.com/pilldrops-oss/pilldrops/internal/httpapi"
 	"github.com/pilldrops-oss/pilldrops/internal/httpx"
 	"github.com/pilldrops-oss/pilldrops/internal/mcp"
 
@@ -2463,11 +2463,7 @@ func main() {
 	// MCP tool calls re-enter this router at /v1 with the caller's bearer
 	// key, so auth and limits apply as for any other client.
 	r.Handle("/mcp", &mcp.HTTPServer{API: r})
-	r.Get("/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "public, max-age=300")
-		writeBytes(w, httpapi.OpenAPISpec())
-	})
+	r.Get("/openapi.json", apispec.Serve)
 
 	// Public, for load balancers.
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {

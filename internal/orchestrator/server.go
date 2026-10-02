@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pilldrops-oss/pilldrops/internal/apispec"
 	"github.com/pilldrops-oss/pilldrops/internal/artifact"
 	"github.com/pilldrops-oss/pilldrops/internal/auth/adminauth"
 	"github.com/pilldrops-oss/pilldrops/internal/auth/authcache"
@@ -291,6 +292,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /health", s.handleLive)
 	mux.HandleFunc("GET /livez", s.handleLive)
 	mux.HandleFunc("GET /readyz", s.handleReady)
+	// Public, like the node's: the Docs page links it.
+	mux.HandleFunc("GET /openapi.json", apispec.Serve)
 	mux.HandleFunc("POST /internal/heartbeat", s.handleHeartbeat)
 	// Behind auth: the scrape names every node.
 	mux.HandleFunc("GET /metrics", s.authOperator(s.handleMetrics))

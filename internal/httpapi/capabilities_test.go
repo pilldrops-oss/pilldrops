@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pilldrops-oss/pilldrops/internal/apispec"
 	"github.com/pilldrops-oss/pilldrops/internal/entitlements"
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
@@ -255,7 +256,7 @@ func TestCapabilitiesIsInTheSpec(t *testing.T) {
 			Schemas map[string]any `json:"schemas"`
 		} `json:"components"`
 	}
-	if err := json.Unmarshal(mustRead(t, "openapi.json"), &spec); err != nil {
+	if err := json.Unmarshal(apispec.JSON(), &spec); err != nil {
 		t.Fatalf("parse openapi.json: %v", err)
 	}
 	ops, ok := spec.Paths["/v1/capabilities"]
