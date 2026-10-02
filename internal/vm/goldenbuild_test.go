@@ -2,10 +2,12 @@ package vm
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/envdproto"
+	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
 
 func TestGoldenEnvdCheck(t *testing.T) {
@@ -64,5 +66,20 @@ func TestGoldenVMIDIsJailerLegal(t *testing.T) {
 	id := goldenVMID("python-3.11", "ab12cd34")
 	if id != "golden-python-3-11-ab12cd34" {
 		t.Fatalf("golden id = %q; the jailer rejects any char but letters, digits and '-'", id)
+	}
+}
+
+func TestGoldenVMIDFitsTheJailerForALongTemplateName(t *testing.T) {
+	long := strings.Repeat("a", rt.MaxTemplateNameLen)
+	other := long[:rt.MaxTemplateNameLen-1] + "b"
+	id := goldenVMID(long, "ab12cd34")
+	if len(id) > maxJailerID {
+		t.Errorf("golden id is %d chars; the jailer refuses more than %d: %q", len(id), maxJailerID, id)
+	}
+	if id == goldenVMID(other, "ab12cd34") {
+		t.Errorf("two long templates sharing a prefix got the same golden id %q", id)
+	}
+	if !strings.HasSuffix(id, "-ab12cd34") {
+		t.Errorf("golden id %q lost its suffix", id)
 	}
 }

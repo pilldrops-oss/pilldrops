@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -31,8 +33,13 @@ func goldenEnvdCheck(level int) error {
 	return nil
 }
 
+// maxJailerID is the longest --id the jailer accepts.
+const maxJailerID = 64
+
 // goldenVMID builds the golden VM's jailer --id. The jailer accepts only letters,
-// digits and '-', so a template such as "python-3.11" cannot go in verbatim.
+// digits and '-', so a template such as "python-3.11" cannot go in verbatim, and
+// at most maxJailerID of them, so a long template name is cut and a hash of the
+// whole name keeps two that share a prefix apart.
 func goldenVMID(template, suffix string) string {
 	safe := strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' {
@@ -40,7 +47,13 @@ func goldenVMID(template, suffix string) string {
 		}
 		return '-'
 	}, template)
-	return "golden-" + safe + "-" + suffix
+	const prefix = "golden-"
+	if room := maxJailerID - len(prefix) - len("-") - len(suffix); len(safe) > room {
+		sum := sha256.Sum256([]byte(template))
+		hash := hex.EncodeToString(sum[:4])
+		safe = safe[:room-len(hash)-1] + "-" + hash
+	}
+	return prefix + safe + "-" + suffix
 }
 
 // goldenBuilds remembers, per template, whether a golden build is running and
