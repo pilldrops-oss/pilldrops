@@ -38,15 +38,24 @@ func TestDockerdStartReadsTheConfiguredPidfile(t *testing.T) {
 	}
 }
 
-// A local pidfile says nothing about a remote daemon's start.
-func TestRemoteDockerHostNeverReadsTheLocalPidfile(t *testing.T) {
+// A local pidfile says nothing about a remote daemon, reached by DOCKER_HOST
+// or by a docker context, unless the operator names the pidfile.
+func TestRemoteDockerdNeverReadsTheLocalPidfile(t *testing.T) {
 	pidfile := filepath.Join(t.TempDir(), "docker.pid")
 	if err := os.WriteFile(pidfile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SANDBOXD_DOCKERD_PIDFILE", pidfile)
-	t.Setenv("DOCKER_HOST", "tcp://10.0.0.5:2376")
-	if got, why := dockerdStart(); !got.IsZero() || !strings.Contains(why, "remote") {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeContext(t, home, "remote", "tcp://10.0.0.5:2376")
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "remote")
+	t.Setenv("SANDBOXD_DOCKERD_PIDFILE", "")
+	if got, why := dockerdStart(); !got.IsZero() || !strings.Contains(why, "not a local socket") {
 		t.Fatalf("start = %v, %q; want unknown because the daemon is remote", got, why)
+	}
+	t.Setenv("SANDBOXD_DOCKERD_PIDFILE", pidfile)
+	if got, why := dockerdStart(); got.IsZero() {
+		t.Fatalf("start unknown (%q) with the pidfile named; want the setting to win", why)
 	}
 }

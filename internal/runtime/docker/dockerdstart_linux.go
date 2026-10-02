@@ -15,12 +15,13 @@ func dockerdStarted() time.Time {
 
 // dockerdStart is when the local dockerd started, or zero and why it is not
 // known: a remote daemon has no local pidfile, and a rootless or snap dockerd
-// writes its own (SANDBOXD_DOCKERD_PIDFILE).
+// writes its own. SANDBOXD_DOCKERD_PIDFILE names it, and wins over both.
 func dockerdStart() (time.Time, string) {
-	if remoteDockerHost() {
-		return time.Time{}, "DOCKER_HOST is a remote daemon, whose pidfile is not on this host"
+	pidfile, configured := dockerdPIDFile()
+	if !configured && remoteDockerd() {
+		return time.Time{}, "the docker endpoint (DOCKER_HOST or the docker context) is not a local socket, " +
+			"so this host has no pidfile of that dockerd (set SANDBOXD_DOCKERD_PIDFILE if it is local)"
 	}
-	pidfile := dockerdPIDFile()
 	b, err := os.ReadFile(pidfile)
 	if err != nil {
 		return time.Time{}, "no dockerd pidfile at " + pidfile + " (set SANDBOXD_DOCKERD_PIDFILE)"

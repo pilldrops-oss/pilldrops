@@ -102,21 +102,32 @@ func (e *engine) sameDaemon(ctx context.Context) bool {
 // resolveDockerSocket finds the unix socket the CLI would use. tcp:// and
 // ssh:// endpoints are left to the CLI.
 func resolveDockerSocket() (string, bool) {
+	host, ok := dockerEndpoint()
+	if !ok {
+		return "", false
+	}
+	if host == "" {
+		return usableSocket("/var/run/docker.sock")
+	}
+	return unixPath(host)
+}
+
+// dockerEndpoint is the daemon endpoint the CLI uses, by its precedence:
+// DOCKER_HOST, DOCKER_CONTEXT, the current context; "" is the default socket.
+// ok is false when DOCKER_CONTEXT names a context that cannot be read.
+func dockerEndpoint() (host string, ok bool) {
 	if h := os.Getenv("DOCKER_HOST"); h != "" {
-		return unixPath(h)
+		return h, true
 	}
 	if name := os.Getenv("DOCKER_CONTEXT"); name != "" {
-		if host, ok := contextEndpoint(name); ok {
-			return unixPath(host)
-		}
-		return "", false
+		return contextEndpoint(name)
 	}
 	if name := currentContextName(); name != "" && name != "default" {
 		if host, ok := contextEndpoint(name); ok {
-			return unixPath(host)
+			return host, true
 		}
 	}
-	return usableSocket("/var/run/docker.sock")
+	return "", true
 }
 
 // unixPath extracts the socket path from a unix:// endpoint.

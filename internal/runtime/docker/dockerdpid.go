@@ -1,19 +1,23 @@
 package docker
 
 import (
-	"cmp"
 	"os"
 	"strings"
 )
 
-// dockerdPIDFile is the dockerd pidfile its start time is read from.
-func dockerdPIDFile() string {
-	return cmp.Or(strings.TrimSpace(os.Getenv("SANDBOXD_DOCKERD_PIDFILE")), "/var/run/docker.pid")
+// dockerdPIDFile is the dockerd pidfile its start time is read from, and
+// whether it was configured.
+func dockerdPIDFile() (string, bool) {
+	if p := strings.TrimSpace(os.Getenv("SANDBOXD_DOCKERD_PIDFILE")); p != "" {
+		return p, true
+	}
+	return "/var/run/docker.pid", false
 }
 
-// remoteDockerHost reports a DOCKER_HOST that is not a local socket: that
-// daemon's pidfile, if one exists here, belongs to some other dockerd.
-func remoteDockerHost() bool {
-	h := os.Getenv("DOCKER_HOST")
-	return h != "" && !strings.HasPrefix(h, "unix://")
+// remoteDockerd reports a daemon the CLI reaches other than by a local socket,
+// through DOCKER_HOST or a docker context: a pidfile here, if any, belongs to
+// some other dockerd.
+func remoteDockerd() bool {
+	host, ok := dockerEndpoint()
+	return !ok || (host != "" && !strings.HasPrefix(host, "unix://"))
 }
