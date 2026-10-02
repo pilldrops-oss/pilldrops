@@ -28,16 +28,18 @@ func (s *stopRecorder) Stop(ctx context.Context) error {
 	return s.Instance.Stop(ctx)
 }
 
-func (a *adoptingRT) Adopt(ctx context.Context, sandboxID string) (rt.Instance, bool) {
+var _ rt.Adopter = (*adoptingRT)(nil)
+
+func (a *adoptingRT) Adopt(ctx context.Context, sandboxID string) (rt.Instance, error) {
 	if !a.adoptable[sandboxID] {
-		return nil, false
+		return nil, rt.ErrNotFound
 	}
 	inst, err := a.Boot(ctx, rt.BootSpec{SandboxID: sandboxID})
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
 	a.adopted = append(a.adopted, sandboxID)
-	return &stopRecorder{Instance: inst, rt: a}, true
+	return &stopRecorder{Instance: inst, rt: a}, nil
 }
 
 func (a *adoptingRT) SweepUnknown(known []string) { a.swept = append(a.swept, known) }

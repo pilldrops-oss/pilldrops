@@ -73,8 +73,8 @@ func TestLiveAdoptKeepsTheSandboxNonRoot(t *testing.T) {
 		t.Fatalf("a freshly booted sandbox execs as uid %q; P1-b's drop is not in effect and this test cannot measure P2-d's half", u)
 	}
 
-	adopted, ok := r.Adopt(ctx, id)
-	if !ok {
+	adopted, err := r.Adopt(ctx, id)
+	if err != nil {
 		t.Fatal("Adopt did not find the container it just booted")
 	}
 	if u := uidOf(adopted, "adopted"); u == "0" {

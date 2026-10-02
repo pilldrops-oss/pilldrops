@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,9 +20,13 @@ type rebootRT struct {
 	swept   [][]string
 }
 
-func (r *rebootRT) Adopt(_ context.Context, id string) (rt.Instance, bool) {
-	c, ok := r.stopped[id]
-	return c, ok
+var _ rt.Adopter = (*rebootRT)(nil)
+
+func (r *rebootRT) Adopt(_ context.Context, id string) (rt.Instance, error) {
+	if c, ok := r.stopped[id]; ok {
+		return c, nil
+	}
+	return nil, rt.ErrNotFound
 }
 
 func (r *rebootRT) SweepUnknown(known []string) { r.swept = append(r.swept, known) }
@@ -136,9 +141,13 @@ type slowRebootRT struct {
 	stopped map[string]*slowStartVMM
 }
 
-func (r *slowRebootRT) Adopt(_ context.Context, id string) (rt.Instance, bool) {
-	c, ok := r.stopped[id]
-	return c, ok
+var _ rt.Adopter = (*slowRebootRT)(nil)
+
+func (r *slowRebootRT) Adopt(_ context.Context, id string) (rt.Instance, error) {
+	if c, ok := r.stopped[id]; ok {
+		return c, nil
+	}
+	return nil, rt.ErrNotFound
 }
 
 // The revives ran one after another on the restore's own deadline, so on a
@@ -171,5 +180,61 @@ func TestRebootRevivesEverySandboxWhenTheirStartsOutlastTheRestoreBudget(t *test
 	}
 	if n := fp.countEvents("exited"); n != 0 {
 		t.Errorf("%d healthy containers were marked failed", n)
+	}
+}
+
+// listFailRT cannot list its instances until listing is set, as while dockerd
+// is still starting after a reboot.
+type listFailRT struct {
+	*rebootRT
+	listing atomic.Bool
+}
+
+func (r *listFailRT) Adopt(ctx context.Context, id string) (rt.Instance, error) {
+	if !r.listing.Load() {
+		return nil, errors.New("docker ps: Cannot connect to the Docker daemon")
+	}
+	return r.rebootRT.Adopt(ctx, id)
+}
+
+func TestRestoreDecidesNothingFromAFailedListingAndRetries(t *testing.T) {
+	plain := runningRec("sb-plain", time.Now().Add(time.Hour))
+	snapped := runningRec("sb-snapped", time.Now().Add(time.Hour))
+	snapped.Snapshot = "/snap/sb-snapped"
+	expired := runningRec("sb-expired", time.Now().Add(-time.Minute))
+	r := &listFailRT{rebootRT: rebooted(t, []string{"sb-plain", "sb-snapped", "sb-expired"}, nil)}
+	fp := newFakePersister([]PersistedSandbox{expired, plain, snapped})
+	d := New(Config{Runtime: r, Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
+	d.Start()
+	defer d.Stop()
+
+	fp.mu.Lock()
+	deleted := len(fp.deleted)
+	fp.mu.Unlock()
+	if deleted != 0 {
+		t.Errorf("records dropped on a failed listing: %v", fp.deleted)
+	}
+	if _, ok := d.Get("sb-snapped"); ok {
+		t.Error("sb-snapped came back from its snapshot while its container could not be looked up")
+	}
+	if len(r.swept) != 0 {
+		t.Errorf("swept %v on a failed listing", r.swept)
+	}
+
+	r.listing.Store(true)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		p, ok1 := d.Get("sb-plain")
+		s, ok2 := d.Get("sb-snapped")
+		if ok1 && ok2 && p.State == StateRunning && s.State == StateRunning {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("not restored once listing worked: plain=%v snapped=%v", p.State, s.State)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !r.stopped["sb-expired"].stopped {
+		t.Error("the expired sandbox's container was not removed once it could be looked up")
 	}
 }

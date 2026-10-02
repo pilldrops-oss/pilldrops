@@ -36,15 +36,15 @@ func (r *Runtime) Restore(ctx context.Context, snap rt.SnapshotRef, spec rt.Boot
 // a casualty for the daemon to start again: a host reboot stops every container,
 // and one not adopted was swept, its writable layer with it. A container with no
 // published port still adopts.
-func (r *Runtime) Adopt(ctx context.Context, sandboxID string) (rt.Instance, bool) {
-	out, _, code, err := dockerOut(ctx, "ps", "-a",
+func (r *Runtime) Adopt(ctx context.Context, sandboxID string) (rt.Instance, error) {
+	out, se, code, err := dockerOut(ctx, "ps", "-a",
 		"--filter", "label=sandboxd.id="+sandboxID, "--format", "{{.ID}} {{.State}}")
 	if err != nil || code != 0 {
-		return nil, false
+		return nil, dockerErr("docker ps", err, code, se)
 	}
 	cid, live := pickAdoptable(out)
 	if cid == "" {
-		return nil, false
+		return nil, rt.ErrNotFound
 	}
 	primary := adoptedPrimaryPort(ctx, cid)
 	host, _ := mappedPort(ctx, cid, primary)
@@ -59,8 +59,10 @@ func (r *Runtime) Adopt(ctx context.Context, sandboxID string) (rt.Instance, boo
 		ports:   map[int]string{primary: host},
 	}
 	inst.casualty.Store(!live)
-	return inst, true
+	return inst, nil
 }
+
+var _ rt.Adopter = (*Runtime)(nil)
 
 // pickAdoptable picks from `ps -a` lines ("<id> <state>") a live container
 // first, else any. A docker-paused one is live: it is a standby sandbox, thawed

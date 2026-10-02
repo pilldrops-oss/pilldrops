@@ -863,16 +863,18 @@ func shellQuote(s string) string {
 // Adopt implements rt.Adopter: reattach the VM a crashed daemon left running
 // for sandboxID. The daemon's restore calls it for every sandbox its records
 // say was running.
-func (r *fcRuntime) Adopt(_ context.Context, sandboxID string) (rt.Instance, bool) {
+func (r *fcRuntime) Adopt(_ context.Context, sandboxID string) (rt.Instance, error) {
 	sb, ok := r.be.AdoptOwned(sandboxID)
 	if !ok {
-		return nil, false
+		return nil, rt.ErrNotFound
 	}
 	return &fcInstance{
 		be: r.be, sandboxID: sandboxID, vmID: sb.ID, hostIP: sb.HostIP(),
 		start: nowFunc(), envd: guestClient(sb), token: sb.Token, bootType: sb.BootType,
-	}, true
+	}, nil
 }
+
+var _ rt.Adopter = (*fcRuntime)(nil)
 
 // SweepUnknown implements rt.Sweeper: once the daemon has adopted what it
 // owns, every VM still held for adoption belongs to nothing and is removed.

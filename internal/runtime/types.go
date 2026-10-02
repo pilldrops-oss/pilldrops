@@ -407,9 +407,11 @@ type Runtime interface {
 }
 
 // Adopter is implemented by runtimes whose instances outlive the daemon; Adopt
-// reattaches to the live instance for sandboxID.
+// reattaches to the instance for sandboxID. ErrNotFound means there is none;
+// any other error means the runtime could not tell, and nothing may be decided
+// from it.
 type Adopter interface {
-	Adopt(ctx context.Context, sandboxID string) (Instance, bool)
+	Adopt(ctx context.Context, sandboxID string) (Instance, error)
 }
 
 // Sweeper garbage-collects instances not in known, the full set of sandbox ids

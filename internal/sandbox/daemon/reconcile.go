@@ -21,11 +21,13 @@ func (d *Daemon) Start() {
 	d.bgCancel = cancel
 
 	restoreCtx, restoreCancel := context.WithTimeout(ctx, restoreBudget)
-	d.restoreFromStore(restoreCtx)
+	restored := d.restoreFromStore(restoreCtx)
 	restoreCancel()
 	// After the store is read, so a checkpoint is only swept when its sandbox is
 	// genuinely gone rather than merely not restored yet.
-	d.sweepCheckpoints()
+	if restored {
+		d.sweepCheckpoints()
+	}
 
 	go func() {
 		ticker := time.NewTicker(time.Second)
@@ -34,6 +36,11 @@ func (d *Daemon) Start() {
 			select {
 			case <-ticker.C:
 				tickCtx, tickCancel := context.WithTimeout(ctx, reconcileBudget)
+				if !restored {
+					if restored = d.restoreFromStore(tickCtx); restored {
+						d.sweepCheckpoints()
+					}
+				}
 				start := d.clock.Now()
 				d.reconcileOnce(tickCtx)
 				d.metrics.ReconcileDuration.Observe(d.clock.Now().Sub(start))

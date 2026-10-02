@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 //	ps-<sandbox id>  `ps -a` lines for that sandbox ("<cid> <state>"); a
 //	                 status=running filter keeps the running ones
 //	all              every sandboxd container id, for the sweep
+//	psfail           present = every ps fails, as before dockerd is up
 //	label-<cid>      the container's sandboxd.id; absent = inspect fails
 //	port-<cid>       the container's sandboxd.port label
 //	pub-<cid>-<port> the host address docker published that port on
@@ -27,6 +29,7 @@ echo "$all" >> "$d/calls"
 eval last=\${$#}
 case "$1" in
 ps)
+	[ -f "$d/psfail" ] && { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
 	case "$*" in
 	*label=sandboxd=1*) cat "$d/all" ;;
 	*status=running*) id=${all##*label=sandboxd.id=}; grep ' running$' "$d/ps-${id%% *}" 2>/dev/null | cut -d' ' -f1 ;;
@@ -86,9 +89,9 @@ func TestAdoptFindsAStoppedContainer(t *testing.T) {
 		{"sb-two", "c3", false},
 		{"sb-standby", "c4", false},
 	} {
-		inst, ok := r.Adopt(t.Context(), tc.id)
-		if !ok {
-			t.Errorf("%s: not adopted; its container is there", tc.id)
+		inst, err := r.Adopt(t.Context(), tc.id)
+		if err != nil {
+			t.Errorf("%s: not adopted (%v); its container is there", tc.id, err)
 			continue
 		}
 		di := inst.(*dockerInstance)
@@ -96,8 +99,8 @@ func TestAdoptFindsAStoppedContainer(t *testing.T) {
 			t.Errorf("%s: adopted %s casualty=%v, want %s casualty=%v", tc.id, di.cid, di.Casualty(), tc.cid, tc.casualty)
 		}
 	}
-	if _, ok := r.Adopt(t.Context(), "sb-none"); ok {
-		t.Error("adopted a sandbox that has no container")
+	if _, err := r.Adopt(t.Context(), "sb-none"); !errors.Is(err, rt.ErrNotFound) {
+		t.Errorf("a sandbox with no container: err = %v, want rt.ErrNotFound", err)
 	}
 }
 
@@ -141,9 +144,9 @@ func TestLiveAdoptRestartsAStoppedContainerWithItsData(t *testing.T) {
 		t.Fatalf("docker stop: %v %d", err, code)
 	}
 
-	adopted, ok := r.Adopt(ctx, id)
-	if !ok {
-		t.Fatal("the stopped container was not adopted")
+	adopted, err := r.Adopt(ctx, id)
+	if err != nil {
+		t.Fatalf("the stopped container was not adopted: %v", err)
 	}
 	rv := adopted.(rt.Reviver)
 	if !rv.Casualty() {
@@ -169,9 +172,9 @@ func TestAdoptAndReviveKeepAServicesPrimaryPort(t *testing.T) {
 		"port-c1":     "3000\n",
 		"pub-c1-3000": "127.0.0.1:41000\n",
 	})
-	inst, ok := (&Runtime{}).Adopt(t.Context(), "sb-svc")
-	if !ok {
-		t.Fatal("not adopted")
+	inst, err := (&Runtime{}).Adopt(t.Context(), "sb-svc")
+	if err != nil {
+		t.Fatalf("not adopted: %v", err)
 	}
 	revived, err := inst.(rt.Reviver).Revive(t.Context())
 	if err != nil {
@@ -189,5 +192,15 @@ func TestAdoptAndReviveKeepAServicesPrimaryPort(t *testing.T) {
 func TestBootLabelsThePrimaryPort(t *testing.T) {
 	if !strings.Contains(sourceContaining(t, "func (r *Runtime) bootImage("), `"--label", primaryPortLabel+"="+strconv.Itoa(primary)`) {
 		t.Error("bootImage does not label the container with its primary port; Adopt falls back to appPort")
+	}
+}
+
+// A ps that fails is not "no container": restore dropped the record on it and
+// the next sweep removed the container.
+func TestAdoptReportsAFailedListingAsAnError(t *testing.T) {
+	fakeDockerCLI(t, map[string]string{"ps-sb-1": "c1 running\n", "psfail": ""})
+	_, err := (&Runtime{}).Adopt(t.Context(), "sb-1")
+	if err == nil || errors.Is(err, rt.ErrNotFound) {
+		t.Fatalf("err = %v, want a listing error that is not rt.ErrNotFound", err)
 	}
 }

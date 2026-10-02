@@ -581,9 +581,8 @@ func TestBackupRefusalsNameWhatIsMissing(t *testing.T) {
 // the fake's own instance so the capture path still finds a checkpointer.
 type adoptAll struct{ *runtimetest.Fake }
 
-func (a adoptAll) Adopt(ctx context.Context, id string) (rt.Instance, bool) {
-	inst, err := a.Boot(ctx, rt.BootSpec{SandboxID: id})
-	return inst, err == nil
+func (a adoptAll) Adopt(ctx context.Context, id string) (rt.Instance, error) {
+	return a.Boot(ctx, rt.BootSpec{SandboxID: id})
 }
 
 // Retention used to live only in a struct field in this process: the backup
