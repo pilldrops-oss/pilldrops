@@ -176,25 +176,7 @@ func TestCreateFromAnUnreadySnapshotIs404(t *testing.T) {
 // template outright, booted or replaced what that sandbox runs on.
 func TestAMovesCaptureIsNotATenantSnapshot(t *testing.T) {
 	f := newSnapshotCreateFleet(t)
-	name := store.MoveSnapshotName("sb-1")
-
-	// As the move itself captures one.
-	node, ok := f.s.reg.Node("node-fc")
-	if !ok {
-		t.Fatal("no capture node")
-	}
-	snap := store.Snapshot{OrgID: "default", Name: name, Runtime: "firecracker", SourceSandbox: "sb-1", CreatedAt: time.Now().Unix()}
-	if err := f.st.SaveSnapshot(t.Context(), &snap); err != nil {
-		t.Fatal(err)
-	}
-	tmpl := store.SnapshotTemplateID("default", name)
-	if err := f.st.BeginTemplateBuild(t.Context(), store.TemplateBuild{BuildID: snap.BuildID, TemplateID: tmpl,
-		OrgID: "default", CreatedAt: snap.CreatedAt}); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.s.captureSnapshot(t.Context(), node, "sb-1", snap, tmpl); err != nil {
-		t.Fatal(err)
-	}
+	name, tmpl := captureMoveSnapshot(t, f)
 
 	if status, out := f.do(t, "POST", "/v1/sandboxes", "apikey", `{"snapshot":"`+name+`"}`); status != http.StatusNotFound {
 		t.Errorf("a create from a move's capture answered %d %v, want 404", status, out["_raw"])
@@ -213,5 +195,59 @@ func TestAMovesCaptureIsNotATenantSnapshot(t *testing.T) {
 	}
 	if status, out := f.do(t, "POST", "/v1/sandboxes", "apikey", `{"snapshot":"golden"}`); status != http.StatusCreated {
 		t.Fatalf("create from an ordinary snapshot answered %d %v", status, out["_raw"])
+	}
+}
+
+// captureMoveSnapshot captures sb-1 as a move does, and returns the
+// snapshot's name and template id.
+func captureMoveSnapshot(t *testing.T, f *snapshotCreateFleet) (name, tmpl string) {
+	t.Helper()
+	name = store.MoveSnapshotName("sb-1")
+	// As the move itself captures one.
+	node, ok := f.s.reg.Node("node-fc")
+	if !ok {
+		t.Fatal("no capture node")
+	}
+	snap := store.Snapshot{OrgID: "default", Name: name, Runtime: "firecracker", SourceSandbox: "sb-1", CreatedAt: time.Now().Unix()}
+	if err := f.st.SaveSnapshot(t.Context(), &snap); err != nil {
+		t.Fatal(err)
+	}
+	tmpl = store.SnapshotTemplateID("default", name)
+	if err := f.st.BeginTemplateBuild(t.Context(), store.TemplateBuild{BuildID: snap.BuildID, TemplateID: tmpl,
+		OrgID: "default", CreatedAt: snap.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.captureSnapshot(t.Context(), node, "sb-1", snap, tmpl); err != nil {
+		t.Fatal(err)
+	}
+
+	return name, tmpl
+}
+
+// The tenant snapshot API listed a move's capture and let it be deleted, and
+// with it the root image the moved sandbox resumes from.
+func TestAMovesCaptureIsNotListedOrDeletableByATenant(t *testing.T) {
+	f := newSnapshotCreateFleet(t)
+	name, _ := captureMoveSnapshot(t, f)
+	if got := f.saveAndWait(t, "golden"); got["status"] != "ready" {
+		t.Fatalf("save: %v", got)
+	}
+
+	_, out := f.do(t, "GET", "/v1/snapshots", "apikey", "")
+	if raw, _ := out["_raw"].(string); strings.Contains(raw, name) || !strings.Contains(raw, "golden") {
+		t.Errorf("the tenant list = %s, want golden and not %s", raw, name)
+	}
+	if status, _ := f.do(t, "GET", "/v1/snapshots/"+name, "apikey", ""); status != http.StatusNotFound {
+		t.Errorf("GET of a move's capture answered %d, want 404", status)
+	}
+	if status, _ := f.do(t, "DELETE", "/v1/snapshots/"+name, "apikey", ""); status != http.StatusNotFound {
+		t.Errorf("DELETE of a move's capture answered %d, want 404", status)
+	}
+	// Still there for the move that owns it.
+	if _, err := f.st.LatestReadySnapshot(t.Context(), "default", name); err != nil {
+		t.Fatalf("the move's capture is gone after the tenant's delete: %v", err)
+	}
+	if status, _ := f.do(t, "DELETE", "/v1/snapshots/golden", "apikey", ""); status != http.StatusOK {
+		t.Errorf("DELETE of an ordinary snapshot answered %d, want 200", status)
 	}
 }
