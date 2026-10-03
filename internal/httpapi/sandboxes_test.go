@@ -11,6 +11,7 @@ import (
 	"time"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
+	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
 func do(t *testing.T, method, url, key, body string) (int, map[string]any) {
@@ -253,6 +254,31 @@ func TestCreateRefusesAgentMode(t *testing.T) {
 		}
 		if msg, _ := out["error"].(string); !strings.Contains(msg, "agent_mode is not supported") {
 			t.Errorf("agent_mode %q error = %q", mode, msg)
+		}
+	}
+}
+
+// A capture is another sandbox's root image. A tenant reaching a node directly
+// must not boot one by naming its template or its move snapshot; the control
+// plane's own move, on the operator key, still may.
+func TestATenantCannotBootACaptureOnTheNode(t *testing.T) {
+	srv, st, tenant := newTestServerWithStore(t)
+	_, op, err := st.CreateKeyWithRole(t.Context(), "op", "default", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"template":"snap-rehome-sb-x-0a1b2c3d"}`,
+		`{"snapshot":"move-sb-x"}`,
+		`{"template":"` + store.SnapshotTemplateID("default", "move-sb-x-0a1b2c3d") + `"}`,
+		`{"template":"` + store.SnapshotTemplateID("other-org", "golden") + `"}`,
+	} {
+		code, out := do(t, "POST", srv.URL+"/v1/sandboxes", tenant, body)
+		if code != http.StatusBadRequest || out["error"] != "unknown template or snapshot" {
+			t.Errorf("tenant create %s = %d %v, want 400 unknown template or snapshot", body, code, out)
+		}
+		if _, out := do(t, "POST", srv.URL+"/v1/sandboxes", op, body); out["error"] == "unknown template or snapshot" {
+			t.Errorf("operator create %s was refused as a capture", body)
 		}
 	}
 }

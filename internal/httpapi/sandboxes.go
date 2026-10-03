@@ -70,6 +70,21 @@ const codeSlugTaken = "slug_taken"
 // the alternative is a sandbox whose row claims a network it is not on.
 const codeTagNetworksUnsupported = "tag_networks_unsupported"
 
+// tenantMayBoot reports whether a tenant may create from tmpl and snapshot: a
+// catalogue template, or its own org's named snapshot. Another org's snapshot,
+// a rehome capture and a move capture (a reserved snapshot name) are not.
+func tenantMayBoot(org, tmpl, snapshot string) bool {
+	if store.ReservedSnapshotName(snapshot) {
+		return false
+	}
+	if !templates.Internal(tmpl) {
+		return true
+	}
+	own := store.SnapshotTemplateID(org, "")
+	name, ok := strings.CutPrefix(tmpl, own)
+	return ok && name != "" && !store.ReservedSnapshotName(name)
+}
+
 // createReq is the node's create request, the shared sandbox.Spec plus any
 // node-only fields.
 type createReq struct {
@@ -182,6 +197,12 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// Choosing an id is moving a sandbox: the control plane's call alone.
 	if body.ID != "" && roleOf(r) != "operator" {
 		writeErr(w, http.StatusForbidden, "only the control plane may create under a chosen id")
+		return
+	}
+	// A capture is another sandbox's root image: only the control plane's move
+	// boots one. Refused as an unknown template, so its existence is not told.
+	if roleOf(r) != "operator" && !tenantMayBoot(orgID(r), body.Template, body.Snapshot) {
+		writeErr(w, http.StatusBadRequest, "unknown template or snapshot")
 		return
 	}
 	name, err := body.Validate(knownTemplate, sanitizeSandboxName, validateRepo)

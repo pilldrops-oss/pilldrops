@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pilldrops-oss/pilldrops/internal/store"
 	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
 
@@ -25,7 +26,8 @@ func TestASnapshotCreateIsNotRefusedByTheSquashfsTierAlone(t *testing.T) {
 	templates.SetDir("")
 	t.Cleanup(func() { templates.SetDir(prev) })
 
-	const id = "snap-abc-golden"
+	// The default org's own snapshot: another org's is refused before the tiers.
+	id := store.SnapshotTemplateID("default", "golden")
 
 	code, out := do(t, "POST", srv.URL+"/v1/sandboxes", key, `{"template":"`+id+`","snapshot":"golden"}`)
 	if code == http.StatusBadRequest && strings.Contains(str(out, "error"), "unknown template") {
