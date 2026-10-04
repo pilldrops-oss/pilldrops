@@ -82,6 +82,7 @@ function NodeCard({ n, onAction }: NodeCardProps) {
 
       <div className="fleet-node-chips">
         <span className="chip">zone · {n.zone || 'default'}</span>
+        {n.runtime && <span className="chip">runtime · {n.runtime}</span>}
         {labels.map(([k, v]) => (
           <span key={k} className="chip">{k}={v}</span>
         ))}

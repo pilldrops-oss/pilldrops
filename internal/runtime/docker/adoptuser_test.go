@@ -3,7 +3,6 @@ package docker
 import (
 	"strings"
 	"testing"
-	"time"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
@@ -48,7 +47,7 @@ func TestLiveAdoptKeepsTheSandboxNonRoot(t *testing.T) {
 		t.Skipf("docker runtime unavailable: %v", err)
 	}
 	ctx := t.Context()
-	id := "sb-adopt-" + time.Now().Format("150405")
+	id := liveSandboxID(t, "sb-adopt")
 
 	inst, err := r.Boot(ctx, rt.BootSpec{
 		SandboxID: id,
@@ -58,7 +57,6 @@ func TestLiveAdoptKeepsTheSandboxNonRoot(t *testing.T) {
 	if err != nil {
 		t.Skipf("boot: %v", err)
 	}
-	t.Cleanup(func() { _, _, _, _ = dockerOut(ctx, "rm", "-f", "--", inst.(*dockerInstance).cid) })
 
 	uidOf := func(i rt.Instance, what string) string {
 		res, err := i.Exec(ctx, rt.ExecSpec{Cmd: "id -u"})
@@ -73,8 +71,8 @@ func TestLiveAdoptKeepsTheSandboxNonRoot(t *testing.T) {
 		t.Fatalf("a freshly booted sandbox execs as uid %q; P1-b's drop is not in effect and this test cannot measure P2-d's half", u)
 	}
 
-	adopted, ok := r.Adopt(ctx, id)
-	if !ok {
+	adopted, err := r.Adopt(ctx, id)
+	if err != nil {
 		t.Fatal("Adopt did not find the container it just booted")
 	}
 	if u := uidOf(adopted, "adopted"); u == "0" {

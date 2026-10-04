@@ -66,3 +66,17 @@ and tenant code that no longer runs as root.
 
 `sudo scripts/pre-upgrade-check.sh` answers the machine-checkable half on a
 node. It exits 2 for a check it could not run, which is not a pass.
+
+**Docker nodes, builds that include the docker egress allowlist change:** re-run
+`sudo scripts/setup-docker-egress.sh` on every docker node after upgrading it.
+The new rules give docker sandboxes the Firecracker DNS/HTTP/HTTPS allowlist,
+and node preflight runs `verify-egress.sh --docker`, which fails until they are
+installed: the node then accepts no creates.
+
+**Control plane, builds that include the vault key guard:** set
+`VAULT_SECRET_KEY` (`openssl rand -hex 32`, control plane only, never on a node)
+on every orchestrator replica *before* upgrading it. A clustered orchestrator
+(`ORCHESTRATOR_TOKEN` set) without it now **refuses to start** instead of
+starting and refusing provider keys later. A fleet that already stored vault
+secrets unencrypted under `ALLOW_PLAINTEXT_VAULT=1` keeps starting with that
+flag; see docs/deployment.md, *At-rest keys*.

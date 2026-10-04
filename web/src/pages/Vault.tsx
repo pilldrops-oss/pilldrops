@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { listSecrets, putSecret, deleteSecret } from '../api'
+import { listSecrets, putSecret, deleteSecret, setSecretAutoInject } from '../api'
 import type { VaultSecret } from '../types'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmModal'
@@ -32,16 +32,29 @@ export default function Vault() {
 
   useEffect(() => { refresh() }, [refresh])
 
-  const store = useCallback(async (name: string, value: string, done: string) => {
+  const store = useCallback(async (name: string, value: string, autoInject: boolean | undefined, done: string) => {
     setBusy(name)
     try {
-      await putSecret(name, value)
+      await putSecret(name, value, autoInject)
       await refresh()
       toast.success(done)
       return true
     } catch (e) {
       toast.error(`Could not save ${name}: ${errText(e)}`)
       return false
+    } finally {
+      setBusy(null)
+    }
+  }, [refresh, toast])
+
+  // Flips auto-inject on its own, without touching the secret's value.
+  const toggleAutoInject = useCallback(async (name: string, autoInject: boolean) => {
+    setBusy(name)
+    try {
+      await setSecretAutoInject(name, autoInject)
+      await refresh()
+    } catch (e) {
+      toast.error(`Could not update ${name}: ${errText(e)}`)
     } finally {
       setBusy(null)
     }
@@ -83,6 +96,7 @@ export default function Vault() {
         busy={busy}
         onStore={store}
         onRemove={remove}
+        onToggleAutoInject={toggleAutoInject}
         loading={loading}
       />
     </div>
@@ -92,16 +106,18 @@ export default function Vault() {
 // ── Custom secrets ───────────────────────────────────────────────────────────
 
 function CustomSecrets({
-  secrets, busy, onStore, onRemove, loading,
+  secrets, busy, onStore, onRemove, onToggleAutoInject, loading,
 }: {
   secrets: VaultSecret[]
   busy: string | null
-  onStore: (name: string, value: string, done: string) => Promise<boolean>
+  onStore: (name: string, value: string, autoInject: boolean | undefined, done: string) => Promise<boolean>
   onRemove: (name: string, title: string, body: React.ReactNode) => Promise<void>
+  onToggleAutoInject: (name: string, autoInject: boolean) => Promise<void>
   loading: boolean
 }) {
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
+  const [autoInject, setAutoInject] = useState(false)
   const [error, setError] = useState('')
   const valueRef = useRef<HTMLInputElement>(null)
 
@@ -118,10 +134,13 @@ function CustomSecrets({
       return
     }
     setError('')
-    const ok = await onStore(trimmed, value, `${replacing ? 'Replaced' : 'Added'} ${trimmed}`)
+    // A rotation only changes the value: auto-inject is its own toggle on the
+    // row now, and omitting the field here keeps whatever it is set to.
+    const ok = await onStore(trimmed, value, replacing ? undefined : autoInject, `${replacing ? 'Replaced' : 'Added'} ${trimmed}`)
     if (ok) {
       setName('')
       setValue('')
+      setAutoInject(false)
     }
   }
 
@@ -143,11 +162,24 @@ function CustomSecrets({
         <div key={s.name} className="vault-custom-row">
           <code className="chip mono">{s.name}</code>
           <span className="vault-last4">…{s.last4}</span>
+          <label className="chip" title="Injected into every new sandbox without a secret_refs entry">
+            <input
+              type="checkbox"
+              aria-label={`Auto-inject ${s.name}`}
+              checked={!!s.auto_inject}
+              disabled={busy === s.name}
+              onChange={e => onToggleAutoInject(s.name, e.target.checked)}
+            />{' '}
+            auto-inject
+          </label>
           <button
             type="button"
             className="btn ghost"
             disabled={busy === s.name}
-            onClick={() => { setName(s.name); setValue(''); setError(''); valueRef.current?.focus() }}
+            onClick={() => {
+              setName(s.name); setValue(''); setError('')
+              valueRef.current?.focus()
+            }}
           >
             Replace value
           </button>
@@ -187,6 +219,12 @@ function CustomSecrets({
           onChange={e => setValue(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') add() }}
         />
+        {!replacing && (
+          <label className="vault-auto">
+            <input type="checkbox" checked={autoInject} onChange={e => setAutoInject(e.target.checked)} />{' '}
+            Inject into every new sandbox
+          </label>
+        )}
         <button
           type="button"
           className="btn primary"

@@ -67,7 +67,20 @@ func privilegeHandover(user string) string {
 		return ""
 	}
 	return "chown -R " + user + " " + containerWorkdir + " 2>/dev/null; " +
-		"if [ -d /root/app ]; then chmod o+rx /root 2>/dev/null; chown -R " + user + " /root/app 2>/dev/null; fi; "
+		"if [ -d /root/app ]; then chmod o+rx /root 2>/dev/null; chown -R " + user + " /root/app 2>/dev/null; fi; " +
+		passwdEntry(user)
+}
+
+// passwdEntry names the run uid in /etc/passwd and /etc/group when the image
+// does not, so `id -un`, `whoami` and anything that looks up $USER work. The
+// uid stays numeric everywhere else; this only gives it a name. Root writes
+// the files before the drop, and the tenant cannot.
+func passwdEntry(user string) string {
+	uid, gid := userPart(user), groupPart(user)
+	return "grep -q '^[^:]*:[^:]*:" + uid + ":' /etc/passwd 2>/dev/null || " +
+		"echo 'sandbox:x:" + uid + ":" + gid + ":sandbox:" + sandboxRunHome + ":/bin/sh' >> /etc/passwd 2>/dev/null; " +
+		"grep -q '^[^:]*:[^:]*:" + gid + ":' /etc/group 2>/dev/null || " +
+		"echo 'sandbox:x:" + gid + ":' >> /etc/group 2>/dev/null; "
 }
 
 // dropPrefix wraps a command so it runs as user with no inheritable caps.

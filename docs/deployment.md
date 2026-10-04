@@ -237,6 +237,8 @@ port filters nothing. `network_advisories` says so on a domain-only allow list.
 | `ORCHESTRATOR_API_KEY` | **yes** | the operator/fleet key. Also the secret behind browser preview tokens — unset means preview gating **fails closed**, not off |
 | `ORCHESTRATOR_TOKEN` | **yes** in a fleet | signs `X-Org-Override` and the node-hop preview token; without it those relays refuse. Nodes no longer present it — each presents its own derived heartbeat token |
 | `NODE_KEY_SECRET` | **yes** in a fleet | control-plane only, **never** on a node. Derives every per-node credential. The orchestrator **refuses to start** without it when `ORCHESTRATOR_TOKEN` is set |
+| `ORG_ASSERT_KEY` | **yes** in a fleet | Ed25519 seed (`openssl rand -hex 32`) that signs `X-Org-Override`; nodes get only the public half at join. The orchestrator **refuses to start** without it when `ORCHESTRATOR_TOKEN` is set. See *The two secrets that stop one node compromising the fleet* |
+| `VAULT_SECRET_KEY` | **yes** in a fleet | encrypts tenants' provider API keys (`vault_secrets`); control plane only, **never** on a node (`openssl rand -hex 32`). The orchestrator **refuses to start** without it when `ORCHESTRATOR_TOKEN` is set, unless `ALLOW_PLAINTEXT_VAULT=1` (dev only). See *At-rest keys* |
 | `SANDBOXD_DATABASE_URL` | **yes** in a fleet | Postgres. Without it the orchestrator still boots but serves **no** projects, threads, vault or launch stats, and **admission is disabled** — see the warning below |
 | `PORTAL_SANDBOX_DOMAIN` | for previews | the wildcard domain. Unset disables host ingress entirely, and with it custom domains (`GET /v1/capabilities` reports `custom_domains: false`) |
 | `TRUSTED_PROXY_CIDRS` | with a TLS terminator | comma-separated CIDRs whose `X-Forwarded-For` is believed. Unset means the header is ignored everywhere |
@@ -272,6 +274,7 @@ port filters nothing. `network_advisories` says so on a domain-only allow list.
 | `SNAPSHOT_ARCHIVE` | recommended with a bucket | `bucket` archives every pause to the node's bucket, so a paused sandbox **resumes on another node when its own is gone**. Needs `SANDBOXD_ARTIFACT_STORE=s3`; the node refuses to start otherwise. See *When a node dies* |
 | `SNAPSHOT_ARCHIVE_DIR` | no | the older alternative: pause snapshots copied to a directory, expected to be a network volume. Restorable only by a node with the same id |
 | `SANDBOXD_LAZY_MEMORY` | no | default on (`0` off). A sandbox restored from its archive on another node boots **before its memory is downloaded**: pages are fetched from the bucket as the guest touches them and the rest prefetched. Needs Firecracker `v1.17` or later on a 6.x+ host kernel (see the pin table). *When a node dies* describes the one window it adds |
+| `SANDBOXD_DOCKERD_PIDFILE` | Docker nodes with a non-default dockerd | default `/var/run/docker.pid`. dockerd's start time, read from its pidfile, is how a sandbox container stopped by a dockerd restart is told from one that crashed. Set it for a rootless (`$XDG_RUNTIME_DIR/docker.pid`), snap or custom-`--pidfile` dockerd. Setting it always wins. Unset, a docker endpoint that is not a local socket (a remote `DOCKER_HOST` or docker context) is never read locally. With no readable pidfile, or a remote endpoint, the node warns at startup and starts every stopped sandbox container again; a crash is still destroyed when its container will not stay up |
 
 > **Nothing configures the node's TLS certificate.** It is generated on first
 > boot into `SANDBOXD_DATA` as `node-tls.crt` / `node-tls.key` and advertised in
@@ -356,7 +359,17 @@ cd ~/pdbuild && sudo BUILD_DIR=$PWD TEMPLATES=base bash scripts/provision-node.s
 It installs Docker + squashfs-tools, a Go toolchain in `/usr/local/go`,
 Firecracker and its jailer in `/usr/bin`, the guest kernel at
 `/var/lib/sandbox/vmlinux`, host networking via `scripts/setup-host.sh`, and a
-template rootfs under `/var/lib/sandbox/templates`. Go is there on purpose:
+template rootfs under `/var/lib/sandbox/templates` (`TEMPLATES=` lists them,
+comma-separated, default `base`; set but empty builds none), `envd` and the
+guest CLI in `/opt/pilldrops/bin` (the Docker runtime bind-mounts both into
+every sandbox; without them a docker sandbox has no exec API or terminal), and
+the `sandboxd` and `sandbox-egress-restore` units from `packaging/`, enabled
+but not started. A re-run leaves an installed unit alone, so set the node's
+environment and other overrides in a drop-in (`systemctl edit sandboxd`
+writes `/etc/systemd/system/sandboxd.service.d/override.conf`) rather than by
+editing the unit. A re-run warns when an installed unit differs from the
+packaged one; to pick up the packaged version, keep your changes in a drop-in,
+delete the installed unit and re-run. Go is there on purpose:
 `internal/vm` is `//go:build linux` and runs zero tests on macOS, so live work
 means `go build` / `go test -c` **on the node** rather than cross-compiling and
 copying binaries across.
@@ -412,9 +425,10 @@ rules were never applied, or did not survive a reboot, looks exactly like one
 that is protected. (That failure mode is specific to these host-owned rules;
 it is the reason the netns default moved them into the node.)
 
-`setup-docker-egress.sh` must run **after** `sandboxd` has started once: it reads
-`sandboxd-net`'s subnet from Docker, and warns loudly rather than silently doing
-nothing if the network does not exist yet.
+`setup-docker-egress.sh` keys its rules on `sandboxd-net`'s subnet, creating the
+network with the runtime's options if `sandboxd` has not started yet. Re-run it
+after upgrading a docker node: node preflight fails until the current rules are
+installed (see [SECURITY.md](../SECURITY.md#upgrading-an-existing-fleet)).
 
 Both scripts `iptables-save` to `/etc/iptables/rules.v4`, and
 `sandbox-egress-restore.service` replays that file before `sandboxd` starts.
@@ -486,16 +500,15 @@ A production node refuses to start rather than run unsafely:
 > sandbox is the *worst* case, not a safe one, and a resume of one can take
 > minutes.
 >
-> **Rebaking a template without deleting its golden gives you a corrupt VM.**
-> A golden is a memory image captured against one exact `rootfs.squashfs`, and
-> the restored kernel keeps that file's block layout in its page cache. Publish
-> a new squashfs under the same id and the next create *restores* — then reads
-> the old offsets out of the new file and fails with `SQUASHFS error: Failed to
-> read block ...: -5`, surfacing as `envd not ready: ... open /root:
-> input/output error`. It looks exactly like disk corruption and the disk is
-> fine. Whenever you republish a template, `rm -rf
-> <SNAPSHOT_DIR>/<id>/snapshots` and restart the node; `scripts/build-template.sh`
-> does not do it for you.
+> **A rebaked template's goldens are rebuilt on their own.** A golden is a
+> memory image captured against one exact `rootfs.squashfs`, and the restored
+> kernel keeps that file's block layout in its page cache: restored over a new
+> squashfs under the same id, it fails with `SQUASHFS error: Failed to read
+> block ...: -5`, surfacing as `envd not ready: ... open /root: input/output
+> error`. Each golden records the digest of the image it was taken against, so
+> after a rebake the node stops serving it, cold boots the next creates and
+> builds new goldens in the background. A golden from before the digest was
+> recorded is rebuilt once the same way.
 >
 > **Golden restore serves exactly one storage size.** A golden snapshot bakes
 > its overlay at 20480 MB (`vm.DefaultOverlayMB`; the node advertises it as
@@ -946,9 +959,12 @@ analytics tag into them; both are off unless set.
 | `VAULT_SECRET_KEY` | **yes** | **never** | `vault_secrets` — tenants' provider API keys |
 
 `VAULT_SECRET_KEY` is the one at-rest key the control plane keeps to itself, and
-it is deliberately absent from the node join bundle. Without it set, connecting
-a provider key is **refused** rather than stored unencrypted — which is what
-used to happen, silently. `ALLOW_PLAINTEXT_VAULT=1` restores the old behaviour
+it is deliberately absent from the node join bundle. A clustered control plane
+**refuses to start** without it; unclustered, connecting a provider key is
+**refused** rather than stored unencrypted — which is what used to happen, silently.
+**Upgrading:** set it on every orchestrator replica before rolling onto a build
+with this guard, or the upgraded replica will not start (see SECURITY.md,
+*Upgrading an existing fleet*). `ALLOW_PLAINTEXT_VAULT=1` restores the old behaviour
 for local development and should never be set on a shared deployment.
 
 Generate one with `openssl rand -hex 32`.

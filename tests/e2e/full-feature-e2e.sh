@@ -1,7 +1,9 @@
 #!/bin/bash
-# Full E2E of every user-facing feature against a real Docker-backed node. Usage: full-feature-e2e.sh <base-url> <api-key>
-B="$1"; K="$2"; H="Authorization: Bearer $K"
+# Full E2E of every user-facing feature against a real Docker-backed node.
+# Usage: full-feature-e2e.sh <base-url> <api-key> [operator-key]
+B="$1"; K="$2"; H="Authorization: Bearer $K"; OPK="${3:-}"
 pass=0; fail=0; skip=0
+mkdir -p /tmp/e2e-all
 declare -a FAILURES
 ok()   { echo "  ✅ $1"; pass=$((pass+1)); }
 bad()  { echo "  ❌ $1"; fail=$((fail+1)); FAILURES+=("$1"); }
@@ -128,10 +130,19 @@ sec "C. Observability"
 for ep in metrics logs; do
   [ "$(code $B/v1/sandboxes/$SB/$ep -H "$H")" = 200 ] && ok "$ep" || bad "$ep"
 done
-for ep in usage events history audit nodes templates; do
+for ep in usage events history audit templates; do
   c=$(code $B/v1/$ep -H "$H")
   [ "$c" = 200 ] && ok "/v1/$ep" || bad "/v1/$ep ($c)"
 done
+# /v1/nodes is operator-only.
+c=$(code $B/v1/nodes -H "$H")
+[ "$c" = 403 ] && ok "/v1/nodes refused to the tenant" || bad "/v1/nodes for the tenant ($c, want 403)"
+if [ -n "$OPK" ]; then
+  c=$(code $B/v1/nodes -H "Authorization: Bearer $OPK")
+  [ "$c" = 200 ] && ok "/v1/nodes for the operator" || bad "/v1/nodes for the operator ($c)"
+else
+  skp "/v1/nodes for the operator (no operator key given)"
+fi
 cost=$(curl -s $B/v1/usage -H "$H" | jq_ "print('cost_usd' in d)")
 [ "$cost" = "True" ] && ok "cost attribution (cost_usd)" || bad "no cost attribution"
 

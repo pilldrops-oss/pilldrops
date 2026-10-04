@@ -56,6 +56,7 @@ func (s *Server) handleFork(w http.ResponseWriter, r *http.Request) {
 			// own ?ptok= and must not be relayed either. See sanitizeNodeURLs.
 			to, viewer := s.previewLinks(r, created.URL)
 			rb = s.rewriteURL(r, rb, created.URL, to, viewer, node.ID)
+			rb = s.withPreviewGeneration(r.Context(), rb, created.ID)
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")

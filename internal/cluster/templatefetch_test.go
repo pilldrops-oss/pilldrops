@@ -105,3 +105,12 @@ func TestUnrestrictedNodeKeepsFullEligibility(t *testing.T) {
 		t.Error("an unrestricted node counts as holding everything, so it is in the preferred tier")
 	}
 }
+
+func TestAFetchNeedsAReadyBuild(t *testing.T) {
+	t.Parallel()
+	now, ttl := time.Now(), time.Minute
+	fresh := fetchNode("fresh", 4000, []string{}, true)
+	if got := Pick([]*Node{fresh}, Request{MemMB: 512, Template: "browser", NoBuild: true}, now, ttl); got != nil {
+		t.Fatalf("picked %q to fetch a template the store has no build of", got.ID)
+	}
+}

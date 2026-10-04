@@ -82,7 +82,7 @@ check "POST /filesystem/remove" "204" "$(curl -s -o /dev/null -w '%{http_code}' 
 echo ""; echo "Lifecycle:"
 check "POST /pause" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/v1/sandboxes/$SB_ID/pause)"
 check "POST /resume" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/v1/sandboxes/$SB_ID/resume)"
-check "POST /timeout" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/v1/sandboxes/$SB_ID/timeout -d '{"timeout":600}')"
+check "POST /timeout" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/v1/sandboxes/$SB_ID/timeout -d '{"seconds":600}')"
 check "POST /refresh" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/v1/sandboxes/$SB_ID/refresh)"
 check "GET /logs" "200" "$(curl -s -o /dev/null -w '%{http_code}' $BASE/v1/sandboxes/$SB_ID/logs)"
 check "GET /metrics" "200" "$(curl -s -o /dev/null -w '%{http_code}' $BASE/v1/sandboxes/$SB_ID/metrics)"

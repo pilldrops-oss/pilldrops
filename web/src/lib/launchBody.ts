@@ -12,6 +12,8 @@ export function composeCreateBody(cfg: {
   start: string
   port: string
   envList: string[]
+  /** Vault secret names the server resolves into env at create. */
+  secretRefs?: string[]
   previewPort: number
   /** Seconds; empty means keep-alive default. */
   timeoutInput?: string
@@ -26,19 +28,24 @@ export function composeCreateBody(cfg: {
     start,
     port,
     envList,
+    secretRefs = [],
     previewPort,
     timeoutInput = '',
     idleInput = '',
   } = cfg
   const portNum = port ? parseInt(port, 10) : undefined
   const life = resolveLifetime(startsServer(kind, start), timeoutInput, idleInput)
+  const vars = {
+    env: envList.length ? envList : undefined,
+    secret_refs: secretRefs.length ? secretRefs : undefined,
+  }
 
   if (kind === 'service') {
-    return { env: envList.length ? envList : undefined, start: undefined, port: portNum, ...life }
+    return { ...vars, start: undefined, port: portNum, ...life }
   }
 
   if (kind === 'gui') {
-    return { env: envList.length ? envList : undefined, start: undefined, port: portNum, ...life }
+    return { ...vars, start: undefined, port: portNum, ...life }
   }
 
   if (kind === 'test') {
@@ -48,18 +55,20 @@ export function composeCreateBody(cfg: {
       const reportServe = /playwright/.test(cmd)
         ? 'npx playwright show-report --host 0.0.0.0 --port $PORT'
         : 'python3 -m http.server $PORT'
-      const start = serveReport ? `${cmd}; ${reportServe}` : cmd
-      return { env: envList.length ? envList : undefined, start, port: portNum, ...life }
+      // A template whose preview is its report serves it already (playwright's
+      // start.sh serves /root/recordings on $PORT), so a second server would only fail.
+      const start = serveReport && tpl.outcome !== 'report' ? `${cmd}; ${reportServe}` : cmd
+      return { ...vars, start, port: portNum, ...life }
     }
     const body = universalStartBody(previewPort)
     const kal = resolveLifetime(true, timeoutInput, idleInput)
-    return { env: envList.length ? envList : undefined, ...body, ...kal }
+    return { ...vars, ...body, ...kal }
   }
 
   if (kind === 'shell') {
     if (start.trim()) {
       return {
-        env: envList.length ? envList : undefined,
+        ...vars,
         start: start.trim(),
         port: portNum,
         ...life,
@@ -67,17 +76,17 @@ export function composeCreateBody(cfg: {
     }
     const body = universalStartBody(previewPort)
     const kal = resolveLifetime(true, timeoutInput, idleInput)
-    return { env: envList.length ? envList : undefined, ...body, ...kal }
+    return { ...vars, ...body, ...kal }
   }
 
   // web: no start command and no built-in server gets a browser terminal so the preview never hangs.
   if (!tpl.has_server && !start.trim()) {
     const body = universalStartBody(previewPort)
     const kal = resolveLifetime(true, timeoutInput, idleInput)
-    return { env: envList.length ? envList : undefined, ...body, ...kal }
+    return { ...vars, ...body, ...kal }
   }
   return {
-    env: envList.length ? envList : undefined,
+    ...vars,
     start: tpl.has_server ? undefined : start.trim() || undefined,
     port: portNum,
     ...life,
@@ -123,21 +132,30 @@ export function buildPilldropsExport(cfg: {
   return config
 }
 
-// buildCliSnippet mirrors the current config as a CLI command.
+// buildCliSnippet mirrors the current config as a CLI command. Flag names and
+// availability are checked against pilldrops-cli's `sandbox create`
+// (internal/cli/cmd_sandbox.go): it has --vcpu, --mem (not --memory) and
+// --public, but no --name, so the sandbox name from the form is not shown.
 export function buildCliSnippet(cfg: {
   tpl: Template | null
   start: string
   port: string
   envList: string[]
+  /** Resource overrides from the form; the CLI's own defaults are per-template. */
+  cpu?: number
+  mem?: number
+  isPublic?: boolean
   /** When present it drives the flags so the snippet reflects the real request. */
   composed?: ComposedBody
 }): string {
-  const { tpl, start, port, envList, composed } = cfg
+  const { tpl, start, port, envList, cpu, mem, isPublic, composed } = cfg
   if (!tpl) return ''
 
   const parts = ['pilldrops sandbox create', `--template ${tpl.id}`]
   const rt = requiredRuntime(tpl)
   if (rt) parts.push(`--runtime ${rt}`)
+  if (cpu) parts.push(`--vcpu ${cpu}`)
+  if (mem) parts.push(`--mem ${mem}`)
 
   let startCmd: string | undefined
   if (composed) startCmd = composed.start
@@ -159,6 +177,7 @@ export function buildCliSnippet(cfg: {
   if (portVal) parts.push(`--port ${portVal}`)
   if (composed?.timeout !== undefined) parts.push(`--timeout ${composed.timeout}`)
   if (composed?.idle_timeout !== undefined) parts.push(`--idle-timeout ${composed.idle_timeout}`)
+  if (isPublic) parts.push('--public')
 
   let out = parts.join(' \\\n  ')
   if (hasUniversalScript) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -25,6 +26,30 @@ func safeFilePath(p string) bool {
 // kept, and only the rule is added to it.
 const confinedPathMsg = "invalid path: file paths are taken relative to the sandbox home, " +
 	"and one that resolves outside it is refused"
+
+// writeFSErr answers a failed file operation with what went wrong with the
+// caller's path: missing 404, already there 409, not allowed 403, unusable or
+// outside the sandbox home 400. Only a failure it cannot attribute to the path
+// is the node's 503. Read, stat and list used to answer 404 for everything and
+// the mutations 503, so a mkdir over a file told the caller to retry.
+func writeFSErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, rt.ErrPathRefused):
+		// The caller's path, not this node's health: a 503 sent them away with
+		// "retry", which a path the guest will refuse every time never satisfies.
+		writeErr(w, http.StatusBadRequest, confinedPathMsg)
+	case errors.Is(err, rt.ErrPathNotFound), errors.Is(err, iofs.ErrNotExist):
+		writeErr(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, iofs.ErrExist):
+		writeErr(w, http.StatusConflict, err.Error())
+	case errors.Is(err, iofs.ErrPermission):
+		writeErr(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, iofs.ErrInvalid):
+		writeErr(w, http.StatusBadRequest, err.Error())
+	default:
+		writeErr(w, statusForErr(err), err.Error())
+	}
+}
 
 func (s *Server) handleWriteFile(w http.ResponseWriter, r *http.Request) {
 	id, path := r.PathValue("id"), r.URL.Query().Get("path")
@@ -65,13 +90,7 @@ func (s *Server) handleWriteFile(w http.ResponseWriter, r *http.Request) {
 				fmt.Sprintf("file exceeds the per-file limit PD_FILES_MAX_BYTES (%d bytes)", s.filesMaxBytes))
 			return
 		}
-		// The caller's path, not this node's health: a 503 sent them away with
-		// "retry", which a path the guest will refuse every time never satisfies.
-		if errors.Is(err, rt.ErrPathRefused) {
-			writeErr(w, http.StatusBadRequest, confinedPathMsg)
-			return
-		}
-		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		writeFSErr(w, err)
 		return
 	}
 	s.auditDetail(r, "sandbox.fs.write", id, map[string]any{"path": path, "size": n})
@@ -96,7 +115,7 @@ func (s *Server) handleReadFile(w http.ResponseWriter, r *http.Request) {
 	if sfs, ok := fs.(rt.StreamFS); ok {
 		// Stat first so a missing file is a 404 and not a half-written 200.
 		if _, err := fs.Stat(r.Context(), path); err != nil {
-			writeErr(w, http.StatusNotFound, err.Error())
+			writeFSErr(w, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -107,7 +126,7 @@ func (s *Server) handleReadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := fs.Read(r.Context(), path)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, err.Error())
+		writeFSErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
@@ -134,7 +153,7 @@ func (s *Server) handleListDir(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := fs.List(r.Context(), path)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, err.Error())
+		writeFSErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
@@ -161,7 +180,7 @@ func (s *Server) handleStat(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := fs.Stat(r.Context(), path)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, err.Error())
+		writeFSErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, info)
@@ -200,7 +219,7 @@ func (s *Server) fsMutate(w http.ResponseWriter, r *http.Request, op string) {
 		err = fs.Remove(r.Context(), body.Path)
 	}
 	if err != nil {
-		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		writeFSErr(w, err)
 		return
 	}
 	detail := map[string]any{"path": body.Path}

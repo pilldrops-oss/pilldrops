@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
@@ -52,23 +53,30 @@ func (m *Manager) rootfsPath(template string) string {
 
 // rootfsDigest hashes a template's root image.
 func (m *Manager) rootfsDigest(template string) (string, error) {
-	return m.digestOf(m.rootfsPath(template))
+	return digestOf(m.rootfsPath(template))
 }
+
+// rootfsSums memoises root-image digests by path+size+mtime; its own lock so
+// hashing a 200 MB image never holds any other.
+var (
+	sumMu      sync.Mutex
+	rootfsSums = map[string]string{}
+)
 
 // digestOf hashes one image. Memoised on (size, mtime) so a node pays the hash
 // once per image rather than once per restore; an image is replaced by rename
 // (templatebuild, and linkInto on the fetch path) so changed bytes are a
 // changed mtime.
-func (m *Manager) digestOf(path string) (string, error) {
+func digestOf(path string) (string, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return "", err
 	}
 	key := fmt.Sprintf("%s|%d|%d", path, fi.Size(), fi.ModTime().UnixNano())
 
-	m.sumMu.Lock()
-	sum, ok := m.rootfsSums[key]
-	m.sumMu.Unlock()
+	sumMu.Lock()
+	sum, ok := rootfsSums[key]
+	sumMu.Unlock()
 	if ok {
 		return sum, nil
 	}
@@ -84,12 +92,9 @@ func (m *Manager) digestOf(path string) (string, error) {
 	}
 	sum = "sha256:" + hex.EncodeToString(h.Sum(nil))
 
-	m.sumMu.Lock()
-	if m.rootfsSums == nil {
-		m.rootfsSums = map[string]string{}
-	}
-	m.rootfsSums[key] = sum
-	m.sumMu.Unlock()
+	sumMu.Lock()
+	rootfsSums[key] = sum
+	sumMu.Unlock()
 	return sum, nil
 }
 
@@ -113,7 +118,7 @@ func (m *Manager) checkRootfs(meta sandboxSnapMeta, srcDir, rootfs string) error
 	if path == "" {
 		path = m.rootfsPath(meta.Template)
 	}
-	have, err := m.digestOf(path)
+	have, err := digestOf(path)
 	if err != nil {
 		return fmt.Errorf("check the root image %s against capture %s: %w", path, srcDir, err)
 	}

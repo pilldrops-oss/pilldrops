@@ -21,11 +21,16 @@ func (d *Daemon) Start() {
 	d.bgCancel = cancel
 
 	restoreCtx, restoreCancel := context.WithTimeout(ctx, restoreBudget)
-	d.restoreFromStore(restoreCtx)
+	restored := d.restoreFromStore(restoreCtx)
 	restoreCancel()
 	// After the store is read, so a checkpoint is only swept when its sandbox is
 	// genuinely gone rather than merely not restored yet.
-	d.sweepCheckpoints()
+	var retry restoreRetry
+	if restored {
+		d.sweepCheckpoints()
+	} else {
+		retry.failed(d.clock.Now())
+	}
 
 	go func() {
 		ticker := time.NewTicker(time.Second)
@@ -34,6 +39,13 @@ func (d *Daemon) Start() {
 			select {
 			case <-ticker.C:
 				tickCtx, tickCancel := context.WithTimeout(ctx, reconcileBudget)
+				if !restored && retry.due(d.clock.Now()) {
+					if restored = d.restoreFromStore(tickCtx); restored {
+						d.sweepCheckpoints()
+					} else {
+						retry.failed(d.clock.Now())
+					}
+				}
 				start := d.clock.Now()
 				d.reconcileOnce(tickCtx)
 				d.metrics.ReconcileDuration.Observe(d.clock.Now().Sub(start))
@@ -70,12 +82,9 @@ func (d *Daemon) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				scanCtx, scanCancel := context.WithTimeout(ctx, scanBudget)
 				start := d.clock.Now()
-				d.scanOOMKills(scanCtx)
-				d.scanServerCrashes(scanCtx)
+				d.scanOnce(ctx)
 				d.metrics.ScanDuration.Observe(d.clock.Now().Sub(start))
-				scanCancel()
 			case <-ctx.Done():
 				return
 			}
@@ -83,8 +92,23 @@ func (d *Daemon) Start() {
 	}()
 }
 
-// scanBudget is under the 8s scanner tick so a slow pass cannot overlap the next.
-const scanBudget = 7 * time.Second
+// scanOnce is one scanner pass. The exit scan has a budget of its own and goes
+// first: behind the probes into every guest, a slow fleet starved it, and a dead
+// VMM's netns, chroot and overlay leak until it is reaped.
+func (d *Daemon) scanOnce(ctx context.Context) {
+	exitCtx, exitCancel := context.WithTimeout(ctx, scanBudget)
+	d.scanExits(exitCtx)
+	exitCancel()
+
+	scanCtx, scanCancel := context.WithTimeout(ctx, scanBudget)
+	defer scanCancel()
+	d.scanOOMKills(scanCtx)
+	d.scanServerCrashes(scanCtx)
+}
+
+// scanBudget bounds each scanner pass; a var so tests can shrink it. A slow
+// pass delays the next tick rather than overlapping it.
+var scanBudget = 7 * time.Second
 
 // Stop halts the reconciler. Idempotent.
 func (d *Daemon) Stop() {
@@ -94,6 +118,7 @@ func (d *Daemon) Stop() {
 			d.bgCancel()
 		}
 	})
+	d.stopRevives()
 }
 
 // reconcileOnce is one tick of the control loop, extracted so tests can drive
@@ -136,14 +161,6 @@ func (d *Daemon) reconcileOnce(ctx context.Context) {
 			d.log().Info("abandoning sandbox", "sandbox_id", id, "idle", now.Sub(sb.LastActiveAt).Round(time.Hour).String())
 			toStop = append(toStop, id)
 			continue
-		}
-		// Reap a sandbox whose VMM died, or its netns, chroot and overlay leak
-		// until an explicit delete. Only runtimes exposing Liveness are checked.
-		if sb.State == StateRunning {
-			if lv, ok := sb.inst.(rt.Liveness); ok && !lv.Alive() {
-				toStop = append(toStop, id)
-				continue
-			}
 		}
 		// Two timers off the same LastActiveAt clock, both with the per-sandbox
 		// override shape (0 = daemon default; <0 = never). The hibernate one is
@@ -235,5 +252,24 @@ type usageBatchWriter interface {
 	RecordUsageBatch(ctx context.Context, recs []UsageRecord) error
 }
 
-// restoreBudget bounds reading persisted sandboxes back at boot.
-const restoreBudget = 60 * time.Second
+// restoreBudget bounds reading persisted sandboxes back at boot; a var so
+// tests can shrink it.
+var restoreBudget = 60 * time.Second
+
+// restoreRetryMax caps the wait between restore retries.
+const restoreRetryMax = 30 * time.Second
+
+// restoreRetry spaces out retries of an unfinished restore, doubling from a
+// second to restoreRetryMax: with docker down for good, every tick reloaded
+// the store and logged an error.
+type restoreRetry struct {
+	wait time.Duration
+	next time.Time
+}
+
+func (b *restoreRetry) due(now time.Time) bool { return !now.Before(b.next) }
+
+func (b *restoreRetry) failed(now time.Time) {
+	b.wait = min(max(2*b.wait, time.Second), restoreRetryMax)
+	b.next = now.Add(b.wait)
+}

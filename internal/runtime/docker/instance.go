@@ -53,10 +53,19 @@ type dockerInstance struct {
 	execs   int64
 	// eng is nil when the Engine socket was unreachable; every path then uses the CLI.
 	eng *engine
+	// primary is the port previews default to: appPort, or a service's first.
+	primary int
 	// ports caches `docker port` answers, seeded with the primary port; a
 	// mapping is fixed for the container's life, so one lookup per port suffices.
 	portsMu sync.Mutex
 	ports   map[int]string
+	// oomKilled is what the inspect that found the container dead said.
+	oomKilled atomic.Bool
+	// deadSince is the first of the consecutive reads that found it stopped.
+	deadMu    sync.Mutex
+	deadSince time.Time
+	// casualty is what the last Alive read said: stopped by a dockerd restart.
+	casualty atomic.Bool
 }
 
 func (i *dockerInstance) ID() string { return i.id }
@@ -270,30 +279,217 @@ func (i *dockerInstance) FS() rt.FileSystem {
 	return &dockerFS{cid: i.cid, eng: i.eng, user: i.runUser}
 }
 
+// isKeepalive defines ka, true for the pid that is the container's keepalive:
+// the `sleep infinity` PID 1 (docker-init) runs, whose exit ends the container.
+// It is told from a tenant's orphaned `sleep infinity`, also PID 1's child, by
+// its start time (stat field 22): docker-init forked it at once, so it started
+// within a second (100 ticks) of PID 1. Fork time, so the shell's exec into
+// sleep after the workspace chown does not move it.
+const isKeepalive = `st() { set -- $(cat /proc/$1/stat 2>/dev/null); eval echo "\${22:-0}"; }; ` +
+	`ka() { [ "$(tr '\0' ' ' < /proc/$1/cmdline 2>/dev/null)" = "sleep infinity " ] && ` +
+	`grep -qx 'PPid:[[:space:]]*1' /proc/$1/status 2>/dev/null && ` +
+	`[ "$(st "$1")" -le $(( $(st 1) + 100 )) ]; }; `
+
+// procList prints "pid comm" for each process in the container's own pid
+// namespace, skipping itself and the keepalive. docker top reports host pids,
+// which a kill run inside the container (Signal, or the tenant's own shell)
+// cannot address.
+const procList = isKeepalive + `for d in /proc/[0-9]*; do p=${d#/proc/}; [ "$p" = $$ ] && continue; ` +
+	`{ read -r c < "$d/comm"; } 2>/dev/null || continue; [ "$c" = sleep ] && ka "$p" && continue; ` +
+	`echo "$p $c"; done`
+
+// signalScript kills $2 with signal $1 unless it is the keepalive, for which
+// it exits keepaliveExit.
+const (
+	signalScript  = isKeepalive + `ka "$2" && exit 64; kill -"$1" "$2"`
+	keepaliveExit = 64
+)
+
+// Alive implements rt.Liveness. An inspect that fails for any reason but a
+// missing container answers alive: reaping on a dockerd hiccup would destroy
+// every sandbox on the node.
+func (i *dockerInstance) Alive() bool {
+	st, err := i.state()
+	if err != nil && !strings.Contains(err.Error(), "No such") { // engine: "container", CLI: "object"
+		return true
+	}
+	if err == nil && st.Running {
+		i.deadMu.Lock()
+		i.deadSince = time.Time{}
+		i.deadMu.Unlock()
+		return true
+	}
+	i.oomKilled.Store(st.OOMKilled)
+	// A dockerd restart stopped it: not dead, and the daemon revives it.
+	casualty := restartCasualty(st.FinishedAt, dockerdStarted())
+	i.casualty.Store(casualty)
+	return !casualty && !i.confirmDead(time.Now())
+}
+
+// Casualty implements rt.Reviver.
+func (i *dockerInstance) Casualty() bool { return i.casualty.Load() }
+
+// EngineStarted implements rt.Reviver.
+func (*dockerInstance) EngineStarted() time.Time { return dockerdStarted() }
+
+// reviveTries and reviveBackoff bound the docker start of a restart casualty:
+// the new daemon can still be settling when the first one runs.
+var (
+	reviveTries   = 3
+	reviveBackoff = 2 * time.Second
+)
+
+// Revive implements rt.Reviver: start the container again and re-read its
+// published ports, which docker reallocates on a start, as Adopt does.
+func (i *dockerInstance) Revive(ctx context.Context) (rt.Instance, error) {
+	err := retryStart(ctx, func() error {
+		_, se, code, err := dockerOut(ctx, "start", i.cid)
+		if err == nil && code != 0 {
+			err = errors.New(strings.TrimSpace(se))
+		}
+		return err
+	})
+	if err == nil {
+		err = stayedUp(ctx, reviveSettle, i.state)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("docker start %s: %w", i.cid, err)
+	}
+	host, _ := mappedPort(ctx, i.cid, i.primary)
+	termHost, _ := mappedPort(ctx, i.cid, terminalPort)
+	return &dockerInstance{
+		id: i.id, cid: i.cid, host: host, termHost: termHost, envdToken: i.envdToken,
+		vcpu: i.vcpu, memMiB: i.memMiB, service: i.service, runUser: i.runUser,
+		start: time.Now(), eng: i.eng, primary: i.primary, ports: map[int]string{i.primary: host},
+	}, nil
+}
+
+// reviveSettle is how long a started container must stay running to count as
+// revived: `docker start` exits 0 for one whose command dies at once.
+const reviveSettle = 2 * time.Second
+
+// stayedUp waits settle, then confirms the container is still running. A
+// state read that fails confirms nothing either way and is not a failure.
+func stayedUp(ctx context.Context, settle time.Duration, state func() (containerState, error)) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(settle):
+	}
+	if st, err := state(); err == nil && !st.Running {
+		return fmt.Errorf("%w: exited right after start", rt.ErrWontStayUp)
+	}
+	return nil
+}
+
+// retryStart runs start up to reviveTries times, reviveBackoff apart.
+func retryStart(ctx context.Context, start func() error) error {
+	var err error
+	for n := range reviveTries {
+		if n > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(reviveBackoff):
+			}
+		}
+		if err = start(); err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+func (i *dockerInstance) state() (containerState, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if i.eng != nil {
+		return i.eng.State(ctx, i.cid)
+	}
+	out, se, code, err := dockerOut(ctx, "inspect", "-f",
+		"{{.State.Running}} {{.State.OOMKilled}} {{.State.FinishedAt}}", i.cid)
+	if err == nil && code != 0 {
+		err = errors.New(se)
+	}
+	if err != nil {
+		return containerState{}, err
+	}
+	var st containerState
+	if f := strings.Fields(out); len(f) == 3 {
+		st.Running, st.OOMKilled = f[0] == "true", f[1] == "true"
+		st.FinishedAt, _ = time.Parse(time.RFC3339Nano, f[2])
+	}
+	return st, nil
+}
+
+// deadConfirmAfter is how long a container must stay stopped, across two
+// reads, before it is reported dead; a var so tests can shrink it.
+var deadConfirmAfter = 5 * time.Second
+
+// restartGrace is how long after dockerd's start a stop still counts as that
+// restart's doing: after a crash the new daemon stops the orphaned containers
+// just after it starts. A stop before its start, however long ago, was the old
+// daemon going away under the container. Minutes, not seconds: a dockerd
+// restoring many containers after a crash stops some of them late, and a
+// truly broken one is still caught when its revive will not stay up.
+const restartGrace = 5 * time.Minute
+
+// confirmDead decides whether a container read as stopped at now is dead: it
+// must stay stopped across two reads deadConfirmAfter apart.
+func (i *dockerInstance) confirmDead(now time.Time) bool {
+	i.deadMu.Lock()
+	defer i.deadMu.Unlock()
+	if i.deadSince.IsZero() {
+		i.deadSince = now
+		return false
+	}
+	return now.Sub(i.deadSince) >= deadConfirmAfter
+}
+
+// restartCasualty reports whether a stop at finishedAt was the doing of the
+// dockerd that started at dockerdStart. With dockerd's start unknown every stop
+// is one: a restart must never destroy a healthy sandbox, and a crash is still
+// destroyed when its revive will not stay up. A known start with an unknown
+// stop is judged by confirmDead like any exit.
+func restartCasualty(finishedAt, dockerdStart time.Time) bool {
+	if dockerdStart.IsZero() {
+		return true
+	}
+	if finishedAt.IsZero() {
+		return false
+	}
+	return finishedAt.Before(dockerdStart.Add(restartGrace))
+}
+
+// OOMKilled implements rt.OOMKilledReporter.
+func (i *dockerInstance) OOMKilled() bool { return i.oomKilled.Load() }
+
 func (i *dockerInstance) Procs() ([]rt.Proc, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if i.eng != nil {
-		if _, rows, err := i.eng.Top(ctx, i.cid, "-eo pid,comm"); err == nil {
-			var procs []rt.Proc
-			for _, f := range rows {
-				if len(f) < 2 {
-					continue
-				}
-				if pid, perr := strconv.Atoi(strings.TrimSpace(f[0])); perr == nil {
-					procs = append(procs, rt.Proc{PID: pid, Cmd: strings.Join(f[1:], " ")})
-				}
-			}
-			return procs, nil
-		}
+	if out, _, code, err := i.runExec(ctx, rt.ExecSpec{}, procList, []string{"exec", i.cid, "/bin/sh", "-c", procList}); err == nil && code == 0 {
+		return parseProcs(out, false), nil
 	}
+	// An image with no /bin/sh (a distroless service): docker top still lists
+	// it, but by host pids, which a kill inside the container would read as
+	// some other process and which say nothing a tenant should see. Listed with
+	// pid 0, which the signal route refuses.
 	out, _, code, err := dockerOut(ctx, "top", i.cid, "-eo", "pid,comm")
 	if err != nil || code != 0 {
 		return nil, nil // best-effort, like the process runtime
 	}
+	procs := parseProcs(out, true)
+	for n := range procs {
+		procs[n].PID = 0
+	}
+	return procs, nil
+}
+
+// parseProcs reads "pid comm" lines, skipping docker top's header row.
+func parseProcs(out string, header bool) []rt.Proc {
 	var procs []rt.Proc
 	for n, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if n == 0 { // header row
+		if header && n == 0 {
 			continue
 		}
 		f := strings.Fields(line)
@@ -304,15 +500,25 @@ func (i *dockerInstance) Procs() ([]rt.Proc, error) {
 			procs = append(procs, rt.Proc{PID: pid, Cmd: strings.Join(f[1:], " ")})
 		}
 	}
-	return procs, nil
+	return procs
 }
 
 func (i *dockerInstance) Signal(pid, sig int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, se, code, err := dockerOut(ctx, "exec", i.cid, "kill", "-"+strconv.Itoa(sig), strconv.Itoa(pid))
-	if err != nil || code != 0 {
-		return fmt.Errorf("signal %d/%d: %w %s", pid, sig, err, strings.TrimSpace(se))
+	args := []string{"exec", i.cid, "kill", "-" + strconv.Itoa(sig), strconv.Itoa(pid)}
+	if !i.service { // only the platform's own command has a keepalive
+		args = []string{"exec", i.cid, "sh", "-c", signalScript, "sh", strconv.Itoa(sig), strconv.Itoa(pid)}
+	}
+	_, se, code, err := dockerOut(ctx, args...)
+	if err != nil {
+		return fmt.Errorf("signal %d/%d: %w", pid, sig, err)
+	}
+	if !i.service && code == keepaliveExit {
+		return fmt.Errorf("pid %d: %w", pid, rt.ErrProtectedProcess)
+	}
+	if code != 0 {
+		return fmt.Errorf("signal %d/%d: %s", pid, sig, strings.TrimSpace(se))
 	}
 	return nil
 }
@@ -350,7 +556,9 @@ func (i *dockerInstance) ListenTarget(port int) (string, error) {
 	defer cancel()
 	h, err := mappedPort(ctx, i.cid, port)
 	if err != nil {
-		return "", fmt.Errorf("%w: sandbox %s publishes port %d and its declared ports only, not %d", rt.ErrNoAppOnPort, i.id, appPort, port)
+		return "", fmt.Errorf("%w: sandbox %s publishes port %d and its declared ports only, not %d; docker "+
+			"publishes ports when the container is created, so create the sandbox with \"ports\":[%d]",
+			rt.ErrNoAppOnPort, i.id, appPort, port, port)
 	}
 	if i.ports == nil {
 		i.ports = map[int]string{}

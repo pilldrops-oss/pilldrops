@@ -79,14 +79,34 @@ case "$mode" in
     [ -z "$du_accept_at" ] || [ "$du_at" -lt "$du_accept_at" ] \
       || fail "the FORWARD -j DOCKER-USER jump is BELOW an ACCEPT (line $du_at vs $du_accept_at) — container egress can bypass every DOCKER-USER DROP"
     du="$(iptables -S DOCKER-USER)"
-    printf '%s\n' "$du" | grep -qE -- '-d 169\.254\.0\.0/16 -j DROP'  || fail "Docker metadata DROP missing"
-    printf '%s\n' "$du" | grep -qE -- '-d 172\.17\.0\.1/32 -j DROP'   || fail "Docker gateway DROP missing"
-    printf '%s\n' "$du" | grep -qE -- '-d 10\.0\.0\.0/8 -j DROP'      || fail "Docker RFC1918 10/8 DROP missing"
-    printf '%s\n' "$du" | grep -qE -- '-d 172\.16\.0\.0/12 -j DROP'   || fail "Docker RFC1918 172.16/12 DROP missing"
-    printf '%s\n' "$du" | grep -qE -- '-d 100\.64\.0\.0/10 -j DROP'   || fail "Docker CGNAT 100.64/10 DROP missing"
-    # sandbox -> node is delivered locally via INPUT, not DOCKER-USER. The
-    # sandboxd-net subnet is allocated by dockerd and differs per host.
-    sb_re='-s 172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+/[0-9]+'
+    # The sandboxd-net subnet is allocated by dockerd from its address pools,
+    # which an operator may move to 10/8 or 192.168/16, so it is read, not guessed.
+    # First IPv4 subnet: a dual-stack network lists an IPv6 one too, and these rules are IPv4.
+    sb_net=$(docker network inspect sandboxd-net -f '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' 2>/dev/null \
+      | grep -m1 -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$') || sb_net=""
+    [ -n "$sb_net" ] || fail "cannot read an IPv4 subnet for sandboxd-net from docker — the network is missing, has no IPv4 subnet, or docker is down (run setup-docker-egress.sh)"
+    sb_re="-s ${sb_net//./\\.}"
+    # The DNS/HTTP/HTTPS allowlist setup-host.sh gives Firecracker VMs. Without
+    # its closing DROP a sandbox reaches every port on every public address,
+    # the control plane on a peer host included.
+    [ -n "$(line_of "$du" "$sb_re -j DROP")" ] \
+      || fail "Docker sandbox port allowlist missing — sandboxes reach any port on any public address, including peer hosts' control plane (run setup-docker-egress.sh)"
+    # The allowlist is destination-blind, so every DROP must sit above it.
+    ret_at=$(line_of "$du" "$sb_re .*-j RETURN")
+    du_drop() {
+      local at
+      at=$(line_of "$du" "$1 -j DROP")
+      [ -n "$at" ] || fail "Docker $2 DROP missing (run setup-docker-egress.sh)"
+      [ -z "$ret_at" ] || [ "$at" -lt "$ret_at" ] \
+        || fail "the Docker $2 DROP is BELOW the sandbox allowlist (line $at vs $ret_at) — sandbox traffic to that range on 53/80/443 is NOT blocked"
+    }
+    du_drop '-d 169\.254\.0\.0/16'          'metadata 169.254.0.0/16'
+    du_drop '-d 172\.17\.0\.1/32'           'gateway 172.17.0.1'
+    du_drop '-d 10\.0\.0\.0/8'              'RFC1918 10/8'
+    du_drop '-d 172\.16\.0\.0/12'           'RFC1918 172.16/12'
+    du_drop "$sb_re -d 192\.168\.0\.0/16"   'RFC1918 192.168/16'
+    du_drop '-d 100\.64\.0\.0/10'           'CGNAT 100.64/10'
+    # sandbox -> node is delivered locally via INPUT, not DOCKER-USER.
     dinp="$(iptables -S INPUT)"
     drop_at=$(line_of "$dinp" "$sb_re -j DROP")
     # Replies on node-opened connections need this ACCEPT above the DROP.

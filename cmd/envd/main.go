@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -38,10 +39,19 @@ const (
 var transportLog onceLogger
 
 func main() {
+	unignoreInterrupt()
+
 	// `envd watch <dir>` is a one-shot tool the node runs through exec, not a
 	// second server; it must return before anything below binds or starts.
 	if len(os.Args) > 1 && os.Args[1] == "watch" {
 		os.Exit(runWatch(os.Args[2:], os.Stdout))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "reap" {
+		self, err := os.Executable()
+		if err != nil {
+			self = os.Args[0]
+		}
+		reapForever([]string{self})
 	}
 
 	// A fast-boot microVM has no entropy; without this Node and Python hang on getrandom().
@@ -57,7 +67,7 @@ func main() {
 	}
 
 	// A snapshot-restored guest has no boot hash and gets one over the credential channel.
-	hashes := newHashStore(readTokenHash())
+	hashes := persistedHashStore(pushedHashPath)
 
 	// Not fatal: Docker has no vsock and a cold-booted guest already has its
 	// hash from the cmdline. credErr is reported in the transport notice.
@@ -96,6 +106,21 @@ func main() {
 	if err := srv.Serve(listener); err != nil {
 		fmt.Fprintf(os.Stderr, "envd: serve error: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// unignoreInterrupt gives every child envd spawns a default SIGINT, so Ctrl-C
+// reaches a terminal's foreground job. init starts envd as `envd &`, and sh
+// sets SIGINT (and SIGQUIT) to SIG_IGN for a background job; an ignored signal
+// survives exec, so every shell and command inherited it. The Go runtime keeps
+// an inherited SIG_IGN for SIGINT (it already handles SIGQUIT itself), and a
+// handled signal is reset to SIG_DFL by exec, so catching it here is enough.
+// The buffered channel is never read: a stray SIGINT to envd itself is dropped.
+// Started in the foreground (local dev), SIGINT was never ignored: the Go
+// runtime's handler already resets for children, and Ctrl-C still stops envd.
+func unignoreInterrupt() {
+	if signal.Ignored(syscall.SIGINT) {
+		signal.Notify(make(chan os.Signal, 1), syscall.SIGINT)
 	}
 }
 

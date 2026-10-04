@@ -53,6 +53,17 @@ func SnapshotTemplateID(orgID, name string) string {
 	return "snap-" + hex.EncodeToString(sum[:4]) + "-" + name
 }
 
+// MoveSnapshotName starts the name of every snapshot a move of sandbox id
+// captures it into; each move adds its own suffix.
+func MoveSnapshotName(id string) string { return "move-" + id }
+
+// ReservedSnapshotName reports a name the platform's own captures use: a
+// move's, and a rehome's on the node. The sandbox they moved runs on it, so no
+// tenant may save over one or create from one.
+func ReservedSnapshotName(name string) bool {
+	return strings.HasPrefix(name, MoveSnapshotName("")) || strings.HasPrefix(name, "rehome-")
+}
+
 // SnapshotBuildID is the build id a snapshot version publishes under. The
 // version is zero-padded into it on purpose.
 //
@@ -179,6 +190,16 @@ func (s *Store) UpdateSnapshotCapture(ctx context.Context, id, template string, 
 		return fmt.Errorf("store: record what snapshot %q was captured from: %w", id, err)
 	}
 	return nil
+}
+
+// FirstSnapshotTemplate is the template the earliest captured version of a
+// name was taken from. For a move snapshot that is what the sandbox ran before
+// it first moved: every later move captures the move template itself.
+func (s *Store) FirstSnapshotTemplate(ctx context.Context, orgID, name string) (string, error) {
+	var template string
+	err := s.queryRow(ctx, `SELECT template FROM snapshots
+		WHERE org_id = ? AND name = ? AND template <> '' ORDER BY version LIMIT 1`, orgID, name).Scan(&template)
+	return template, err
 }
 
 // snapshotSelect is the join every read shares: the registry row plus the

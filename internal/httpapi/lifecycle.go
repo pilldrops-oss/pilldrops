@@ -101,16 +101,23 @@ func (s *Server) handleTimeout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Seconds int `json:"seconds"`
+		Seconds *int `json:"seconds"`
 	}
 	if !decodeBody(r, &body) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	// A TTL of zero expires the sandbox on the spot, which is what a client
+	// sending the wrong field name used to get.
+	if body.Seconds == nil || *body.Seconds == 0 {
+		writeErr(w, http.StatusBadRequest, `"seconds" is required: a positive TTL from now, or -1 for no expiry`)
+		return
+	}
+	seconds := *body.Seconds
 	org := orgID(r)
 	plan := s.orgPlan(r.Context(), org)
-	ttl := time.Duration(body.Seconds) * time.Second
-	if body.Seconds < 0 {
+	ttl := time.Duration(seconds) * time.Second
+	if seconds < 0 {
 		if !plan.Persistent {
 			writeErr(w, http.StatusForbidden, fmt.Sprintf(
 				"plan '%s' includes no persistent workstations — upgrade to keep a sandbox with no expiry",

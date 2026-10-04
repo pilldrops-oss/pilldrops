@@ -16,6 +16,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/auth/previewtoken"
 	"github.com/pilldrops-oss/pilldrops/internal/httpx"
 	"github.com/pilldrops-oss/pilldrops/internal/proxy"
+	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
@@ -68,7 +69,10 @@ func (s *Server) previewToken(ctx context.Context, id string, port int) string {
 //
 // Sharing (private -> org) revokes too. It is the same event from the other
 // side, the share wipe already makes it a state change rather than a widening,
-// and one rule beats two.
+// and one rule beats two. Turning a public preview off is the same event
+// again, so the public flag is part of the generation too, and every flip of
+// either bumps a counter in it, so flipping back never revives an old token
+// (sandbox.PreviewGeneration).
 //
 // ok=false means the store could not be read. The caller refuses: this is the
 // same fail-closed rule isPublicPreview already applies, and a store outage
@@ -76,21 +80,27 @@ func (s *Server) previewToken(ctx context.Context, id string, port int) string {
 func (s *Server) previewGeneration(ctx context.Context, id string) (string, bool) {
 	st := s.st.Load()
 	if st == nil {
-		// Storeless: nothing records a visibility, so mint and verify agree on
-		// the default and the gate is exactly the token check it always was.
-		return sandbox.VisibilityOrg, true
+		// Storeless: nothing records a visibility; public and its flips are
+		// this replica's in-memory fallback.
+		return sandbox.PreviewGeneration("", s.isPublicPreview(ctx, id), s.memFlips(id)), true
 	}
 	row, found, err := s.previewRow(ctx, id)
-	if err != nil {
-		s.log().ErrorContext(ctx, "preview generation lookup failed, refusing the preview",
-			"component", "orchestrator", "sandbox", id, "err", err)
-		return "", false
+	if err == nil {
+		var v any
+		v, err = s.pcache.get("gen:"+id, previewFresh, s.now(), func() (any, error) { return st.PreviewGeneration(ctx, id) })
+		if err == nil {
+			flips, _ := v.(int64)
+			vis := ""
+			if found {
+				// "" is a row from before visibility existed: the default.
+				vis = row.Visibility
+			}
+			return sandbox.PreviewGeneration(vis, s.isPublicPreview(ctx, id), flips), true
+		}
 	}
-	if !found || row.Visibility == "" {
-		// No row, or a row from before visibility existed: the default.
-		return sandbox.VisibilityOrg, true
-	}
-	return row.Visibility, true
+	s.log().ErrorContext(ctx, "preview generation lookup failed, refusing the preview",
+		"component", "orchestrator", "sandbox", id, "err", err)
+	return "", false
 }
 
 // previewHopTTL bounds the orchestrator-to-node preview credential so a ?ptok= captured from a log expires.
@@ -134,6 +144,15 @@ const previewPrivatePage = `<!doctype html><meta charset="utf-8"><title>Private 
 <p>Open it with the <code>viewer_url</code> from the create response (or the dashboard). The link carries an access token; the bare URL isn't reachable. Create with <code>public: true</code> to make a preview shareable without a token.</p>
 <p style="margin-top:10px">If this link used to work: changing a sandbox's visibility retracts every preview link issued before the change. Mint a new one with <code>GET /v1/sandboxes/&lt;id&gt;/preview-token?port=&lt;port&gt;</code>.</p></div>`
 
+// previewPlatformPortPage is the refusal for the terminal and desktop ports,
+// where public: true does not apply, so the generic page's advice would mislead.
+const previewPlatformPortPage = `<!doctype html><meta charset="utf-8"><title>Owner access only</title>
+<style>html,body{margin:0;height:100%;display:grid;place-items:center;background:#0e0e10;color:#e8eaed;font-family:system-ui,Segoe UI,Roboto,sans-serif}
+.c{max-width:440px;text-align:center;padding:32px}h1{font-size:19px;margin:0 0 10px}p{color:#9aa0a6;font-size:14px;line-height:1.5;margin:0}code{color:#8ab4f8}</style>
+<div class="c"><h1>🔒 This port needs the owner's access link</h1>
+<p>The terminal and desktop ports give shell access to the sandbox, so they always need an access token from the sandbox's owner, even when the sandbox is public. <code>public: true</code> shares only the app's own ports.</p>
+<p style="margin-top:10px">The owner can mint a link with <code>GET /v1/sandboxes/&lt;id&gt;/preview-token?port=&lt;port&gt;</code> or open it from the dashboard.</p></div>`
+
 // authorizePreview is the single preview gate: public sandboxes pass, private
 // ones need ?token= (then persisted as a cookie so sub-resources load) or the
 // cookie. Writes the 403 page and returns false when refused.
@@ -145,7 +164,10 @@ func (s *Server) authorizePreview(w http.ResponseWriter, r *http.Request, id str
 		http.Error(w, "sandbox not found", http.StatusNotFound)
 		return false
 	}
-	if s.isPublicPreview(r.Context(), id) {
+	// Public shares the app, never the platform's own ports: the node hands
+	// the terminal hop envd's shell credential, so a tokenless 7681 on a
+	// public sandbox was an anonymous shell.
+	if !rt.IsPlatformPort(port) && s.isPublicPreview(r.Context(), id) {
 		return true
 	}
 	if s.apiKey == "" {
@@ -184,7 +206,11 @@ func (s *Server) authorizePreview(w http.ResponseWriter, r *http.Request, id str
 	setPreviewGuards(w.Header(), s.previewGuardDomain(r))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)
-	_, _ = w.Write([]byte(previewPrivatePage)) //nolint:errcheck // best-effort: status/headers already committed
+	page := previewPrivatePage
+	if rt.IsPlatformPort(port) {
+		page = previewPlatformPortPage
+	}
+	_, _ = w.Write([]byte(page)) //nolint:errcheck // best-effort: status/headers already committed
 	return false
 }
 

@@ -113,6 +113,7 @@ type KeyInfo struct {
 	Name     string `json:"name"`
 	Masked   string `json:"masked_key"`
 	OrgID    string `json:"org_id"`
+	Role     string `json:"role"`
 	LastUsed int64  `json:"last_used"`
 	Created  int64  `json:"created_at"`
 }
@@ -123,7 +124,7 @@ func (s *Store) ListKeys(ctx context.Context, orgID string) ([]KeyInfo, error) {
 		orgID = "default"
 	}
 	rows, err := s.query(ctx,
-		`SELECT id, name, org_id, COALESCE(last_used,0), created_at
+		`SELECT id, name, org_id, role, COALESCE(last_used,0), created_at
 		 FROM api_keys WHERE org_id = ? AND revoked_at IS NULL ORDER BY created_at DESC`, orgID)
 	if err != nil {
 		return nil, err
@@ -132,7 +133,7 @@ func (s *Store) ListKeys(ctx context.Context, orgID string) ([]KeyInfo, error) {
 	var out []KeyInfo
 	for rows.Next() {
 		var k KeyInfo
-		if err := rows.Scan(&k.ID, &k.Name, &k.OrgID, &k.LastUsed, &k.Created); err != nil {
+		if err := rows.Scan(&k.ID, &k.Name, &k.OrgID, &k.Role, &k.LastUsed, &k.Created); err != nil {
 			return nil, err
 		}
 		k.Masked = "sf_live_" + strings.Repeat("*", 4) + k.ID[len(k.ID)-4:]
@@ -142,15 +143,18 @@ func (s *Store) ListKeys(ctx context.Context, orgID string) ([]KeyInfo, error) {
 }
 
 // RevokeKey marks one of orgID's keys revoked. The org is part of the WHERE
-// clause so a tenant cannot revoke another tenant's key by id.
-func (s *Store) RevokeKey(ctx context.Context, id, orgID string) error {
+// clause so a tenant cannot revoke another tenant's key by id. Without
+// operatorKeys an operator-role key (a node's, the bootstrap one) reads as
+// not found, so a member cannot detach the fleet.
+func (s *Store) RevokeKey(ctx context.Context, id, orgID string, operatorKeys bool) error {
 	if orgID == "" {
 		orgID = "default"
 	}
-	res, err := s.exec(ctx,
-		`UPDATE api_keys SET revoked_at = ? WHERE id = ? AND org_id = ?`,
-		time.Now().Unix(), id, orgID,
-	)
+	q := `UPDATE api_keys SET revoked_at = ? WHERE id = ? AND org_id = ?`
+	if !operatorKeys {
+		q += ` AND role <> 'operator'`
+	}
+	res, err := s.exec(ctx, q, time.Now().Unix(), id, orgID)
 	if err != nil {
 		return err
 	}

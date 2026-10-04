@@ -261,9 +261,18 @@ button { font-family: var(--sans); }
   flex: none;
 }
 
-.bc { display: flex; align-items: center; gap: 9px; color: var(--sub); font-size: 14px; }
-.bc b { color: var(--ink); font-weight: 600; }
-.bc .sep { color: var(--faint); }
+.bc { display: flex; align-items: center; gap: 9px; color: var(--sub); font-size: 14px; min-width: 0; overflow: hidden; }
+.bc b { color: var(--ink); font-weight: 600; flex: none; }
+.bc .sep { color: var(--faint); flex: none; }
+.bc-sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--sub);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .tr { display: flex; align-items: center; gap: 10px; }
 
@@ -364,6 +373,8 @@ button { font-family: var(--sans); }
 .ph h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .ph .rgt { display: flex; gap: 10px; align-items: center; }
 .ph .meta { color: var(--dim); font-size: 12px; font-family: var(--mono); }
+.sb-search { width: 150px; }
+.sb-sort { width: 130px; }
 
 /* ── Filter tabs ─────────────────────────────────────────────────────────── */
 .filter { display: flex; gap: 2px; background: var(--bg2); border-radius: 9px; padding: 3px; }
@@ -784,6 +795,7 @@ body.dark .callout.error { border-color: rgba(220,38,38,0.3); background: rgba(2
   gap: 8px;
   flex-wrap: wrap;
 }
+.detail-access { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--sub); }
 
 /* ── Metrics strip ───────────────────────────────────────────────────────── */
 .metrics-strip {
@@ -1506,6 +1518,9 @@ body.dark .term-stderr {
 .rowh.fn, .row.fn { grid-template-columns: 1.6fr 0.9fr 0.7fr 0.9fr 0.6fr 70px; }
 .fn-url { font-family: var(--mono); font-size: 11.5px; color: var(--sub); }
 
+/* ── Sandbox list with a Node column (operator callers only) ─────────── */
+.rowh.has-node, .row.has-node { grid-template-columns: 1.5fr 0.85fr 0.8fr 0.6fr 0.7fr 0.55fr 66px; }
+
 /* ── Deploy panel + ghost button ─────────────────────────────────────── */
 .deploy-panel { margin-bottom: 20px; }
 .deploy-body { padding: 18px 20px 20px; display: grid; gap: 18px; }
@@ -2025,6 +2040,8 @@ body.dark .term-stderr {
 /* Env editor */
 .lm-env { display: flex; flex-direction: column; gap: 8px; }
 .lm-env-row { display: grid; gap: 4px; }
+.lm-vault { border: 0; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.lm-vault-row { display: flex; align-items: center; gap: 6px; }
 .lm-env-name { font-size: 12px; font-family: var(--mono); color: var(--sub); }
 .lm-req { color: #dc2626; }
 .lm-secret {
@@ -2470,6 +2487,8 @@ body.dark .term-stderr {
 body.dark .dep-card:hover {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.4);
 }
+.dep-card.off,
+.dep-card.off:hover { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; border-color: var(--line); }
 .dep-card-head { display: flex; align-items: center; gap: 10px; }
 .dep-card-ic {
   width: 34px;
@@ -3468,6 +3487,17 @@ body.dark .dp-error { border-color: rgba(220, 38, 38, 0.3); background: rgba(220
   .rowh, .row { grid-template-columns: 1.5fr 0.9fr 0.7fr 40px; gap: 10px; }
   .rowh > :nth-child(4), .row > :nth-child(4),
   .rowh > :nth-child(5), .row > :nth-child(5) { display: none; }
+  /* Sandbox table: name, status and actions only, so a row fits the panel
+     (which clips) instead of hiding its status and actions off the edge. */
+  .sb-table-scroll .rowh, .sb-table-scroll .row { grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; padding: 12px 14px; }
+  .sb-table-scroll .rowh > :not(:first-child):not(:nth-child(3)):not(:last-child),
+  .sb-table-scroll .row > :not(:first-child):not(:nth-child(3)):not(:last-child) { display: none; }
+  .sb-table-scroll .sb { min-width: 0; }
+  .sb-table-scroll .sb-namewrap { overflow-wrap: anywhere; }
+  /* Its toolbar wraps under the title rather than running off the panel. */
+  .sb-ph { flex-wrap: wrap; gap: 10px; }
+  .sb-ph .rgt { flex-wrap: wrap; width: 100%; }
+  .sb-ph .sb-search, .sb-ph .sb-sort { flex: 1 1 120px; min-width: 0; width: auto; }
   /* API keys: keep Name + Key + action; drop Created + Last used. */
   .keys-row { grid-template-columns: 1fr 1fr 40px; gap: 10px; }
   .keys-row > :nth-child(3), .keys-row > :nth-child(4) { display: none; }
@@ -3754,6 +3784,7 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
   margin-top: 10px;
 }
 .vault-add-name { width: 200px; flex: none; }
+.vault-auto { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 
 /* ── Gateway disclosure ──────────────────────────────────────────────────── */
 .vault-gw { margin: 9px 0 0; }

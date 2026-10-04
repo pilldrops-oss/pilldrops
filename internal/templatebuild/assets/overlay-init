@@ -13,7 +13,7 @@ mount -t overlay overlay \
     -o lowerdir=/rom,upperdir=/overlay/upper,workdir=/overlay/work \
     /newroot
 
-mkdir -p /newroot/{proc,sys,dev,tmp}
+mkdir -p /newroot/proc /newroot/sys /newroot/dev /newroot/tmp
 # Mount fresh procfs/sysfs (not a bind of the initramfs's empty /proc) so the
 # guest gets a real /proc — /proc/self/exe (go's GOROOT detection), /proc/meminfo,
 # ps, etc. all depend on this.

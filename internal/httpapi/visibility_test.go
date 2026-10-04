@@ -114,6 +114,7 @@ func TestPrivateSandboxIsInvisibleToOtherMembers(t *testing.T) {
 		// someone who may not see that it exists.
 		{"GET", "/v1/sandboxes/" + id + "/ports", ""},
 		{"GET", "/v1/sandboxes/" + id + "/preview-status", ""},
+		{"GET", "/v1/sandboxes/" + id + "/deploy", ""},
 		{"DELETE", "/v1/sandboxes/" + id, ""},
 	} {
 		if code, _ := do(t, probe.method, srv.URL+probe.path, k2, probe.body); code != http.StatusNotFound {
@@ -124,7 +125,7 @@ func TestPrivateSandboxIsInvisibleToOtherMembers(t *testing.T) {
 	// stuck off, so the creator must still get an answer. Not asserted as 200 —
 	// what the fake runtime reports about ports is not this test's question,
 	// only that the ownership rule let the request through.
-	for _, path := range []string{"/v1/sandboxes/" + id + "/ports", "/v1/sandboxes/" + id + "/preview-status"} {
+	for _, path := range []string{"/v1/sandboxes/" + id + "/ports", "/v1/sandboxes/" + id + "/preview-status", "/v1/sandboxes/" + id + "/deploy"} {
 		if code, _ := do(t, "GET", srv.URL+path, k1, ""); code == http.StatusNotFound {
 			t.Errorf("the creator GET %s = 404: the guard refuses its owner too", path)
 		}
@@ -281,5 +282,45 @@ func TestAnUnsignedKeyIdIsIgnored(t *testing.T) {
 	_ = json.NewDecoder(resp.Body).Decode(&direct)
 	if got := str(direct, "created_by"); got == "zzz" || got == "" {
 		t.Fatalf("direct create with a bare X-Key-Id: created_by = %q, want the caller's own key id", got)
+	}
+}
+
+// Preview tokens are bound to a flip count, so the node counts each real flip:
+// org -> private -> org must not land back on the generation it started at.
+func TestVisibilityFlipsAreCounted(t *testing.T) {
+	srv, st, key := newTestServerWithStore(t)
+	_, out := do(t, "POST", srv.URL+"/v1/sandboxes", key, `{"template":"base"}`)
+	id := str(out, "id")
+	for _, v := range []string{"private", "org", "org"} {
+		if code, got := do(t, "POST", srv.URL+"/v1/sandboxes/"+id+"/visibility", key, `{"visibility":"`+v+`"}`); code != http.StatusOK {
+			t.Fatalf("flip to %s = %d (%v)", v, code, got)
+		}
+	}
+	// The last one re-asserts org: not a flip.
+	if n, err := st.PreviewGeneration(t.Context(), id); err != nil || n != 2 {
+		t.Errorf("preview generation = %d, %v; want 2 flips counted", n, err)
+	}
+}
+
+// The count goes before the flip: when it cannot be recorded the visibility
+// stays put, so no flip ever lands uncounted.
+func TestAFailedRetractionLeavesVisibilityUnchanged(t *testing.T) {
+	srv, st, key := newTestServerWithStore(t)
+	_, out := do(t, "POST", srv.URL+"/v1/sandboxes", key, `{"template":"base"}`)
+	id := str(out, "id")
+
+	restore := store.FailPreviewBumpsForTest(t, st)
+	if code, got := do(t, "POST", srv.URL+"/v1/sandboxes/"+id+"/visibility", key, `{"visibility":"private"}`); code != http.StatusServiceUnavailable {
+		t.Fatalf("flip with a failing count = %d (%v), want 503", code, got)
+	}
+	if _, got := do(t, "GET", srv.URL+"/v1/sandboxes/"+id, key, ""); str(got, "visibility") != "org" {
+		t.Errorf("visibility = %q after a refused flip, want org", str(got, "visibility"))
+	}
+	restore()
+	if code, _ := do(t, "POST", srv.URL+"/v1/sandboxes/"+id+"/visibility", key, `{"visibility":"private"}`); code != http.StatusOK {
+		t.Fatalf("flip after recovery = %d", code)
+	}
+	if n, _ := st.PreviewGeneration(t.Context(), id); n != 1 {
+		t.Errorf("generation = %d, want 1", n)
 	}
 }

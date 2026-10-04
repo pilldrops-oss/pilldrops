@@ -39,6 +39,11 @@ func (f *workdirFS) hide(err error) error {
 		rel = filepath.Base(pe.Path)
 	}
 	pe.Path = "/" + filepath.ToSlash(rel)
+	// The errno already answers errors.Is for not-exist, exist and permission;
+	// this adds the kinds it does not, such as ENOTDIR, the way every runtime says them.
+	if kind := rt.FSKind(pe.Err.Error()); kind != nil {
+		return fmt.Errorf("%w: %w", kind, pe)
+	}
 	return pe
 }
 
@@ -114,7 +119,7 @@ func (f *workdirFS) Remove(ctx context.Context, p string) error {
 	}
 	// "", "." and "/" all resolve to root, and RemoveAll would wipe the sandbox.
 	if full == filepath.Clean(f.root) {
-		return errors.New("refusing to remove sandbox root")
+		return fmt.Errorf("%w: refusing to remove sandbox root", os.ErrInvalid)
 	}
 	return f.hide(os.RemoveAll(full))
 }

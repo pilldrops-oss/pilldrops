@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -17,21 +18,45 @@ func TestInitScriptStartsEnvd(t *testing.T) {
 	}
 	init := string(b)
 	for _, want := range []string{
-		"/usr/local/bin/envd &",
 		"/etc/sandbox-env",
 		"/etc/resolv.conf",
 		"/etc/hosts",
-		"exec sleep infinity",
+		"exec /usr/local/bin/envd reap",
 	} {
 		if !strings.Contains(init, want) {
 			t.Errorf("/sbin/init does not contain %q", want)
 		}
+	}
+	// A hash baked into the image would outrank the cold boot's credential.
+	if rm := strings.Index(init, "rm -f /run/envd.token-hash"); rm < 0 || rm > strings.Index(init, "exec /usr/local/bin/envd reap") {
+		t.Error("/sbin/init does not remove a stale /run/envd.token-hash before envd starts")
+	}
+	// The reaper starts the server; a second one from init could not bind.
+	if strings.Contains(init, "/usr/local/bin/envd &") {
+		t.Errorf("/sbin/init starts the envd server itself as well as the reaper:\n%s", init)
 	}
 	// A leftover placeholder would be written into the guest's PID 1 verbatim,
 	// and the in-tree-only start.sh line assumes a baked script this build has not.
 	if strings.Contains(init, "agentd") || strings.Contains(init, "__") ||
 		strings.Contains(init, "/usr/local/bin/start.sh") {
 		t.Errorf("/sbin/init kept a line only the in-tree build wants:\n%s", init)
+	}
+}
+
+// The boot scripts run under a POSIX sh, which has no brace expansion:
+// `mkdir -p /newroot/{proc,sys}` made one directory named "{proc,sys}".
+func TestBootScriptsUseNoBraceExpansion(t *testing.T) {
+	brace := regexp.MustCompile(`(^|[^$])\{[^}]*,[^}]*\}`)
+	for _, name := range []string{"assets/overlay-init", "assets/init"} {
+		b, err := assets.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			if !strings.HasPrefix(strings.TrimSpace(line), "#") && brace.MatchString(line) {
+				t.Errorf("%s uses brace expansion: %q", name, line)
+			}
+		}
 	}
 }
 

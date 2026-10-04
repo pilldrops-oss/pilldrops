@@ -12,6 +12,7 @@ import (
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
 	"github.com/pilldrops-oss/pilldrops/internal/egress"
+	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 	"github.com/pilldrops-oss/pilldrops/internal/templates"
@@ -98,6 +99,13 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	{
 		var peek sandbox.Spec
 		_ = json.Unmarshal(body, &peek) //nolint:errcheck // best-effort peek; a malformed body fails for real when the node parses it
+		// snap-* ids are snapshot captures, booted only by naming the snapshot
+		// (or by this tier's own move); named directly, a tenant could boot
+		// another sandbox's capture.
+		if templates.Internal(peek.Template) && !moving {
+			writeErr(w, http.StatusBadRequest, "template "+peek.Template+" is a snapshot capture; create from a snapshot by its name instead")
+			return
+		}
 		if peek.Snapshot != "" {
 			resolved, ok := s.resolveSnapshotCreate(w, r, body, peek)
 			if !ok {
@@ -180,6 +188,9 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// Carry a tri-state through the heartbeat if that case starts mattering.
 	place := cluster.Request{VCPU: req.VCPU, MemMB: memMB, Zone: req.Zone, Runtime: runtime, Template: canonTemplate,
 		Avoid: []string{move.from}}
+	if fromSnapshot == nil {
+		place.NoBuild = s.noReadyBuild(r.Context(), canonTemplate)
+	}
 	if fromSnapshot != nil && s.reg.AnyWithCapability(cluster.CapNamedSnapshot, s.now(), cluster.NodeTTL) {
 		place.NamedSnapshot = true
 	}
@@ -210,18 +221,6 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		node = next
 		if node == nil {
-			// "Nothing can boot this template" is a 400; "capacity is tight" is a retryable 503.
-			if canonTemplate != "" {
-				if supported, bootable := s.reg.TemplateSupport(canonTemplate, s.now(), cluster.NodeTTL); !supported {
-					msg := "template " + req.Template + " is not available on any online node"
-					if len(bootable) > 0 {
-						msg += " — bootable now: " + strings.Join(bootable, ", ")
-					}
-					s.metrics.recordSchedule(schedNoTemplate)
-					writeErr(w, 400, msg)
-					return
-				}
-			}
 			if req.Image != "" && !s.reg.AnyByRuntime("docker", s.now(), cluster.NodeTTL) {
 				// On an fc-only fleet the docker pin makes this a capability miss, not capacity.
 				s.metrics.recordSchedule(schedNoRuntime)
@@ -236,6 +235,18 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, 400, "template "+req.Template+" requires the "+runtime+
 					" runtime — no "+runtime+" node is online")
 				return
+			}
+			// "Nothing can boot this template" is a 400; "capacity is tight" is a retryable 503.
+			if canonTemplate != "" {
+				if supported, bootable := s.reg.TemplateSupport(place, s.now(), cluster.NodeTTL); !supported {
+					msg := "template " + req.Template + " is not available on any online node"
+					if len(bootable) > 0 {
+						msg += " — bootable now: " + strings.Join(bootable, ", ")
+					}
+					s.metrics.recordSchedule(schedNoTemplate)
+					writeErr(w, 400, msg)
+					return
+				}
 			}
 			// A snapshot no online CPU can run is a capability miss, not capacity:
 			// retrying never helps and "no node has capacity" would send an operator
@@ -256,6 +267,20 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 				s.metrics.recordSchedule(schedTooBig)
 				writeErr(w, 400, fmt.Sprintf("this sandbox asks for %d MiB of memory and the largest online node has %d MiB",
 					memMB, biggest))
+				return
+			}
+			// A domain allowlist pinned to a runtime none of whose nodes runs the
+			// name layer (docker never does) is a capability miss, not capacity.
+			// Unpinned, the refusal at the top already established some node can
+			// enforce it, so a miss here is those nodes being full: a 503.
+			if place.EgressDomains && runtime != "" && !s.anyEgressDomainsOn(runtime) {
+				s.metrics.recordSchedule(schedNoRuntime)
+				writeJSON(w, http.StatusNotImplemented, map[string]string{
+					"error": "the " + runtime + " runtime does not support egress allowlists that name a domain: " +
+						"only firecracker nodes run the name layer that enforces them, so create the " +
+						`sandbox with "runtime":"firecracker"`,
+					"code": "egress_not_enforced",
+				})
 				return
 			}
 			// Only this branch means "add nodes".
@@ -306,6 +331,15 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			if st := s.st.Load(); st != nil {
 				_ = st.SetSandboxAttribution(r.Context(), created.ID, store.ClassifySource(req.Client), req.Client) //nolint:errcheck // best-effort: a failure here just means attribution shows up later, not never
 			}
+			// Persisted so every replica agrees; the in-memory map is the no-store
+			// fallback. Before the links are minted: the flag is part of the
+			// generation their tokens are bound to.
+			if req.Public {
+				if err := s.setPublicPreview(r.Context(), created.ID, true); err != nil {
+					s.log().ErrorContext(r.Context(), "could not persist public preview; the caller is about to be handed a link that will not work",
+						"component", "orchestrator", "sandbox", created.ID, "err", err)
+				}
+			}
 			// Rewrite the preview URL to come back through the orchestrator.
 			prev := created.AppURL
 			if prev == "" {
@@ -313,23 +347,49 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			}
 			to, viewer := s.previewLinks(r, prev)
 			rb = s.rewriteURL(r, rb, prev, to, viewer, node.ID)
-			// Persisted so every replica agrees; the in-memory map is the no-store fallback.
 			if req.Public {
-				if st := s.st.Load(); st != nil {
-					if err := st.SetPublicPreview(r.Context(), created.ID, true); err != nil {
-						s.log().ErrorContext(r.Context(), "could not persist public preview; the caller is about to be handed a link that will not work",
-							"component", "orchestrator", "sandbox", created.ID, "err", err)
-					}
-				} else {
-					s.publicSB.Store(created.ID, true)
+				fields := map[string]any{"public": true, "public_preview": true}
+				if port, ok := platformPortIn(req); ok {
+					fields["warning"] = fmt.Sprintf("public: true does not share this sandbox's preview: port %d is a "+
+						"terminal or desktop port, which gives shell access, so it always needs an access token "+
+						"from the owner. Mint one with GET /v1/sandboxes/%s/preview-token?port=%d", port, created.ID, port)
 				}
-				rb = injectJSONFields(rb, map[string]any{"public": true})
+				rb = injectJSONFields(rb, fields)
 			}
+			rb = s.withPreviewGeneration(r.Context(), rb, created.ID)
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(rb) //nolint:errcheck // best-effort: status/headers are already committed, nothing left to do on a write failure
+}
+
+// anyEgressDomainsOn reports whether a schedulable node of runtime runs the
+// name layer, as AnyByRuntime does for the runtime alone.
+func (s *Server) anyEgressDomainsOn(runtime string) bool {
+	now := s.now()
+	for _, n := range s.reg.Nodes() {
+		if n.Schedulable(now, cluster.NodeTTL) && n.Runtime == runtime && n.EgressDomains {
+			return true
+		}
+	}
+	return false
+}
+
+// platformPortIn returns the first terminal or desktop port the create would
+// preview, its app port or a requested ports entry: public: true never
+// shares those, so the caller is warned rather than handed a link that 403s.
+func platformPortIn(req sandbox.Spec) (int, bool) {
+	var tmpl sandbox.TemplateDefaults
+	if t, ok := templates.Resolve(req.Template); ok {
+		tmpl.Port = t.Port
+	}
+	for _, p := range append([]int{sandbox.AppPort(req, tmpl)}, req.Ports...) {
+		if rt.IsPlatformPort(p) {
+			return p, true
+		}
+	}
+	return 0, false
 }
 
 // maxCreateTries bounds how many nodes one create is offered to when each
@@ -448,7 +508,7 @@ func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 					ExitState: store.StateLost, CreatedAt: rec.CreatedAt, DestroyedAt: now,
 					DurationSecs: now - rec.CreatedAt, VCPU: rec.VCPU, MemMiB: rec.MemMiB,
 				})
-				if err := st.DeleteSandbox(r.Context(), id); err != nil {
+				if err := st.ForgetSandbox(r.Context(), id); err != nil {
 					writeErr(w, http.StatusServiceUnavailable, "could not forget the lost sandbox: "+err.Error())
 					return
 				}
@@ -526,9 +586,11 @@ func (s *Server) handleSandboxGet(w http.ResponseWriter, r *http.Request) {
 			prev = doc.URL
 		}
 		body = s.pointLinksHere(r, body, prev, node.ID)
+		extra := map[string]any{"public_preview": s.isPublicPreview(r.Context(), id)}
 		if fw := s.forwardsFor(r, id); fw != nil {
-			body = injectJSONFields(body, map[string]any{"forwards": fw})
+			extra["forwards"] = fw
 		}
+		body = s.withPreviewGeneration(r.Context(), injectJSONFields(body, extra), id)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body) //nolint:errcheck // best-effort: headers are committed
 		return

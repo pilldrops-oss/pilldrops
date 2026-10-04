@@ -8,7 +8,7 @@ import (
 )
 
 func TestMetricsExposeOperationalSeries(t *testing.T) {
-	srv, key := newTestServer(t)
+	srv, key := newOperatorTestServer(t)
 	defer srv.Close()
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/metrics", nil)

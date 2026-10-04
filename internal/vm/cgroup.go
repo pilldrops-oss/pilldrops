@@ -159,3 +159,18 @@ func readCgroupSet(path string) (map[string]bool, error) {
 	}
 	return set, nil
 }
+
+// vmmOOMKilled reports whether the kernel OOM-killed anything in the VMM's
+// cgroup leaf, which holds only the VMM: a guest-side OOM kill stays in the guest.
+func vmmOOMKilled(jailerID string) bool {
+	b, err := os.ReadFile(filepath.Join(vmmCgroupPath(jailerID), "memory.events"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if n, ok := strings.CutPrefix(line, "oom_kill "); ok {
+			return strings.TrimSpace(n) != "0"
+		}
+	}
+	return false
+}

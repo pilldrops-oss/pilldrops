@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -16,6 +17,10 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
+	}
+	// A member never sees the fleet's operator and node keys in its org.
+	if !operatorCaller(r) {
+		keys = slices.DeleteFunc(keys, func(k store.KeyInfo) bool { return k.Role == "operator" })
 	}
 	writeJSON(w, http.StatusOK, keys)
 }
@@ -45,7 +50,7 @@ func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	// Org-scoped so one tenant cannot revoke another's key. Another org's key
 	// reads as 404, not 403, so the id's existence is not leaked.
-	if err := s.st.RevokeKey(r.Context(), id, orgID(r)); err != nil {
+	if err := s.st.RevokeKey(r.Context(), id, orgID(r), operatorPrincipal(r)); err != nil {
 		if errors.Is(err, store.ErrKeyNotFound) {
 			writeErr(w, http.StatusNotFound, "key not found")
 			return
@@ -108,7 +113,7 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	cat := templates.Catalog()
+	cat := templates.Listed()
 	out := make([]templates.Template, 0, len(cat))
 	for _, t := range cat {
 		if f, ok := flags[t.ID]; ok && f.Published != nil && !*f.Published {

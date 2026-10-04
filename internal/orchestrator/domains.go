@@ -11,6 +11,7 @@ import (
 
 	"github.com/pilldrops-oss/pilldrops/internal/cron"
 	"github.com/pilldrops-oss/pilldrops/internal/httpx"
+	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
@@ -187,6 +188,17 @@ func (s *Server) prepareSandboxDomain(w http.ResponseWriter, r *http.Request, d 
 	}
 	if d.Port < 1 || d.Port > 65535 {
 		writeErr(w, http.StatusBadRequest, `"port" must be 1-65535`)
+		return false
+	}
+	// The preview gate never opens these ports without the owner's token, so a
+	// host on one would refuse every visitor.
+	if rt.IsPlatformPort(d.Port) {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "port " + strconv.Itoa(d.Port) + " is the sandbox's terminal or desktop, which gives shell access " +
+				"and always needs an access token from the owner, so a custom host on it would refuse every visitor. " +
+				"Attach the host to the port your app serves.",
+			"code": "platform_port",
+		})
 		return false
 	}
 	// A private sandbox behind a customer host would answer 403 without a

@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,3 +94,38 @@ func TestExternalizeRefusesACaptureWithNoTag(t *testing.T) {
 }
 
 var _ rt.PortableCapture = (*Runtime)(nil)
+
+// A paused docker sandbox is its committed pause image: the backup of one tags
+// that image as a checkpoint rather than starting the sandbox.
+func TestLiveCheckpointPausedTagsThePauseImage(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Skipf("docker runtime unavailable: %v", err)
+	}
+	ctx := t.Context()
+	id := liveSandboxID(t, "sb-live-pausedckpt")
+	inst, err := r.Boot(ctx, rt.BootSpec{SandboxID: id, Template: rt.Template{Name: "base", Image: "alpine:3"}, VCPU: 1, MemMiB: 256})
+	if err != nil {
+		t.Skipf("boot: %v", err)
+	}
+	t.Cleanup(func() { _ = r.DeleteSnapshot(context.Background(), id, rt.SnapshotRef{}) })
+	snap := rt.SnapshotRef{Path: filepath.Join(t.TempDir(), "snap")}
+	if err := inst.Snapshot(ctx, snap); err != nil {
+		t.Fatalf("pause snapshot: %v", err)
+	}
+	if err := inst.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	if _, err := r.CheckpointPaused(ctx, id, snap, rt.SnapshotRef{Path: dir, Name: "bkp-1"}); err != nil {
+		t.Fatalf("CheckpointPaused: %v", err)
+	}
+	tag, err := os.ReadFile(filepath.Join(dir, ckptTagFile))
+	if err != nil || strings.TrimSpace(string(tag)) != ckptImageTag(id, "bkp-1") {
+		t.Fatalf("tag file = %q, %v", tag, err)
+	}
+	if err := exec.Command("docker", "image", "inspect", string(tag)).Run(); err != nil {
+		t.Fatalf("the checkpoint image %s does not exist: %v", tag, err)
+	}
+}

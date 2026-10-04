@@ -27,6 +27,9 @@ mkdir -p /sys/fs/cgroup
 mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null
 # Optional persistent template app (backgrounded so init stays alive). # __INTREE_ONLY__
 [ -x /usr/local/bin/start.sh ] && /usr/local/bin/start.sh >/var/log/start.log 2>&1 & # __INTREE_ONLY__
-# Start envd in background, then keep init (PID 1) alive.
-/usr/local/bin/envd &
-exec sleep infinity
+# A pushed token hash outranks the boot one; a stale file baked into the image
+# would make envd refuse this cold boot's credential. A restore skips init.
+rm -f /run/envd.token-hash
+# Become the reaper that keeps PID 1 alive: it starts the envd server and
+# starts it again if it exits, and orphans reparent here and are waited on.
+exec /usr/local/bin/envd reap

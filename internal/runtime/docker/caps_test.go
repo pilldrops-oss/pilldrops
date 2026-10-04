@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
@@ -92,14 +91,13 @@ func TestLiveSandboxCannotHoldDangerousCapabilities(t *testing.T) {
 	ctx := t.Context()
 
 	inst, err := r.Boot(ctx, rt.BootSpec{
-		SandboxID: "sb-caps-" + time.Now().Format("150405"),
+		SandboxID: liveSandboxID(t, "sb-caps"),
 		Template:  rt.Template{Name: "base", Image: "alpine:3"},
 		VCPU:      1, MemMiB: 256,
 	})
 	if err != nil {
 		t.Skipf("boot: %v", err)
 	}
-	t.Cleanup(func() { _ = inst.Stop(ctx) })
 
 	run := func(cmd string) string {
 		res, err := inst.Exec(ctx, rt.ExecSpec{Cmd: cmd})

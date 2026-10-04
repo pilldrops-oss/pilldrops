@@ -129,3 +129,20 @@ func TestTimeoutWithinPlanIsHonoured(t *testing.T) {
 		t.Errorf("expiry is %v out, want ~10m — an in-plan request must be honoured as asked", d)
 	}
 }
+
+// The JS SDK sent {"timeout":N}; with no "seconds" the TTL became 0 and the
+// sandbox expired on the spot. A missing or zero value must change nothing.
+func TestTimeoutWithoutSecondsIsRefusedAndKeepsTheTTL(t *testing.T) {
+	srv, _, key := newBilledTestServer(t)
+	id := createBox(t, srv.URL, key, `{"template":"base"}`)
+	before := expiresAt(t, srv.URL, key, id)
+
+	for _, body := range []string{`{"timeout":600}`, `{}`, `{"seconds":0}`} {
+		if code, out := do(t, "POST", srv.URL+"/v1/sandboxes/"+id+"/timeout", key, body); code != http.StatusBadRequest {
+			t.Errorf("%s = %d (%v), want 400", body, code, out)
+		}
+	}
+	if after := expiresAt(t, srv.URL, key, id); after != before {
+		t.Fatalf("a refused /timeout moved the expiry from %v to %v", before, after)
+	}
+}

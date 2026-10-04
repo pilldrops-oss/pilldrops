@@ -32,6 +32,15 @@ export function quickLaunchable(t: Template): boolean {
   return !pi || !pi.required
 }
 
+// bootableOn uses the catalog's own `available` flag (GET /v1/templates),
+// which the server computes from the same schedulable-node rule for every
+// caller, tenants included. A template missing the field — an older or
+// non-fleet server — is treated as available, same as no catalog at all.
+export function bootableOn(templates: Template[]): (id: string) => boolean {
+  const byId = new Map(templates.map(t => [t.id, t]))
+  return id => byId.get(id)?.available !== false
+}
+
 export function TemplateList({
   templates,
   selectedId,
@@ -108,12 +117,14 @@ export function TemplateGallery({
   onQuickLaunch,
   favorites,
   onToggleFavorite,
+  bootable,
 }: {
   templates: Template[]
   onPick: (t: Template) => void
   onQuickLaunch?: (t: Template, primaryValue?: string) => void
   favorites?: string[]
   onToggleFavorite?: (id: string) => void
+  bootable?: (id: string) => boolean
 }) {
   const [query, setQuery] = useState('')
   const [cat, setCat] = useState<'All' | Category>('All')
@@ -202,6 +213,7 @@ export function TemplateGallery({
                   onQuickLaunch={onQuickLaunch}
                   fav={favorites?.includes(t.id)}
                   onToggleFavorite={onToggleFavorite}
+                  off={bootable ? !bootable(t.id) : false}
                 />
               ))}
             </div>
@@ -218,25 +230,29 @@ function TemplateCard({
   onQuickLaunch,
   fav,
   onToggleFavorite,
+  off,
 }: {
   tpl: Template
   onPick: (t: Template) => void
   onQuickLaunch?: (t: Template, primaryValue?: string) => void
   fav?: boolean
   onToggleFavorite?: (id: string) => void
+  off?: boolean
 }) {
   const langBadge = tpl.language || tpl.tags?.[0]
   const port = tpl.default_port ?? tpl.port
   const cpu = tpl.cpu || 1
-  const zeroQuick = !!onQuickLaunch && quickLaunchable(tpl)
+  const zeroQuick = !off && !!onQuickLaunch && quickLaunchable(tpl)
   return (
     <div
-      className="dep-card"
+      className={`dep-card${off ? ' off' : ''}`}
       role="button"
-      tabIndex={0}
-      onClick={() => onPick(tpl)}
+      tabIndex={off ? -1 : 0}
+      aria-disabled={off || undefined}
+      title={off ? 'No node in this fleet can boot this template' : undefined}
+      onClick={() => { if (!off) onPick(tpl) }}
       onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        if (!off && (e.key === 'Enter' || e.key === ' ')) {
           e.preventDefault()
           onPick(tpl)
         }
@@ -288,6 +304,7 @@ function TemplateCard({
         {tpl.has_server && port ? (
           <span className="chip dep-chip-g">Opens a web app</span>
         ) : null}
+        {off && <span className="chip">No node can boot this</span>}
       </div>
       {zeroQuick && (
         <div

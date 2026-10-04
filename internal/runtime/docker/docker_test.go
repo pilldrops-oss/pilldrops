@@ -64,7 +64,7 @@ func TestBoot_PlatformTemplateNeverAllowlistChecked(t *testing.T) {
 	defer cancel()
 	_, err := r.Boot(ctx, rt.BootSpec{
 		Template:  rt.Template{Name: "python-3.11"},
-		SandboxID: "test-sb-platform-template",
+		SandboxID: liveSandboxID(t, "test-sb-platform-template"),
 	})
 	if err == nil {
 		t.Skip("Boot unexpectedly completed within the timeout in this environment")

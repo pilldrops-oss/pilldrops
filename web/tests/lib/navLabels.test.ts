@@ -29,7 +29,7 @@ describe('breadcrumb labels', () => {
 
   it('does not reuse one label for unrelated routes', () => {
     // Deliberate aliases: a detail page belongs to its list, and the index redirects to /sandboxes.
-    const aliases = new Set(['', 'sandbox', 'fn'])
+    const aliases = new Set(['', 'sandbox', 'fn', 't'])
     const seen = new Map<string, string>()
     for (const route of CUSTOMER_ROUTES) {
       if (aliases.has(route)) continue
@@ -43,5 +43,12 @@ describe('breadcrumb labels', () => {
     // The customer index redirects to Sandboxes, so that is the least-wrong fallback.
     expect(labelFor('not-a-route', false)).toBe('Sandboxes')
     expect(labelFor('not-a-route', true)).toBe('Overview')
+  })
+
+  it('labels a template page as the catalog and an admin page as itself in the customer console', () => {
+    expect(labelFor('t', false)).toBe('Catalog')
+    expect(labelFor('fleet', false)).toBe('Fleet')
+    expect(labelFor('cluster-sandboxes', false)).toBe('Cluster Sandboxes')
+    expect(labelFor('sandboxes', false)).toBe('Sandboxes')
   })
 })

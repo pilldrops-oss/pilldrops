@@ -6,7 +6,7 @@ import (
 )
 
 func TestMetricsLatencyHistogram(t *testing.T) {
-	srv, key := newTestServer(t)
+	srv, key := newOperatorTestServer(t)
 	if code, _ := do(t, "GET", srv.URL+"/v1/templates", key, ""); code != 200 {
 		t.Fatalf("seed request = %d, want 200", code)
 	}

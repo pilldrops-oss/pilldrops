@@ -11,6 +11,7 @@ vi.mock('../../src/api', () => ({
   listDomains: vi.fn(),
   addDomain: vi.fn(),
   removeDomain: vi.fn(),
+  getCapabilities: vi.fn(),
 }))
 
 const row = (over: Partial<CustomDomain> = {}): CustomDomain => ({
@@ -40,6 +41,7 @@ beforeEach(() => {
   vi.mocked(api.listDomains).mockReset().mockResolvedValue([])
   vi.mocked(api.addDomain).mockReset().mockResolvedValue(row())
   vi.mocked(api.removeDomain).mockReset().mockResolvedValue(undefined as never)
+  vi.mocked(api.getCapabilities).mockReset().mockResolvedValue({ custom_domains: true })
 })
 
 describe('Domains', () => {
@@ -81,5 +83,29 @@ describe('Domains', () => {
     await user.click(await screen.findByRole('button', { name: 'Confirm' }))
 
     await waitFor(() => expect(api.removeDomain).toHaveBeenCalledWith('app.example.com'))
+  })
+
+  // B25: show the 501 reason up front, and disable the form rather than let
+  // the user fill it in only to have the add fail.
+  it('shows the feature-off reason up front and disables the form', async () => {
+    vi.mocked(api.getCapabilities).mockResolvedValue({ custom_domains: false })
+    renderDomains()
+
+    expect(await screen.findByText(/custom domains are off on this server/i)).toBeInTheDocument()
+    expect(screen.getByLabelText('host')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Add domain' })).toBeDisabled()
+    expect(api.addDomain).not.toHaveBeenCalled()
+  })
+
+  // B25: a bad hostname is rejected on the client, not sent to the server.
+  it('validates the hostname before submitting', async () => {
+    const user = userEvent.setup()
+    renderDomains()
+
+    await user.type(await screen.findByLabelText('host'), 'not a host!')
+    await user.click(screen.getByRole('button', { name: 'Add domain' }))
+
+    expect(await screen.findByText(/at least two labels/i)).toBeInTheDocument()
+    expect(api.addDomain).not.toHaveBeenCalled()
   })
 })

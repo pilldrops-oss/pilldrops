@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +26,12 @@ func TestSinglePortAdmitsDeclaredPorts(t *testing.T) {
 	if _, err := d.PreviewTarget(ctx, sb.ID, 5432, "default"); errors.Is(err, rt.ErrNoAppOnPort) {
 		t.Fatalf("declared port 5432 refused: %v", err)
 	}
-	if _, err := d.PreviewTarget(ctx, sb.ID, 3000, "default"); !errors.Is(err, rt.ErrNoAppOnPort) {
+	_, err := d.PreviewTarget(ctx, sb.ID, 3000, "default")
+	if !errors.Is(err, rt.ErrNoAppOnPort) {
 		t.Fatalf("undeclared port 3000 err = %v, want ErrNoAppOnPort (control)", err)
+	}
+	// API I1.15: the refusal has to say how to get the port, not only that it is missing.
+	if !strings.Contains(err.Error(), `"ports":[3000]`) {
+		t.Errorf("refusal %q does not say to publish the port at create", err)
 	}
 }

@@ -73,6 +73,34 @@ const GLYPHS: Record<string, Glyph> = {
       </>
     ),
   },
+  // A gear/nut, not the brand mark: close enough to read as "systems/Rust" at icon size.
+  rust: {
+    color: 'inherit',
+    vb: '0 0 24 24',
+    body: (
+      <>
+        <polygon
+          points="12,2 20,7 20,17 12,22 4,17 4,7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+        />
+        <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      </>
+    ),
+  },
+  // A play button in a frame, for "run the tests" rather than the brand mark.
+  playwright: {
+    color: 'inherit',
+    vb: '0 0 24 24',
+    body: (
+      <>
+        <rect x="3" y="3" width="18" height="18" rx="4" fill="none" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M10 8l6 4-6 4z" fill="currentColor" />
+      </>
+    ),
+  },
 }
 
 type Desc = {
@@ -92,6 +120,9 @@ function resolveGlyphKey(d: Desc): string | null {
   const hay = `${id} ${name} ${tags.join(' ')}`
   const has = (...w: string[]) => w.some(x => hay.includes(x))
 
+  // Checked before the generic browser match below: playwright's own tags
+  // include "browser", which would otherwise resolve to the chrome glyph.
+  if (has('playwright')) return 'playwright'
   if (has('desktop', 'computer-use', 'gui', 'vnc', 'chromium', 'chrome', 'browser')) return 'chrome'
 
   if (has('jupyter') && !has('python')) return 'jupyter'
@@ -101,6 +132,7 @@ function resolveGlyphKey(d: Desc): string | null {
   if (lang === 'node' || has('node', 'javascript', 'next', 'deno', 'bun', 'express')) return 'node'
 
   if (lang === 'go' || lang === 'golang' || has('golang')) return 'go'
+  if (lang === 'rust' || has('rust', 'cargo')) return 'rust'
 
   if (d.image || has('docker', 'container')) return 'docker'
 

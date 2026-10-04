@@ -79,3 +79,13 @@ func TestLivenessIgnoresTheStore(t *testing.T) {
 		}
 	}
 }
+
+// The Docs page links /openapi.json; on a fleet that page is served from here.
+func TestOrchestratorServesTheOpenAPISpec(t *testing.T) {
+	srv := httptest.NewServer(NewServer("apikey", "nodetoken").Routes())
+	defer srv.Close()
+	code, body := probe(t, srv, "/openapi.json")
+	if code != http.StatusOK || !strings.Contains(body, `"openapi"`) {
+		t.Fatalf("GET /openapi.json = %d, want 200 and the spec (%.80s)", code, body)
+	}
+}

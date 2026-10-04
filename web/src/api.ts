@@ -24,6 +24,7 @@ import type {
   LimitsInfo,
   VaultSecret,
   CustomDomain,
+  Capabilities,
   ClusterStats,
   JoinToken,
   ImageInfo,
@@ -220,6 +221,15 @@ export type VisibilityResp = {
 export const setSandboxVisibility = (id: string, visibility: 'org' | 'private') =>
   request<VisibilityResp>('POST', `/v1/sandboxes/${id}/visibility`, { visibility })
 
+// PreviewAccessResp says what the flip did; `was` is the value before this call.
+export type PreviewAccessResp = { id: string; public_preview: boolean; was: boolean }
+
+// setPreviewAccess flips whether the app preview needs a token. Only the sandbox's
+// creator or an operator may call it; anyone else gets 404, same as the visibility
+// flip. The terminal (7681) and desktop (6080) ports stay token-gated either way.
+export const setPreviewAccess = (id: string, pub: boolean) =>
+  request<PreviewAccessResp>('POST', `/v1/sandboxes/${id}/preview-access`, { public: pub })
+
 export const refreshSandbox = (id: string) =>
   request<StatusResp>('POST', `/v1/sandboxes/${id}/refresh`, {})
 
@@ -241,9 +251,10 @@ export const setSandboxSlug = (id: string, slug: string) =>
   request<SandboxDetail>('PATCH', `/v1/sandboxes/${id}`, { slug })
 
 // A Go nil slice serialises as null; normalise to [] so no consumer trips on it.
+// The orchestrator names the lifecycle `state`, a node names it `status`.
 export const listSandboxes = () =>
-  request<{ sandboxes: SandboxRow[] | null }>('GET', '/v1/sandboxes', undefined).then(r => ({
-    sandboxes: r.sandboxes ?? [],
+  request<{ sandboxes: (SandboxRow & { state?: string })[] | null }>('GET', '/v1/sandboxes', undefined).then(r => ({
+    sandboxes: (r.sandboxes ?? []).map(s => ({ ...s, status: s.status ?? s.state ?? '' })),
   }))
 
 // getDeployStatus reports async_setup progress, distinct from the sandbox's own logs.
@@ -268,15 +279,21 @@ export const getSandboxPorts = (id: string) =>
 export const fsList = (id: string, path: string) =>
   request<FilesystemListResp>('GET', `/v1/sandboxes/${id}/filesystem/list?path=${encodeURIComponent(path)}`, undefined)
 
-export const fsRead = async (id: string, path: string): Promise<string> => {
+export const fsDownload = async (id: string, path: string): Promise<Blob> => {
   const key = await bearerToken()
-  return fetch(`/v1/sandboxes/${id}/files?path=${encodeURIComponent(path)}`, {
+  const r = await fetch(`/v1/sandboxes/${id}/files?path=${encodeURIComponent(path)}`, {
     headers: bearerHeader(key),
-  }).then(r => {
-    if (!r.ok) throw new Error(`GET /v1/sandboxes/${id}/files → ${r.status}`)
-    return r.text()
   })
+  if (!r.ok) {
+    // The server's own message is what says *why* — a 404 naming the missing
+    // path reads very differently from a bare status.
+    const body = await r.text().catch(() => '')
+    throw new Error(`GET /v1/sandboxes/${id}/files → ${r.status}: ${body}`)
+  }
+  return r.blob()
 }
+
+export const fsRead = async (id: string, path: string): Promise<string> => (await fsDownload(id, path)).text()
 
 // content may be a Blob (a File from a drop or a picker), which is sent as-is
 // rather than read into a string first: /files streams the body to the sandbox
@@ -424,10 +441,19 @@ export async function invokeFunction(name: string, opts: InvokeOptions = {}): Pr
 }
 
 export const listSecrets = () => request<VaultSecret[]>('GET', '/v1/secrets', undefined)
-export const putSecret = (name: string, value: string) =>
-  request<VaultSecret>('POST', '/v1/secrets', { name, value })
+// auto_inject is omitted to keep the current setting on a rotation; the server
+// only resets it to false for a brand-new secret, or when this is passed explicitly.
+export const putSecret = (name: string, value: string, autoInject?: boolean) =>
+  request<VaultSecret>('POST', '/v1/secrets', autoInject === undefined ? { name, value } : { name, value, auto_inject: autoInject })
 export const deleteSecret = (name: string) =>
   request<void>('DELETE', `/v1/secrets/${encodeURIComponent(name)}`, undefined)
+
+// setSecretAutoInject flips a secret's auto-inject flag without touching its value.
+export const setSecretAutoInject = (name: string, autoInject: boolean) =>
+  request<{ name: string; auto_inject: boolean }>('PATCH', `/v1/secrets/${encodeURIComponent(name)}`, { auto_inject: autoInject })
+
+export const getCapabilities = () =>
+  request<Capabilities>('GET', '/v1/capabilities', undefined)
 
 export const listDomains = async () =>
   (await request<{ domains: CustomDomain[] }>('GET', '/v1/domains', undefined)).domains

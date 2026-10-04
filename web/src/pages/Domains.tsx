@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { listDomains, addDomain, removeDomain } from '../api'
+import { listDomains, addDomain, removeDomain, getCapabilities } from '../api'
 import type { CustomDomain } from '../types'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmModal'
 import { errText } from '../lib/errText'
+import { invalidHostnameReason } from '../lib/hostname'
 
 // Domains — your own hostname in front of a public sandbox. The row is stored
 // immediately and stays `pending` until the platform resolves the DNS record
@@ -21,6 +22,14 @@ export default function Domains() {
   const [sandbox, setSandbox] = useState('')
   const [port, setPort] = useState('')
   const [busy, setBusy] = useState(false)
+  const [hostErr, setHostErr] = useState('')
+  // null = not known yet; false disables the form up front instead of
+  // letting the user fill it in and hit the 501 the server would return.
+  const [customDomainsOn, setCustomDomainsOn] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    getCapabilities().then(c => setCustomDomainsOn(c.custom_domains)).catch(() => setCustomDomainsOn(null))
+  }, [])
 
   const refresh = useCallback(async () => {
     try {
@@ -44,6 +53,12 @@ export default function Domains() {
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault()
+    const reason = invalidHostnameReason(host)
+    if (reason) {
+      setHostErr(reason)
+      return
+    }
+    setHostErr('')
     setBusy(true)
     try {
       const d = await addDomain(host.trim(), sandbox.trim(), port ? Number(port) : undefined)
@@ -80,16 +95,26 @@ export default function Domains() {
         </div>
       </div>
 
+      {customDomainsOn === false && (
+        <p className="lm-error">
+          Custom domains are off on this server: it has no PORTAL_SANDBOX_DOMAIN set, so there is no
+          CNAME target to point at. Adding one below would only fail.
+        </p>
+      )}
+
       <div className="panel vault-panel">
         <form className="vault-add" onSubmit={add}>
-          <input className="pa-input mono vault-input" value={host} onChange={e => setHost(e.target.value)}
-                 placeholder="app.example.com" aria-label="host" required />
+          <input className="pa-input mono vault-input" value={host} onChange={e => { setHost(e.target.value); setHostErr('') }}
+                 placeholder="app.example.com" aria-label="host" required disabled={customDomainsOn === false} />
           <input className="pa-input mono vault-input" value={sandbox} onChange={e => setSandbox(e.target.value)}
-                 placeholder="sandbox id (blank for a wildcard)" aria-label="sandbox" />
+                 placeholder="sandbox id (blank for a wildcard)" aria-label="sandbox" disabled={customDomainsOn === false} />
           <input className="pa-input mono vault-add-name" value={port} onChange={e => setPort(e.target.value)}
-                 placeholder="port (8000)" aria-label="port" inputMode="numeric" />
-          <button type="submit" className="btn primary" disabled={busy || !host.trim()}>Add domain</button>
+                 placeholder="port (8000)" aria-label="port" inputMode="numeric" disabled={customDomainsOn === false} />
+          <button type="submit" className="btn primary" disabled={busy || !host.trim() || customDomainsOn === false}>
+            Add domain
+          </button>
         </form>
+        {hostErr && <p className="lm-error">{hostErr}</p>}
         {loadErr && <p className="lm-error">{loadErr}</p>}
       </div>
 

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -82,6 +83,8 @@ func (s *Server) handleSnapshotList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// A move's capture is what the moved sandbox runs on: not the tenant's to see or delete.
+	list = slices.DeleteFunc(list, func(v store.SnapshotView) bool { return store.ReservedSnapshotName(v.Name) })
 	writeJSON(w, http.StatusOK, map[string]any{"snapshots": snapshotViews(list)})
 }
 
@@ -95,7 +98,7 @@ func (s *Server) handleSnapshotGet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if len(versions) == 0 {
+	if len(versions) == 0 || store.ReservedSnapshotName(r.PathValue("name")) {
 		writeErr(w, http.StatusNotFound, "no snapshot named "+r.PathValue("name"))
 		return
 	}
@@ -124,6 +127,10 @@ func (s *Server) handleSnapshotDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
+	if store.ReservedSnapshotName(name) {
+		writeErr(w, http.StatusNotFound, "no snapshot named "+name)
+		return
+	}
 	gone, err := st.DeleteSnapshot(r.Context(), fastOrg(r), name, s.now().Unix())
 	if err != nil {
 		// A foreign org sees exactly this: the fence is that the name is not theirs.
@@ -166,7 +173,9 @@ func (s *Server) handleSnapshotSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	node, ok := s.reg.NodeFor(id)
+	// The capture reaches the node as the control plane, which the node does
+	// not scope to an org, so ownership is checked here or nowhere.
+	_, node, ok := s.movable(r, st, id)
 	if !ok {
 		writeErr(w, http.StatusNotFound, "sandbox not found")
 		return
@@ -181,6 +190,10 @@ func (s *Server) handleSnapshotSave(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(body.Name)
 	if err := store.ValidSnapshotName(name); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if store.ReservedSnapshotName(name) {
+		writeErr(w, http.StatusBadRequest, "snapshot names starting move- or rehome- are reserved for the platform's own captures")
 		return
 	}
 

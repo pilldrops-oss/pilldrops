@@ -456,6 +456,12 @@ func (i *fcInstance) ID() string { return i.sandboxID }
 // Alive reports whether this VM's VMM process is still running.
 func (i *fcInstance) Alive() bool { return i.be.Alive(i.vmID) }
 
+// OOMKilled implements rt.OOMKilledReporter: the host cgroup killed the VMM.
+func (i *fcInstance) OOMKilled() bool {
+	o, ok := i.be.(interface{ OOMKilled(string) bool })
+	return ok && o.OOMKilled(i.vmID)
+}
+
 func (i *fcInstance) Exec(ctx context.Context, s rt.ExecSpec) (rt.ExecResult, error) {
 	to := s.Timeout
 	if to == 0 {
@@ -732,12 +738,19 @@ func fsError(p, stderr string, code int) error {
 	if strings.Contains(msg, "No such file or directory") {
 		return fmt.Errorf("%w: %s", rt.ErrPathNotFound, p)
 	}
+	// confineShell's own refusals: the caller's path, every time.
+	if strings.Contains(msg, "path escapes workspace") || strings.Contains(msg, "path resolution failed") {
+		return fmt.Errorf("%w: %s", rt.ErrPathRefused, p)
+	}
 	// Drop the leading "tool: " the helper stamps on anything else it says.
 	if tool, rest, ok := strings.Cut(msg, ": "); ok && !strings.ContainsAny(tool, " \t") {
 		msg = rest
 	}
 	if msg == "" {
 		msg = fmt.Sprintf("the sandbox refused it (exit %d)", code)
+	}
+	if kind := rt.FSKind(msg); kind != nil {
+		return fmt.Errorf("%w: %s: %s", kind, p, msg)
 	}
 	return fmt.Errorf("%s: %s", p, msg)
 }
@@ -755,6 +768,11 @@ func pathRefusal(p string, err error) error {
 	if err != nil && strings.Contains(err.Error(), "invalid path") {
 		return fmt.Errorf("%w: %s", rt.ErrPathRefused, p)
 	}
+	if err != nil {
+		if kind := rt.FSKind(err.Error()); kind != nil {
+			return fmt.Errorf("%w: %s: %w", kind, p, err)
+		}
+	}
 	return err
 }
 
@@ -766,9 +784,25 @@ func (f *fcFS) Write(ctx context.Context, p string, data []byte) error {
 	return pathRefusal(p, f.be.WriteFile(ctx, f.id, p, data))
 }
 
-// List uses NUL-delimited records because a filename may contain tabs or newlines.
+// listCmd lists p with NUL-delimited records because a filename may contain
+// tabs or newlines. find lists nothing for a file, so a file is refused as on
+// docker rather than answered as an empty directory.
+func listCmd(root, p string) string {
+	return confineShell(root, p) +
+		`[ -e "$p" ] || { echo "No such file or directory" >&2; exit 1; }; ` +
+		`[ -d "$p" ] || { echo "Not a directory" >&2; exit 1; }; ` +
+		"find " + shellQuote(p) + ` -maxdepth 1 -mindepth 1 -printf '%y\t%s\t%f\0'`
+}
+
+// removeCmd removes p, but never the sandbox home itself.
+func removeCmd(root, p string) string {
+	return confineShell(root, p) +
+		`[ "$p" = ` + shellQuote(root) + ` ] && { echo "refusing to remove the sandbox home" >&2; exit 1; }; ` +
+		"rm -rf " + shellQuote(p)
+}
+
 func (f *fcFS) List(ctx context.Context, p string) ([]rt.DirEntry, error) {
-	out, err := f.run(ctx, p, confineShell(fcHomeDir, p)+"find "+shellQuote(p)+` -maxdepth 1 -mindepth 1 -printf '%y\t%s\t%f\0'`)
+	out, err := f.run(ctx, p, listCmd(fcHomeDir, p))
 	if err != nil {
 		return nil, err
 	}
@@ -798,7 +832,7 @@ func (f *fcFS) Move(ctx context.Context, src, dst string) error {
 	return err
 }
 func (f *fcFS) Remove(ctx context.Context, p string) error {
-	_, err := f.run(ctx, p, confineShell(fcHomeDir, p)+"rm -rf "+shellQuote(p))
+	_, err := f.run(ctx, p, removeCmd(fcHomeDir, p))
 	return err
 }
 
@@ -829,15 +863,15 @@ func shellQuote(s string) string {
 // Adopt implements rt.Adopter: reattach the VM a crashed daemon left running
 // for sandboxID. The daemon's restore calls it for every sandbox its records
 // say was running.
-func (r *fcRuntime) Adopt(_ context.Context, sandboxID string) (rt.Instance, bool) {
+func (r *fcRuntime) Adopt(_ context.Context, sandboxID string) (rt.Instance, error) {
 	sb, ok := r.be.AdoptOwned(sandboxID)
 	if !ok {
-		return nil, false
+		return nil, rt.ErrNotFound
 	}
 	return &fcInstance{
 		be: r.be, sandboxID: sandboxID, vmID: sb.ID, hostIP: sb.HostIP(),
 		start: nowFunc(), envd: guestClient(sb), token: sb.Token, bootType: sb.BootType,
-	}, true
+	}, nil
 }
 
 // SweepUnknown implements rt.Sweeper: once the daemon has adopted what it

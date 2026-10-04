@@ -65,6 +65,13 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 	// Labelled on the container so Adopt can recover it without a BootSpec;
 	// otherwise a restart silently returns the adopted sandbox to uid 0.
 	base = append(base, "--label", "sandboxd.runuser="+runUser)
+	// A service's primary port is its first declared one, which a re-attach
+	// has no BootSpec to read; the label carries it to Adopt.
+	primary := appPort
+	if service && len(spec.Template.Ports) > 0 {
+		primary = spec.Template.Ports[0]
+	}
+	base = append(base, "--label", primaryPortLabel+"="+strconv.Itoa(primary))
 	// Before the template's own env so an explicit value still wins.
 	for _, e := range runUserEnv(runUser) {
 		base = append(base, "-e", e)
@@ -110,6 +117,9 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 	var envdToken string
 	var cmd []string
 	if !service {
+		// PID 1 is otherwise `sleep infinity`, which never reaps: a killed
+		// background process stayed a zombie and still listed as running.
+		base = append(base, "--init")
 		// Under Firecracker the guest init runs start.sh; here PID 1 must.
 		const startIfPresent = "if [ -x /usr/local/bin/start.sh ]; then /usr/local/bin/start.sh >/tmp/start.log 2>&1 & fi; "
 
@@ -128,9 +138,10 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 			envdToken, envdHash = sbtoken.Mint()
 			base = append(base, "-e", "ENVD_TOKEN_HASH="+envdHash)
 			// envd drops too: its terminal is a tenant surface. The log fd is
-			// opened by root before the drop.
+			// opened by root before the drop. Run under its reaper, as in a
+			// Firecracker guest, so a killed server is started again.
 			cmd = []string{"sh", "-c", handover + startIfPresent +
-				dropPrefix(runUser) + "/usr/local/bin/envd >/tmp/envd.log 2>&1 & exec sleep infinity"}
+				dropPrefix(runUser) + "/usr/local/bin/envd reap >/tmp/envd.log 2>&1 & exec sleep infinity"}
 		} else {
 			cmd = []string{"sh", "-c", handover + startIfPresent + "exec sleep infinity"}
 		}
@@ -166,10 +177,6 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 	}
 	cid := strings.TrimSpace(out)
 
-	primary := appPort
-	if service && len(spec.Template.Ports) > 0 {
-		primary = spec.Template.Ports[0]
-	}
 	// Before the container is handed out: a sandbox is never returned without
 	// the identity its row promises. Zero on a resume, which delivers nothing.
 	if spec.Identity.Token != "" {
@@ -189,9 +196,10 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 		id: spec.SandboxID, cid: cid, host: host, termHost: termHost,
 		envdToken: envdToken,
 		vcpu:      spec.VCPU, memMiB: spec.MemMiB, service: service, runUser: runUser,
-		start: time.Now(),
-		eng:   r.eng,
-		ports: map[int]string{primary: host},
+		start:   time.Now(),
+		eng:     r.eng,
+		primary: primary,
+		ports:   map[int]string{primary: host},
 	}, nil
 }
 

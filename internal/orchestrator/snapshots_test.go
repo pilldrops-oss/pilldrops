@@ -34,6 +34,8 @@ type fakeSnapshotNode struct {
 	// captures counts capture requests; exports names the directories deleted.
 	captures int
 	deleted  []string
+	// evicted names the sandboxes the control plane evicted after a move.
+	evicted []string
 	// payload is what the node claims it captured.
 	payload string
 	// rootfs, when set, is the root image every capture was taken against: the
@@ -106,6 +108,14 @@ func newFakeSnapshotNode(t *testing.T) *fakeSnapshotNode {
 		n.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("DELETE /v1/sandboxes/{id}", func(w http.ResponseWriter, r *http.Request) {
+		n.mu.Lock()
+		if r.URL.Query().Get("evict") == "1" {
+			n.evicted = append(n.evicted, r.PathValue("id"))
+		}
+		n.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	})
 	n.srv = httptest.NewServer(mux)
 	t.Cleanup(n.srv.Close)
 	return n
@@ -126,6 +136,12 @@ func newSnapshotFleet(t *testing.T) *snapshotFleet {
 	}
 	f.s.reg.SetNodeMeta("node-fc", cluster.NodeMeta{Runtime: "firecracker", Isolation: true, CanFetch: true})
 	f.s.reg.Place("sb-1", "node-fc")
+	if err := f.st.SaveSandbox(t.Context(), store.SandboxRecord{
+		ID: "sb-1", OrgID: "default", NodeID: "node-fc", Template: "base", State: "running",
+		CreatedAt: 1, UpdatedAt: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	return &snapshotFleet{publishFixture: f, node: n}
 }
 
@@ -466,5 +482,26 @@ func TestSnapshotRootImageIsStoredOnceAndSurvivesAPurge(t *testing.T) {
 	bad := f.saveAndWait(t, "liar")
 	if bad["status"] == "ready" {
 		t.Fatal("a root image that does not match its digest was published")
+	}
+}
+
+// Every other route on a sandbox answers another org 404; the snapshot save
+// reached the node as the control plane and captured whatever it was told to.
+func TestAnotherOrgCannotSnapshotASandbox(t *testing.T) {
+	f := newSnapshotFleet(t)
+	_, other, err := f.st.CreateKey(t.Context(), "other", "u:other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := f.do(t, "POST", "/v1/sandboxes/sb-1/snapshot", other, `{"name":"stolen"}`); status != http.StatusNotFound {
+		t.Fatalf("another org's snapshot save answered %d, want 404", status)
+	}
+	if status, _ := f.do(t, "GET", "/v1/snapshots/stolen", other, ""); status != http.StatusNotFound {
+		t.Errorf("the refused save still registered a snapshot (%d)", status)
+	}
+	f.node.mu.Lock()
+	defer f.node.mu.Unlock()
+	if f.node.captures != 0 {
+		t.Errorf("the node was asked to capture for another org")
 	}
 }

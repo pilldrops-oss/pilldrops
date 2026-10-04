@@ -56,6 +56,7 @@ func (d *Daemon) Standby(ctx context.Context, id string) (took time.Duration, er
 	u := sb.meter.sample(d.clock.Now())
 	sb.meter.standby(d.clock.Now())
 	sb.State = StateStandby
+	sb.probeFails = 0 // a failure from before the freeze says nothing about after the thaw
 	orgID, template := sb.OrgID, sb.Template
 	rec := d.recordOf(sb)
 	d.mu.Unlock()

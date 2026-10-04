@@ -2,12 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/cron"
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
@@ -87,10 +89,17 @@ func (s *Server) handleCronCreate(w http.ResponseWriter, r *http.Request) {
 //
 //	GET /v1/cron
 func (s *Server) handleCronList(w http.ResponseWriter, r *http.Request) {
-	jobs, err := s.st.ListCronJobs(r.Context(), orgID(r))
+	all, err := s.st.ListCronJobs(r.Context(), orgID(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not list jobs")
 		return
+	}
+	// A job's command is its sandbox's business: another member's private one is not listed.
+	jobs := make([]store.CronJob, 0, len(all))
+	for _, j := range all {
+		if s.mayActOnJobSandbox(r, j.SandboxID) {
+			jobs = append(jobs, j)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 }
@@ -100,6 +109,10 @@ func (s *Server) handleCronList(w http.ResponseWriter, r *http.Request) {
 //	DELETE /v1/cron/{id}
 func (s *Server) handleCronDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !s.ownsCronJob(r, id) {
+		writeErr(w, http.StatusNotFound, "job not found")
+		return
+	}
 	ok, err := s.st.DeleteCronJob(r.Context(), orgID(r), id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not delete the job")
@@ -125,6 +138,10 @@ func (s *Server) handleCronToggle(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	if !s.ownsCronJob(r, id) {
+		writeErr(w, http.StatusNotFound, "job not found")
+		return
+	}
 	ok, err := s.st.SetCronEnabled(r.Context(), orgID(r), id, body.Enabled)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not update the job")
@@ -144,7 +161,7 @@ func (s *Server) handleCronToggle(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCronRunNow(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	job, ok := s.st.CronJobByID(r.Context(), orgID(r), id)
-	if !ok {
+	if !ok || !s.ownsCronJob(r, id) {
 		writeErr(w, http.StatusNotFound, "job not found")
 		return
 	}
@@ -164,6 +181,32 @@ func (s *Server) handleCronRunNow(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ownsCronJob applies the sandbox rule to a job's sandbox, so a member cannot
+// run, delete or disable a job on another member's private sandbox. Judged from
+// the shared row rather than owns(), because any node of a fleet answers
+// delete and toggle, not only the one hosting the sandbox.
+func (s *Server) ownsCronJob(r *http.Request, id string) bool {
+	job, ok := s.st.CronJobByID(r.Context(), orgID(r), id)
+	return ok && s.mayActOnJobSandbox(r, job.SandboxID)
+}
+
+// mayActOnJobSandbox is the sandbox visibility rule for a job's sandbox.
+// ponytail: one row read per job; a list is one org's jobs, batch it if that grows.
+func (s *Server) mayActOnJobSandbox(r *http.Request, sandboxID string) bool {
+	row, found, err := s.st.GetActiveSandboxRow(r.Context(), sandboxID)
+	if err != nil {
+		return false
+	}
+	// An orphan (its sandbox gone without the destroy sweeping it) may have
+	// been on a private sandbox, and nothing is left to say whether it was or
+	// whose it was: a job records no creator. Operators only, so its command
+	// text is not listed to the whole org.
+	if !found {
+		return operatorPrincipal(r)
+	}
+	return sandbox.Visible(row.ID, row.Visibility, row.CreatedBy, keyIDOf(r), operatorPrincipal(r))
+}
+
 // daemonCronRunner runs a job's command inside its sandbox.
 type daemonCronRunner struct{ s *Server }
 
@@ -174,6 +217,10 @@ func (s *Server) cronRunner() cron.Runner { return daemonCronRunner{s} }
 func (d daemonCronRunner) RunInSandbox(ctx context.Context, orgIDStr, sandboxID, cmd string) (string, int, error) {
 	res, err := d.s.d.Exec(ctx, sandboxID, rt.ExecSpec{
 		Cmd: cmd, Env: d.s.configEnvFor(ctx, sandboxID), Timeout: cronExecTimeout})
+	if errors.Is(err, rt.ErrNotFound) && d.ownedElsewhere(ctx, sandboxID) {
+		// The sweep hands this node a sibling's job only when its owner is down.
+		return "", 0, errOwnerDown
+	}
 	if err != nil {
 		return "", 0, err
 	}
@@ -198,10 +245,21 @@ var (
 // and not for the upload.
 func (d daemonCronRunner) RunBackup(ctx context.Context, _, sandboxID string) (string, error) {
 	started, err := d.s.d.Backup(ctx, sandboxID)
+	if errors.Is(err, rt.ErrNotFound) && d.ownedElsewhere(ctx, sandboxID) {
+		return "", errOwnerDown
+	}
 	if err != nil {
 		return "", err
 	}
 	return started.ID, nil
+}
+
+var errOwnerDown = errors.New("unavailable: owning node is down")
+
+// ownedElsewhere reports whether the sandbox's row names another node as its owner.
+func (d daemonCronRunner) ownedElsewhere(ctx context.Context, sandboxID string) bool {
+	rec, ok, err := d.s.st.SandboxByID(ctx, sandboxID)
+	return err == nil && ok && rec.NodeID != "" && rec.NodeID != d.s.nodeID
 }
 
 // cronExecTimeout bounds one scheduled run so a hung command cannot hold a sweep slot.

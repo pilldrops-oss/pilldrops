@@ -147,7 +147,8 @@ func (d *Daemon) PreviewTarget(ctx context.Context, id string, port int, org str
 	// (terminal, agent) are exempt.
 	multiPort := d.cfg.Runtime.Capabilities().MultiPort
 	if !multiPort && publicPort != 0 && port != publicPort && !rt.IsPlatformPort(port) && !slices.Contains(declared, port) {
-		return "", fmt.Errorf("%w: sandbox %s publishes port %d, not %d", rt.ErrNoAppOnPort, id, publicPort, port)
+		return "", fmt.Errorf("%w: sandbox %s publishes port %d, not %d; this runtime previews only the ports "+
+			"published at create, so create the sandbox with \"ports\":[%d]", rt.ErrNoAppOnPort, id, publicPort, port, port)
 	}
 
 	woke := state == StatePaused || state == StateStandby || state == StatePausing || state == StateResuming

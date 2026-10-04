@@ -2,7 +2,7 @@
 // make a missing label a compile error instead of a wrong breadcrumb.
 
 export const CUSTOMER_ROUTES = [
-  '', 'projects', 'sandboxes', 'deploy', 'templates', 'vault', 'domains', 'usage', 'keys', 'docs', 'sandbox', 'functions', 'fn',
+  '', 'projects', 'sandboxes', 'deploy', 'templates', 'vault', 'domains', 'usage', 'keys', 'docs', 'sandbox', 'functions', 'fn', 't',
 ] as const
 
 export const ADMIN_ROUTES = [
@@ -28,6 +28,7 @@ const CUSTOMER_LABELS: Record<CustomerRoute, string> = {
   sandbox: 'Sandboxes',
   functions: 'Functions',
   fn: 'Functions',
+  t: 'Catalog',
 }
 
 const ADMIN_LABELS: Record<AdminRoute, string> = {
@@ -46,8 +47,11 @@ const ADMIN_LABELS: Record<AdminRoute, string> = {
   sandboxes: 'Cluster Sandboxes',
 }
 
-/** labelFor returns the breadcrumb label for a first path segment, falling back to the index label. */
+/**
+ * labelFor returns the breadcrumb label for a first path segment, falling back to the index label.
+ * Outside admin mode an admin-only page (an operator reaching it from the customer console) keeps its own label.
+ */
 export function labelFor(segment: string, isAdmin: boolean): string {
   if (isAdmin) return ADMIN_LABELS[segment as AdminRoute] ?? ADMIN_LABELS['']
-  return CUSTOMER_LABELS[segment as CustomerRoute] ?? CUSTOMER_LABELS['']
+  return CUSTOMER_LABELS[segment as CustomerRoute] ?? ADMIN_LABELS[segment as AdminRoute] ?? CUSTOMER_LABELS['']
 }

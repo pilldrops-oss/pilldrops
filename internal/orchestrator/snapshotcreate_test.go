@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,9 +33,14 @@ func newCreateRecorder(t *testing.T, id string) *createRecorder {
 		n.mu.Lock()
 		n.got = append(n.got, spec)
 		n.mu.Unlock()
+		// A move pins the id; the node honours it.
+		created := "sb-child-" + id
+		if spec.ID != "" {
+			created = spec.ID
+		}
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck // test
-			"id": "sb-child-" + id, "app_url": "http://" + id + "/preview",
+			"id": created, "app_url": "http://" + id + "/preview",
 			"boot_type": "snapshot", "boot_ms": 42,
 		})
 	})
@@ -151,6 +157,11 @@ func TestCreateFromAnUnreadySnapshotIs404(t *testing.T) {
 	if status != http.StatusNotFound || out["code"] != "snapshot_not_ready" {
 		t.Fatalf("a create from an unknown snapshot answered %d %v", status, out["_raw"])
 	}
+	// The rig created from a snapshot straight after saving it; the answer has
+	// to say what to poll, not only that it is not ready.
+	if msg, _ := out["error"].(string); !strings.Contains(msg, "GET /v1/snapshots/never-saved") {
+		t.Errorf("snapshot_not_ready error %q does not say what to poll", msg)
+	}
 	// A name whose only version is still building is the same answer: not ready.
 	if _, out := f.do(t, "POST", "/v1/sandboxes/sb-1/snapshot", "apikey", `{"name":"slow"}`); out["status"] != "building" {
 		t.Fatalf("save did not report building: %v", out["_raw"])
@@ -162,5 +173,131 @@ func TestCreateFromAnUnreadySnapshotIs404(t *testing.T) {
 	}
 	if status, out := f.do(t, "POST", "/v1/sandboxes", "apikey", `{"snapshot":"ready-one"}`); status != http.StatusCreated {
 		t.Fatalf("create from a ready snapshot answered %d %v", status, out["_raw"])
+	}
+}
+
+// A move's capture is the moved sandbox's root image, under an ordinary org
+// snapshot name: a tenant creating from it, or saving over it, or naming its
+// template outright, booted or replaced what that sandbox runs on.
+func TestAMovesCaptureIsNotATenantSnapshot(t *testing.T) {
+	f := newSnapshotCreateFleet(t)
+	name, tmpl := captureMoveSnapshot(t, f)
+
+	if status, out := f.do(t, "POST", "/v1/sandboxes", "apikey", `{"snapshot":"`+name+`"}`); status != http.StatusNotFound {
+		t.Errorf("a create from a move's capture answered %d %v, want 404", status, out["_raw"])
+	}
+	if status, out := f.do(t, "POST", "/v1/sandboxes", "apikey", `{"template":"`+tmpl+`"}`); status != http.StatusBadRequest {
+		t.Errorf("a create naming a capture's template answered %d %v, want 400", status, out["_raw"])
+	}
+	for _, reserved := range []string{name, "move-mine", "rehome-sb-1"} {
+		if status, out := f.do(t, "POST", "/v1/sandboxes/sb-1/snapshot", "apikey", `{"name":"`+reserved+`"}`); status != http.StatusBadRequest {
+			t.Errorf("saving a snapshot named %s answered %d %v, want 400", reserved, status, out["_raw"])
+		}
+	}
+	// Positive control: an ordinary name still saves and creates.
+	if got := f.saveAndWait(t, "golden"); got["status"] != "ready" {
+		t.Fatalf("save: %v", got)
+	}
+	if status, out := f.do(t, "POST", "/v1/sandboxes", "apikey", `{"snapshot":"golden"}`); status != http.StatusCreated {
+		t.Fatalf("create from an ordinary snapshot answered %d %v", status, out["_raw"])
+	}
+}
+
+// captureMoveSnapshot captures sb-1 as a move does, and returns the
+// snapshot's name and template id.
+func captureMoveSnapshot(t *testing.T, f *snapshotCreateFleet) (name, tmpl string) {
+	t.Helper()
+	name = store.MoveSnapshotName("sb-1")
+	// As the move itself captures one.
+	node, ok := f.s.reg.Node("node-fc")
+	if !ok {
+		t.Fatal("no capture node")
+	}
+	snap := store.Snapshot{OrgID: "default", Name: name, Runtime: "firecracker", SourceSandbox: "sb-1", CreatedAt: time.Now().Unix()}
+	if err := f.st.SaveSnapshot(t.Context(), &snap); err != nil {
+		t.Fatal(err)
+	}
+	tmpl = store.SnapshotTemplateID("default", name)
+	if err := f.st.BeginTemplateBuild(t.Context(), store.TemplateBuild{BuildID: snap.BuildID, TemplateID: tmpl,
+		OrgID: "default", CreatedAt: snap.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.captureSnapshot(t.Context(), node, "sb-1", snap, tmpl); err != nil {
+		t.Fatal(err)
+	}
+
+	return name, tmpl
+}
+
+// The tenant snapshot API listed a move's capture and let it be deleted, and
+// with it the root image the moved sandbox resumes from.
+func TestAMovesCaptureIsNotListedOrDeletableByATenant(t *testing.T) {
+	f := newSnapshotCreateFleet(t)
+	name, _ := captureMoveSnapshot(t, f)
+	if got := f.saveAndWait(t, "golden"); got["status"] != "ready" {
+		t.Fatalf("save: %v", got)
+	}
+
+	_, out := f.do(t, "GET", "/v1/snapshots", "apikey", "")
+	if raw, _ := out["_raw"].(string); strings.Contains(raw, name) || !strings.Contains(raw, "golden") {
+		t.Errorf("the tenant list = %s, want golden and not %s", raw, name)
+	}
+	if status, _ := f.do(t, "GET", "/v1/snapshots/"+name, "apikey", ""); status != http.StatusNotFound {
+		t.Errorf("GET of a move's capture answered %d, want 404", status)
+	}
+	if status, _ := f.do(t, "DELETE", "/v1/snapshots/"+name, "apikey", ""); status != http.StatusNotFound {
+		t.Errorf("DELETE of a move's capture answered %d, want 404", status)
+	}
+	// Still there for the move that owns it.
+	if _, err := f.st.LatestReadySnapshot(t.Context(), "default", name); err != nil {
+		t.Fatalf("the move's capture is gone after the tenant's delete: %v", err)
+	}
+	if status, _ := f.do(t, "DELETE", "/v1/snapshots/golden", "apikey", ""); status != http.StatusOK {
+		t.Errorf("DELETE of an ordinary snapshot answered %d, want 200", status)
+	}
+}
+
+// A whole move through the public route: capture on the source, create from
+// the capture on another node under the same id, evict the original. Hiding
+// move captures from tenants once refused the move's own create with a 404,
+// and no test drove a move end to end.
+func TestAMoveCapturesCreatesElsewhereAndEvicts(t *testing.T) {
+	f := newSnapshotCreateFleet(t)
+
+	status, out := f.do(t, "POST", "/v1/sandboxes/sb-1/move", "apikey", "")
+	if status != http.StatusOK || out["to"] != "node-create-fc" {
+		t.Fatalf("move answered %d %v, want 200 to node-create-fc", status, out["_raw"])
+	}
+	spec := f.fc.last(t)
+	if spec.ID != "sb-1" || !strings.HasPrefix(spec.Snapshot, store.MoveSnapshotName("sb-1")+"-") {
+		t.Errorf("the target was asked for id %q from snapshot %q, want sb-1 from a %s-<nonce>",
+			spec.ID, spec.Snapshot, store.MoveSnapshotName("sb-1"))
+	}
+	if node, ok := f.s.reg.NodeFor("sb-1"); !ok || node.ID != "node-create-fc" {
+		t.Errorf("sb-1 routes to %v after the move, want node-create-fc", node)
+	}
+	f.node.mu.Lock()
+	evicted := f.node.evicted
+	f.node.mu.Unlock()
+	if len(evicted) != 1 || evicted[0] != "sb-1" {
+		t.Errorf("the source evicted %v, want [sb-1]", evicted)
+	}
+}
+
+// Every move of a sandbox captured under move-<id>, one template id: a move
+// back to a node replaced, under a fork still running on it, the capture an
+// earlier move had left there.
+func TestEachMoveCapturesUnderItsOwnTemplate(t *testing.T) {
+	f := newSnapshotCreateFleet(t)
+	var moved []string
+	for range 2 {
+		f.s.reg.Place("sb-1", "node-fc")
+		if status, out := f.do(t, "POST", "/v1/sandboxes/sb-1/move", "apikey", ""); status != http.StatusOK {
+			t.Fatalf("move answered %d %v", status, out["_raw"])
+		}
+		moved = append(moved, f.fc.last(t).Template)
+	}
+	if moved[0] == moved[1] {
+		t.Fatalf("two moves of sb-1 both landed on template %s", moved[0])
 	}
 }

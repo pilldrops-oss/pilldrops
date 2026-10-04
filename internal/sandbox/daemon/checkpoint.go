@@ -111,15 +111,71 @@ func validCheckpointName(name string) error {
 	return nil
 }
 
-// captureInto runs the engine's capture of a running sandbox into dir, which
-// this call creates and the caller then owns. It holds opMu for the duration,
-// so nothing else touches the machine while it stands still, and it removes
-// dir on failure rather than leaving a half-written capture behind.
+// captureInto runs the engine's capture of a sandbox into dir, which this call
+// creates and the caller then owns. It holds opMu for the duration, so nothing
+// else touches the machine while it stands still, and it removes dir on
+// failure rather than leaving a half-written capture behind.
 //
 // Checkpoints and backups both go through here. One pause path means one set
 // of rules about which states a capture is legal from, and a fix to the
 // resume-on-failure shape cannot land in one caller and miss the other.
+//
+// A paused sandbox (every firecracker one after a node restart) is captured
+// from its pause snapshot when the runtime can, else woken, captured and
+// paused again: refusing it silently broke every scheduled backup.
 func (d *Daemon) captureInto(ctx context.Context, engine rt.Checkpointer, id, name, dir string) (rt.CheckpointInfo, error) {
+	info, err := d.captureOnce(ctx, engine, id, name, dir)
+	if !errors.Is(err, errCaptureNeedsWake) {
+		return info, err
+	}
+	before, _ := d.lastActive(id)
+	if err := d.Resume(ctx, id); err != nil {
+		return rt.CheckpointInfo{}, fmt.Errorf("wake the paused sandbox to capture it: %w", err)
+	}
+	woke, _ := d.lastActive(id)
+	info, err = d.captureOnce(ctx, engine, id, name, dir)
+	d.repauseIfUntouched(ctx, id, before, woke)
+	return info, err
+}
+
+func (d *Daemon) lastActive(id string) (time.Time, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	sb, ok := d.boxes[id]
+	if !ok {
+		return time.Time{}, false
+	}
+	return sb.LastActiveAt, true
+}
+
+// repauseIfUntouched puts a sandbox a capture woke back to sleep, unless its
+// owner used it meanwhile (its idle clock moved past the wake). The idle clock
+// goes back to before the wake, or a scheduled backup would keep an abandoned
+// sandbox alive forever, and the capture's running time is not metered.
+// ponytail: a usage flush that samples mid-capture still bills that slice;
+// pausing the meter for the capture needs a meter state of its own.
+func (d *Daemon) repauseIfUntouched(ctx context.Context, id string, before, woke time.Time) {
+	d.mu.Lock()
+	sb, ok := d.boxes[id]
+	untouched := ok && sb.State == StateRunning && sb.LastActiveAt.Equal(woke)
+	if untouched {
+		sb.LastActiveAt = before
+		sb.meter.resume(d.clock.Now())
+	}
+	d.mu.Unlock()
+	if !untouched {
+		d.log().Info("capture: the sandbox was used while awake for it; leaving it running", "sandbox_id", id)
+		return
+	}
+	if err := d.Pause(ctx, id); err != nil {
+		d.log().Warn("capture: pausing again after the capture failed", "sandbox_id", id, "error", err)
+	}
+}
+
+// errCaptureNeedsWake is a paused sandbox whose runtime captures only running ones.
+var errCaptureNeedsWake = errors.New("paused sandbox must be woken to capture")
+
+func (d *Daemon) captureOnce(ctx context.Context, engine rt.Checkpointer, id, name, dir string) (rt.CheckpointInfo, error) {
 	sb, release, err := d.acquireOp(id)
 	if err != nil {
 		return rt.CheckpointInfo{}, err
@@ -127,19 +183,29 @@ func (d *Daemon) captureInto(ctx context.Context, engine rt.Checkpointer, id, na
 	defer release()
 
 	d.mu.Lock()
-	if sb.State != StateRunning {
-		st := sb.State
-		d.mu.Unlock()
+	st, inst, snap := sb.State, sb.inst, sb.Snapshot
+	d.mu.Unlock()
+	paused, fromSnapshot := engine.(rt.PausedCheckpointer)
+	switch {
+	case st == StateRunning:
+	case st == StatePaused && fromSnapshot:
+	case st == StatePaused:
+		return rt.CheckpointInfo{}, errCaptureNeedsWake
+	default:
 		return rt.CheckpointInfo{}, fmt.Errorf("cannot checkpoint from state %s", st)
 	}
-	inst := sb.inst
-	d.mu.Unlock()
 
 	_ = os.RemoveAll(dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return rt.CheckpointInfo{}, fmt.Errorf("checkpoint dir: %w", err)
 	}
-	info, err := engine.Checkpoint(ctx, inst, rt.SnapshotRef{Path: dir, Name: name})
+	dst := rt.SnapshotRef{Path: dir, Name: name}
+	var info rt.CheckpointInfo
+	if st == StatePaused {
+		info, err = paused.CheckpointPaused(ctx, id, snap, dst)
+	} else {
+		info, err = engine.Checkpoint(ctx, inst, dst)
+	}
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return rt.CheckpointInfo{}, fmt.Errorf("checkpoint: %w", err)

@@ -44,6 +44,12 @@ func (s *Server) resolveSnapshotCreate(w http.ResponseWriter, r *http.Request, b
 		return out, false
 	}
 	view, err := st.LatestReadySnapshot(r.Context(), fastOrg(r), req.Snapshot)
+	// A move's capture is the moved sandbox's root image, not the org's to boot;
+	// only this tier's own move creates from it.
+	_, moving := r.Context().Value(moveCtxKey{}).(moveCtx)
+	if err == nil && store.ReservedSnapshotName(req.Snapshot) && !moving {
+		err = store.ErrSnapshotNotFound
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrSnapshotNotFound) {
 			// One answer for "never existed", "still building" and "another
@@ -51,7 +57,8 @@ func (s *Server) resolveSnapshotCreate(w http.ResponseWriter, r *http.Request, b
 			// is not allowed to know exist.
 			writeJSONErr(w, http.StatusNotFound, "snapshot_not_ready",
 				"no ready snapshot named "+req.Snapshot+
-					" — it may still be building, or may not exist")
+					" — it may still be building, or may not exist; poll GET /v1/snapshots/"+req.Snapshot+
+					` until its status is "ready"`)
 			return out, false
 		}
 		writeErr(w, http.StatusInternalServerError, err.Error())

@@ -1,5 +1,5 @@
 import { lazy } from 'react'
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate, Link } from 'react-router-dom'
 import Shell from './components/Shell'
 import { ToastProvider } from './components/Toast'
 import { ConfirmProvider } from './components/ConfirmModal'
@@ -34,6 +34,15 @@ const System = lazy(() => import('./pages/System'))
 
 // mode is injected into index.html at boot: 'admin' when served by the orchestrator.
 const IS_ADMIN = (window.__SANDBOXD__?.mode ?? 'user') === 'admin'
+
+function NotFound() {
+  return (
+    <div className="wrap">
+      <Link className="back-link" to="/">← Back</Link>
+      <div className="detail-loading">Page not found.</div>
+    </div>
+  )
+}
 
 export default function App() {
   const app = (
@@ -74,6 +83,7 @@ export default function App() {
           <Route path="users" element={<Users />} />
           <Route path="users/:ownerId" element={<UserDetail />} />
           <Route path="sandboxes/:id" element={<AdminSandbox />} />
+          <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
     </HashRouter>

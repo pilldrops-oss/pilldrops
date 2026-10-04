@@ -172,6 +172,10 @@ func New() (*Runtime, error) {
 	slog.Info("tenant image backstop resolved", "component", "docker",
 		"allowlist_entries", len(r.imageAllowlist),
 		"require_digest", r.imageRequireDigest)
+	if _, why := dockerdStart(); why != "" {
+		slog.Warn("dockerd's start time is unknown, so every stopped sandbox container is treated as "+
+			"stopped by a dockerd restart and started again", "component", "docker", "reason", why)
+	}
 	if r.ociRuntime != "" {
 		slog.Info("docker sandboxes run under a non-default OCI runtime", "component", "docker", "runtime", r.ociRuntime)
 	}

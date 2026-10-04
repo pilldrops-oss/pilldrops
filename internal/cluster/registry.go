@@ -158,16 +158,17 @@ func (r *Registry) SetNodeMeta(id string, m NodeMeta) {
 	logStoreErr("setmeta", r.nodes.SetMeta(id, m))
 }
 
-// TemplateSupport reports whether any schedulable node can boot tmpl, plus the
-// sorted union of templates the restricted nodes advertise.
-func (r *Registry) TemplateSupport(tmpl string, now time.Time, ttl time.Duration) (bool, []string) {
+// TemplateSupport reports whether any schedulable node can boot req's template
+// under its runtime pin, by Pick's own rule, plus the sorted union of templates
+// the restricted nodes advertise.
+func (r *Registry) TemplateSupport(req Request, now time.Time, ttl time.Duration) (bool, []string) {
 	supported := false
 	seen := map[string]bool{}
 	for _, n := range r.list() {
 		if !n.Schedulable(now, ttl) {
 			continue
 		}
-		if n.hostsTemplate(tmpl) {
+		if n.canBoot(req) {
 			supported = true
 		}
 		for _, t := range n.Templates {

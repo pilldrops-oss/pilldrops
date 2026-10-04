@@ -210,6 +210,11 @@ func fakeIptables(t *testing.T, chains map[string]string) (binDir, fixDir string
 	if err := os.WriteFile(filepath.Join(binDir, "iptables"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// docker network inspect answers the sandboxd-net fixture, absent when the network is.
+	docker := "#!/bin/sh\ncat \"$FIXDIR/sandboxd-net\" 2>/dev/null\n"
+	if err := os.WriteFile(filepath.Join(binDir, "docker"), []byte(docker), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	return binDir, fixDir
 }
 
@@ -258,10 +263,17 @@ const healthyDockerUser = `-N DOCKER-USER
 -A DOCKER-USER -d 172.17.0.1/32 -j DROP
 -A DOCKER-USER -d 172.16.0.0/12 -j DROP
 -A DOCKER-USER -d 100.64.0.0/10 -j DROP
+-A DOCKER-USER -s 172.18.0.0/16 -d 192.168.0.0/16 -j DROP
+-A DOCKER-USER -s 172.18.0.0/16 -p udp -m udp --dport 53 -j RETURN
+-A DOCKER-USER -s 172.18.0.0/16 -p tcp -m tcp --dport 53 -j RETURN
+-A DOCKER-USER -s 172.18.0.0/16 -p tcp -m tcp --dport 80 -j RETURN
+-A DOCKER-USER -s 172.18.0.0/16 -p tcp -m tcp --dport 443 -j RETURN
+-A DOCKER-USER -s 172.18.0.0/16 -j DROP
 `
 
 func healthyChains() map[string]string {
-	return map[string]string{"FORWARD": healthyForward, "INPUT": healthyInput, "DOCKER-USER": healthyDockerUser}
+	return map[string]string{"FORWARD": healthyForward, "INPUT": healthyInput, "DOCKER-USER": healthyDockerUser,
+		"sandboxd-net": "172.18.0.0/16"}
 }
 
 // Each broken chain must go red; the healthy cases must not, or enforce takes working nodes out.
@@ -285,6 +297,30 @@ func TestVerifyEgressScriptMutations(t *testing.T) {
 	}{
 		{name: "healthy firecracker", mutate: func(map[string]string) {}, mode: "--firecracker"},
 		{name: "healthy docker", mutate: func(map[string]string) {}, mode: "--docker"},
+		{
+			// dockerd allocates from its address pools, which an operator may
+			// move out of 172.16/12; a guessed range then read as rules missing.
+			name: "healthy docker on a 10.200/16 sandboxd-net",
+			mutate: func(c map[string]string) {
+				for _, chain := range []string{"INPUT", "DOCKER-USER"} {
+					c[chain] = strings.ReplaceAll(c[chain], "172.18.0.0/16", "10.200.0.0/16")
+				}
+				c["sandboxd-net"] = "10.200.0.0/16"
+			},
+			mode: "--docker",
+		},
+		{
+			name:     "sandboxd-net missing",
+			mutate:   func(c map[string]string) { delete(c, "sandboxd-net") },
+			mode:     "--docker",
+			wantFail: true, wantMsg: "cannot read an IPv4 subnet for sandboxd-net",
+		},
+		{
+			// A dual-stack network lists both subnets; the IPv4 rules key on the IPv4 one.
+			name:   "healthy docker on a dual-stack sandboxd-net",
+			mutate: func(c map[string]string) { c["sandboxd-net"] = "fd00:1::/64\n172.18.0.0/16\n" },
+			mode:   "--docker",
+		},
 		{
 			name:     "10/8 DROP present but below the allowlist ACCEPT",
 			mutate:   func(c map[string]string) { c["FORWARD"] = belowAllowlist },
@@ -319,6 +355,30 @@ func TestVerifyEgressScriptMutations(t *testing.T) {
 					strings.TrimPrefix(c["FORWARD"], "-P FORWARD ACCEPT\n")
 			},
 			mode: "--docker", wantFail: true, wantMsg: "bypass every DOCKER-USER DROP",
+		},
+		{
+			// A docker sandbox reached the orchestrator, Postgres and MinIO on a
+			// peer host through this node's address, which their firewall trusts.
+			name: "docker sandbox port allowlist missing",
+			mutate: func(c map[string]string) {
+				c["DOCKER-USER"] = strings.Replace(c["DOCKER-USER"], "-A DOCKER-USER -s 172.18.0.0/16 -j DROP\n", "", 1)
+			},
+			mode: "--docker", wantFail: true, wantMsg: "port allowlist missing",
+		},
+		{
+			name: "docker 192.168/16 DROP missing",
+			mutate: func(c map[string]string) {
+				c["DOCKER-USER"] = strings.Replace(c["DOCKER-USER"], "-A DOCKER-USER -s 172.18.0.0/16 -d 192.168.0.0/16 -j DROP\n", "", 1)
+			},
+			mode: "--docker", wantFail: true, wantMsg: "192.168/16 DROP missing",
+		},
+		{
+			name: "docker 10/8 DROP below the sandbox allowlist",
+			mutate: func(c map[string]string) {
+				c["DOCKER-USER"] = strings.Replace(c["DOCKER-USER"], "-A DOCKER-USER -d 10.0.0.0/8 -j DROP\n", "", 1) +
+					"-A DOCKER-USER -d 10.0.0.0/8 -j DROP\n"
+			},
+			mode: "--docker", wantFail: true, wantMsg: "BELOW the sandbox allowlist",
 		},
 		{
 			name: "FC INPUT reply-ACCEPT below the DROP",

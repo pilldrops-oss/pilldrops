@@ -16,6 +16,7 @@ import { listRecents } from '../lib/launchMemory'
 import { TemplateIcon } from '../components/templateIcons'
 import { kindOf } from '../lib/launchKinds'
 import { HistoryPanel } from './History'
+import { matchesSandboxQuery, showNodeColumn, sortSandboxRows, SANDBOX_SORT_LABELS, type SandboxSort } from '../lib/sandboxListSearch'
 
 const CREDIT_ACTION = { label: 'Add credits', to: 'usage' } as const
 function actionFor(e: unknown) {
@@ -239,6 +240,8 @@ export default function Sandboxes() {
     if (tabParam === 'past' || tabParam === 'active') setTab(tabParam)
   }, [tabParam])
   const [filter, setFilter] = useState<FilterType>('all')
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<SandboxSort>('recent')
   const [range, setRange] = useState<RangeType>('5m')
   const navigate = useNavigate()
   const [sparkHistory, setSparkHistory] = useState<number[]>([])
@@ -301,14 +304,17 @@ export default function Sandboxes() {
   const vcpuH = usage?.vcpu_hours ?? 0
   const ramH = usage?.ram_gb_hours ?? 0
 
-  const filtered = (sandboxes ?? []).filter(s => {
-    if (filter === 'running') return s.status === 'running'
-    if (filter === 'paused') return s.status !== 'running'
-    return true
-  })
-  const rank = (s: SandboxRow) => (s.status === 'running' ? 0 : 1)
-  const createdMs = (s: SandboxRow) => Date.parse(s.created_at) || 0
-  filtered.sort((a, b) => rank(a) - rank(b) || createdMs(b) - createdMs(a))
+  const filtered = sortSandboxRows(
+    (sandboxes ?? []).filter(s => {
+      if (filter === 'running' && s.status !== 'running') return false
+      if (filter === 'paused' && s.status === 'running') return false
+      return matchesSandboxQuery(s, query)
+    }),
+    sort,
+  )
+  // The API includes `node` only for operator callers, so this is naturally
+  // absent for a tenant's own list and present on an operator's.
+  const hasNode = showNodeColumn(sandboxes ?? [])
 
   const maxActive = stats?.max_active ?? 50
   const activeCount = sandboxes ? total : (stats?.active_count ?? running)
@@ -366,9 +372,26 @@ export default function Sandboxes() {
         </div>
       </div>
       <div className="panel">
-          <div className="ph">
+          <div className="ph sb-ph">
             <h2>Active</h2>
             <div className="rgt">
+              <input
+                className="inp mono sb-search"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="Search…"
+                aria-label="Search sandboxes"
+              />
+              <select
+                className="sel sb-sort"
+                value={sort}
+                onChange={e => setSort(e.target.value as SandboxSort)}
+                aria-label="Sort sandboxes"
+              >
+                {(Object.keys(SANDBOX_SORT_LABELS) as SandboxSort[]).map(k => (
+                  <option key={k} value={k}>{SANDBOX_SORT_LABELS[k]}</option>
+                ))}
+              </select>
               <div className="filter">
                 {(['all', 'running', 'paused'] as FilterType[]).map(f => (
                   <button
@@ -385,21 +408,24 @@ export default function Sandboxes() {
               <span className="meta">{state === 'stale' ? 'reconnecting…' : 'auto · 3s'}</span>
             </div>
           </div>
-          <div className="rowh">
-            <div>Sandbox</div>
-            <div>Template</div>
-            <div>Status</div>
-            <div>Port</div>
-            <div>Age</div>
-            <div />
+          <div className="sb-table-scroll">
+            <div className={`rowh${hasNode ? ' has-node' : ''}`}>
+              <div>Sandbox</div>
+              <div>Template</div>
+              <div>Status</div>
+              <div>Port</div>
+              {hasNode && <div>Node</div>}
+              <div>Age</div>
+              <div />
+            </div>
+            {filtered.length === 0 ? (
+              <div className="empty">No {filter === 'all' ? '' : `${filter} `}sandboxes match this filter.</div>
+            ) : (
+              filtered.map(row => (
+                <SandboxRowItem key={row.id} row={row} template={tpls.find(t => t.id === row.template)} onDone={handleRefetch} showNode={hasNode} />
+              ))
+            )}
           </div>
-          {filtered.length === 0 ? (
-            <div className="empty">No {filter === 'all' ? '' : `${filter} `}sandboxes match this filter.</div>
-          ) : (
-            filtered.map(row => (
-              <SandboxRowItem key={row.id} row={row} template={tpls.find(t => t.id === row.template)} onDone={handleRefetch} />
-            ))
-          )}
         </div>
       <div className="two">
         <div className="panel chartwrap">
@@ -600,6 +626,7 @@ export function InlineRename({ id, name, onRenamed }: InlineRenameProps) {
       const updated = await renameSandbox(id, next)
       setEditing(false)
       onRenamed(updated.name ?? next)
+      toast.success(updated.name ? `Renamed to ${updated.name}` : 'Name cleared')
     } catch (e) {
       toast.error(errText(e))
     } finally {
@@ -656,7 +683,7 @@ export function InlineRename({ id, name, onRenamed }: InlineRenameProps) {
 }
 
 // Exported for the row-label test. template is the row's catalog entry, when known.
-export function SandboxRowItem({ row, template, onDone }: { row: SandboxRow; template?: Template; onDone: () => void }) {
+export function SandboxRowItem({ row, template, onDone, showNode }: { row: SandboxRow; template?: Template; onDone: () => void; showNode?: boolean }) {
   // A GUI template's preview is its desktop; everything else previews an app.
   const isDesktop = !!template && kindOf(template) === 'gui'
   // Only an explicit false greys it: a node too old to report the field omits
@@ -693,7 +720,7 @@ export function SandboxRowItem({ row, template, onDone }: { row: SandboxRow; tem
 
   return (
     <div
-      className={`row${isRunning ? '' : ' paused'}`}
+      className={`row${isRunning ? '' : ' paused'}${showNode ? ' has-node' : ''}`}
       onClick={handleRowClick}
       style={{ cursor: 'pointer', ...(isCrashed ? { borderLeft: '3px solid #DC2626', background: 'rgba(220,38,38,0.04)' } : {}) }}
     >
@@ -713,6 +740,11 @@ export function SandboxRowItem({ row, template, onDone }: { row: SandboxRow; tem
       <div className={`port${isRunning ? '' : ' off'}`}>
         {isRunning ? `:${row.public_port || 8000}` : '—'}
       </div>
+      {showNode && (
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 12.5, color: 'var(--sub)' }}>
+          {row.node || '—'}
+        </div>
+      )}
       <div className="age">{formatAge(row.created_at)}</div>
       <div className="rowact" onClick={e => e.stopPropagation()}>
         {isRunning && (

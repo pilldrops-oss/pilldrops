@@ -17,6 +17,18 @@ func newTestServer(t *testing.T) (*httptest.Server, string) {
 	return srv, key
 }
 
+// newOperatorTestServer is newTestServer with an operator key, for the
+// node-wide routes a member key is refused on.
+func newOperatorTestServer(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	srv, st, _ := newTestServerWithStore(t)
+	_, key, err := st.CreateKeyWithRole(t.Context(), "op", "default", "operator")
+	if err != nil {
+		t.Fatalf("operator key: %v", err)
+	}
+	return srv, key
+}
+
 // testOrgOverrideSecret is the shared secret test servers verify X-Org-Override with.
 const testOrgOverrideSecret = "test-org-override-secret"
 

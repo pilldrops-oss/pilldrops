@@ -102,21 +102,32 @@ func (e *engine) sameDaemon(ctx context.Context) bool {
 // resolveDockerSocket finds the unix socket the CLI would use. tcp:// and
 // ssh:// endpoints are left to the CLI.
 func resolveDockerSocket() (string, bool) {
+	host, ok := dockerEndpoint()
+	if !ok {
+		return "", false
+	}
+	if host == "" {
+		return usableSocket("/var/run/docker.sock")
+	}
+	return unixPath(host)
+}
+
+// dockerEndpoint is the daemon endpoint the CLI uses, by its precedence:
+// DOCKER_HOST, DOCKER_CONTEXT, the current context; "" is the default socket.
+// ok is false when DOCKER_CONTEXT names a context that cannot be read.
+func dockerEndpoint() (host string, ok bool) {
 	if h := os.Getenv("DOCKER_HOST"); h != "" {
-		return unixPath(h)
+		return h, true
 	}
 	if name := os.Getenv("DOCKER_CONTEXT"); name != "" {
-		if host, ok := contextEndpoint(name); ok {
-			return unixPath(host)
-		}
-		return "", false
+		return contextEndpoint(name)
 	}
 	if name := currentContextName(); name != "" && name != "default" {
 		if host, ok := contextEndpoint(name); ok {
-			return unixPath(host)
+			return host, true
 		}
 	}
-	return usableSocket("/var/run/docker.sock")
+	return "", true
 }
 
 // unixPath extracts the socket path from a unix:// endpoint.
@@ -376,12 +387,26 @@ func demux(r io.Reader, stdout, stderr io.Writer) error {
 
 // containerJSON is the subset of a container inspect this needs.
 type containerJSON struct {
-	ID     string `json:"Id"`
-	SizeRw int64  `json:"SizeRw"`
-	State  struct {
-		Running  bool `json:"Running"`
-		ExitCode int  `json:"ExitCode"`
-	} `json:"State"`
+	ID     string         `json:"Id"`
+	SizeRw int64          `json:"SizeRw"`
+	State  containerState `json:"State"`
+}
+
+// containerState is the subset of a container's State this needs.
+type containerState struct {
+	Running    bool      `json:"Running"`
+	OOMKilled  bool      `json:"OOMKilled"`
+	ExitCode   int       `json:"ExitCode"`
+	FinishedAt time.Time `json:"FinishedAt"`
+}
+
+// State returns the container's run state.
+func (e *engine) State(ctx context.Context, cid string) (containerState, error) {
+	var c containerJSON
+	if err := e.get(ctx, "/containers/"+cid+"/json", &c); err != nil {
+		return containerState{}, err
+	}
+	return c.State, nil
 }
 
 // InspectSize returns the container's writable-layer size in bytes. Expensive:
@@ -457,22 +482,6 @@ func memUsedMiB(s statsJSON) int {
 	}
 	// Rounded up: a small container under 1 MiB is using memory, not none.
 	return int((usage + 1<<20 - 1) >> 20)
-}
-
-// Top lists processes in a container.
-func (e *engine) Top(ctx context.Context, cid, psArgs string) (titles []string, procs [][]string, err error) {
-	var out struct {
-		Titles    []string   `json:"Titles"`
-		Processes [][]string `json:"Processes"`
-	}
-	q := url.Values{}
-	if psArgs != "" {
-		q.Set("ps_args", psArgs)
-	}
-	if err := e.getQ(ctx, "/containers/"+cid+"/top", q, &out); err != nil {
-		return nil, nil, err
-	}
-	return out.Titles, out.Processes, nil
 }
 
 // Kill signals the container's main process; the Engine API has no per-pid

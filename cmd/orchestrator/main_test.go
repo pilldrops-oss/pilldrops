@@ -17,7 +17,7 @@ func bootEnv(t *testing.T, kv map[string]string) {
 		"ORCHESTRATOR_TOKEN", "NODE_KEY_SECRET", "ORG_ASSERT_KEY", "DEV_INSECURE",
 		"SANDBOXD_DEV", "SANDBOXD_DATABASE_URL", "ORCHESTRATOR_ARTIFACT_DIR",
 		"OTEL_EXPORTER_OTLP_ENDPOINT", "PORT",
-		"ORCHESTRATOR_ROLE", "REDIS_URL",
+		"ORCHESTRATOR_ROLE", "REDIS_URL", "VAULT_SECRET_KEY", "ALLOW_PLAINTEXT_VAULT",
 	} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
@@ -52,6 +52,21 @@ func TestRunRefusesAClusteredControlPlaneWithNoOrgAssertKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ORG_ASSERT_KEY") {
 		t.Errorf("refused, but not for the org-assert reason: %v", err)
+	}
+}
+
+func TestRunRefusesAClusteredControlPlaneWithNoVaultKey(t *testing.T) {
+	bootEnv(t, map[string]string{
+		"ORCHESTRATOR_TOKEN": "fleet-secret",
+		"NODE_KEY_SECRET":    "0123456789abcdef",
+		"ORG_ASSERT_KEY":     strings.Repeat("ab", 32),
+		// Past the guard, boot fails here instead of serving.
+		"ORCHESTRATOR_ARTIFACT_DIR": unusableDir(t),
+	})
+
+	err := run(t.Context(), func() {})
+	if err == nil || !strings.Contains(err.Error(), "VAULT_SECRET_KEY") {
+		t.Fatalf("err = %v, want the VAULT_SECRET_KEY refusal", err)
 	}
 }
 

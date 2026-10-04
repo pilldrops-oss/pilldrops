@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -36,6 +37,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pilldrops-oss/pilldrops/internal/apispec"
 	"github.com/pilldrops-oss/pilldrops/internal/config"
 
 	"github.com/go-chi/chi/v5"
@@ -48,7 +50,6 @@ import (
 
 	"github.com/pilldrops-oss/pilldrops/internal/auth/previewtoken"
 	"github.com/pilldrops-oss/pilldrops/internal/auth/sbtoken"
-	"github.com/pilldrops-oss/pilldrops/internal/httpapi"
 	"github.com/pilldrops-oss/pilldrops/internal/httpx"
 	"github.com/pilldrops-oss/pilldrops/internal/mcp"
 
@@ -313,15 +314,24 @@ func rebrandPreview(r *http.Request, u string) string {
 var previewSecret []byte
 
 // previewToken derives a sandbox's stateless preview access token, so any
-// replica can validate it. vis is the sandbox's visibility as the response
-// being rebranded reports it: the orchestrator binds it into the token and
-// re-reads it on every preview request, so minting under any other value here
-// would hand the caller a link the gate refuses. "" is the default, "org".
-func previewToken(id string, port int, vis string) string {
-	if vis == "" {
-		vis = sandbox.VisibilityOrg
+// replica can validate it, under gen: the orchestrator re-reads the sandbox's
+// generation on every preview request, so minting under any other value here
+// would hand the caller a link the gate refuses.
+func previewToken(id string, port int, gen string) string {
+	return previewtoken.Browser(previewSecret, id, port, gen)
+}
+
+// previewGenerationOf is the generation a rebranded sandbox body names: the
+// orchestrator's preview_generation, which carries the flip count this tier
+// cannot read, else the one visibility and public_preview imply with no flips,
+// which is what a body from a node with no orchestrator in front means.
+func previewGenerationOf(m map[string]any) string {
+	if gen, _ := m["preview_generation"].(string); gen != "" {
+		return gen
 	}
-	return previewtoken.Browser(previewSecret, id, port, vis)
+	vis, _ := m["visibility"].(string)
+	public, _ := m["public_preview"].(bool)
+	return sandbox.PreviewGeneration(vis, public, 0)
 }
 
 // rebrandBody rewrites app_url/url fields in a proxied sandbox response
@@ -350,8 +360,7 @@ func rebrandBody(r *http.Request, body []byte) []byte {
 		}
 		// The token is bound to the declared port; a client probing another
 		// port mints its own via GET /v1/sandboxes/{id}/preview-token?port=N.
-		vis, _ := m["visibility"].(string)
-		tok := previewToken(id, port, vis)
+		tok := previewToken(id, port, previewGenerationOf(m))
 		if tok == "" {
 			return
 		}
@@ -942,6 +951,27 @@ func newAPIAuth(keyStore *APIKeyStore, requireAuth bool) func(http.Handler) http
 	}
 }
 
+// hostStub is the local GET /v1/host. It counts every tenant's sandboxes, so
+// like the node's it answers only the operator: here, the PORTAL_API_KEY holder.
+func hostStub(mgr *DevManager, portalKey string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(presentedToken(r)), []byte(portalKey)) != 1 {
+			http.Error(w, `{"error":"operator role required"}`, http.StatusForbidden)
+			return
+		}
+		// Full HostResp shape; a partial object crashes the page.
+		mgr.mu.RLock()
+		active := len(mgr.sandboxes)
+		mgr.mu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		writeFprintf(w, `{"cpu_cores":%d,"cpu_percent":0,"load_avg":[0,0,0],`+
+			`"mem_total_mb":0,"mem_used_mb":0,"mem_available_mb":0,`+
+			`"disk_total_gb":0,"disk_used_gb":0,"disk_free_gb":0,`+
+			`"sandboxes_active":%d,"vcpu_committed":0,"mem_committed_mb":0}`,
+			runtime.NumCPU(), active)
+	}
+}
+
 // registerAPIKeyRoutes mounts GET/POST /v1/keys and DELETE /v1/keys/{id},
 // scoped to ownerID(r).
 func registerAPIKeyRoutes(r chi.Router, keyStore *APIKeyStore, ownerID func(*http.Request) string) {
@@ -1431,7 +1461,7 @@ func (m *DevManager) Destroy(_ context.Context, sandboxID string) {
 // catalog nodes serve.
 func serveCatalog(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	writeJSON(w, templates.Catalog())
+	writeJSON(w, templates.Listed())
 }
 
 // errPathEscapesRoot lets handlers answer 400 for a confinement escape and
@@ -1836,7 +1866,9 @@ func registerSandboxActionRoutes(r chi.Router, mgr *DevManager, ownerID func(*ht
 	}
 	r.Post("/v1/sandboxes/{id}/timeout", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
+		// "timeout" is the pre-SDK-fix field name, still accepted from old clients.
 		var body struct {
+			Seconds int `json:"seconds"`
 			Timeout int `json:"timeout"`
 		}
 		decodeJSONBody(r, &body)
@@ -1844,8 +1876,18 @@ func registerSandboxActionRoutes(r chi.Router, mgr *DevManager, ownerID func(*ht
 		if !ok {
 			return
 		}
-		if body.Timeout > 0 {
-			sb.ExpiresAt = time.Now().Add(time.Duration(body.Timeout) * time.Second)
+		seconds := body.Seconds
+		if seconds == 0 {
+			seconds = body.Timeout
+		}
+		if seconds == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]string{"error": `"seconds" is required: a positive TTL from now`})
+			return
+		}
+		if seconds > 0 {
+			sb.ExpiresAt = time.Now().Add(time.Duration(seconds) * time.Second)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		writeJSON(w, map[string]interface{}{"sandbox_id": id, "expires_at": sb.ExpiresAt})
@@ -2421,11 +2463,7 @@ func main() {
 	// MCP tool calls re-enter this router at /v1 with the caller's bearer
 	// key, so auth and limits apply as for any other client.
 	r.Handle("/mcp", &mcp.HTTPServer{API: r})
-	r.Get("/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "public, max-age=300")
-		writeBytes(w, httpapi.OpenAPISpec())
-	})
+	r.Get("/openapi.json", apispec.Serve)
 
 	// Public, for load balancers.
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -2818,7 +2856,7 @@ func main() {
 			"/v1/cron", "/v1/cron/{id}", "/v1/cron/{id}/toggle", "/v1/cron/{id}/run",
 			// The node probes what the preview would actually serve.
 			"/v1/sandboxes/{id}/preview-status",
-			"/v1/sandboxes/{id}/fork", "/v1/sandboxes/{id}/visibility",
+			"/v1/sandboxes/{id}/fork", "/v1/sandboxes/{id}/visibility", "/v1/sandboxes/{id}/preview-access",
 			"/v1/domains", "/v1/domains/{host}",
 		} {
 			r.Get(pat, fleetPassthrough)
@@ -2931,8 +2969,11 @@ func main() {
 			writeJSON(w, map[string]interface{}{"sandboxes": mgr.List(ownerID(r))})
 		})
 
-		// The catalog every launch path in the dashboard starts from.
-		r.Get("/v1/templates", serveCatalog)
+		// The catalog every launch path in the dashboard starts from. The fleet's
+		// answer marks which templates some node can boot (available).
+		r.Get("/v1/templates", func(w http.ResponseWriter, r *http.Request) {
+			fleetProxy(w, r, func(w http.ResponseWriter) { serveCatalog(w, r) })
+		})
 
 		registerFilesRoutes(r, mgr, ownerID)
 
@@ -2975,18 +3016,7 @@ func main() {
 			w.Header().Set("Content-Type", "application/json")
 			writeBytes(w, []byte(`{"functions":[]}`))
 		})
-		r.Get("/v1/host", func(w http.ResponseWriter, _ *http.Request) {
-			// Full HostResp shape; a partial object crashes the page.
-			mgr.mu.RLock()
-			active := len(mgr.sandboxes)
-			mgr.mu.RUnlock()
-			w.Header().Set("Content-Type", "application/json")
-			writeFprintf(w, `{"cpu_cores":%d,"cpu_percent":0,"load_avg":[0,0,0],`+
-				`"mem_total_mb":0,"mem_used_mb":0,"mem_available_mb":0,`+
-				`"disk_total_gb":0,"disk_used_gb":0,"disk_free_gb":0,`+
-				`"sandboxes_active":%d,"vcpu_committed":0,"mem_committed_mb":0}`,
-				runtime.NumCPU(), active)
-		})
+		r.Get("/v1/host", hostStub(mgr, devKey))
 
 		// After the fleet-passthrough /metrics stub above: chi lets the last
 		// registration of a pattern win, and the local ownership-checked

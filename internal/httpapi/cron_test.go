@@ -161,3 +161,106 @@ func TestCronRefusesAgentMode(t *testing.T) {
 		}
 	}
 }
+
+// A job acts on its sandbox, so on a private sandbox only its creator and an
+// operator may run, disable or delete it, as with the sandbox itself.
+func TestCronJobOnAPrivateSandboxIsTheCreators(t *testing.T) {
+	srv, st, _ := newTestServerWithStore(t)
+	k1, k2, kop := twoMembersAndAnOperator(t, st)
+	code, out := do(t, "POST", srv.URL+"/v1/sandboxes", k1, `{"template":"base","visibility":"private"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("private create = %d (%v)", code, out)
+	}
+	code, out = do(t, "POST", srv.URL+"/v1/cron", k1,
+		`{"sandbox_id":"`+str(out, "id")+`","schedule":"0 9 * * *","command":"true"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("cron create = %d (%v)", code, out)
+	}
+	job := srv.URL + "/v1/cron/" + str(out, "id")
+
+	for _, probe := range []struct{ method, path, body string }{
+		{"POST", job + "/run", ""},
+		{"POST", job + "/toggle", `{"enabled":false}`},
+		{"DELETE", job, ""},
+	} {
+		if code, _ := do(t, probe.method, probe.path, k2, probe.body); code != http.StatusNotFound {
+			t.Errorf("another member %s %s = %d, want 404", probe.method, probe.path, code)
+		}
+	}
+	if code, _ := do(t, "POST", job+"/toggle", kop, `{"enabled":false}`); code != http.StatusOK {
+		t.Errorf("operator toggle = %d, want 200", code)
+	}
+	if code, _ := do(t, "POST", job+"/run", k1, ""); code != http.StatusOK {
+		t.Errorf("creator run = %d, want 200", code)
+	}
+	if code, _ := do(t, "DELETE", job, k1, ""); code != http.StatusOK {
+		t.Errorf("creator delete = %d, want 200", code)
+	}
+}
+
+// The list carries each job's command, so it follows the same rule.
+func TestCronListHidesJobsOnAnotherMembersPrivateSandbox(t *testing.T) {
+	srv, st, _ := newTestServerWithStore(t)
+	k1, k2, kop := twoMembersAndAnOperator(t, st)
+	_, priv := do(t, "POST", srv.URL+"/v1/sandboxes", k1, `{"template":"base","visibility":"private"}`)
+	_, shared := do(t, "POST", srv.URL+"/v1/sandboxes", k1, `{"template":"base"}`)
+	for _, sb := range []string{str(priv, "id"), str(shared, "id")} {
+		if code, out := do(t, "POST", srv.URL+"/v1/cron", k1,
+			`{"sandbox_id":"`+sb+`","schedule":"0 9 * * *","command":"echo secret-`+sb+`"}`); code != http.StatusCreated {
+			t.Fatalf("cron create = %d (%v)", code, out)
+		}
+	}
+	listed := func(key string) int {
+		code, out := do(t, "GET", srv.URL+"/v1/cron", key, "")
+		if code != http.StatusOK {
+			t.Fatalf("list = %d (%v)", code, out)
+		}
+		jobs, _ := out["jobs"].([]any)
+		return len(jobs)
+	}
+	if n := listed(k2); n != 1 {
+		t.Errorf("another member sees %d jobs, want 1: the private sandbox's job leaked", n)
+	}
+	if n := listed(k1); n != 2 {
+		t.Errorf("the creator sees %d jobs, want 2", n)
+	}
+	if n := listed(kop); n != 2 {
+		t.Errorf("an operator sees %d jobs, want 2", n)
+	}
+}
+
+// A job whose sandbox row is gone may have been on a private sandbox, and
+// nothing records whose: only an operator sees it, command text included.
+func TestCronOrphanIsOperatorOnly(t *testing.T) {
+	srv, st, _ := newTestServerWithStore(t)
+	k1, k2, kop := twoMembersAndAnOperator(t, st)
+	_, priv := do(t, "POST", srv.URL+"/v1/sandboxes", k1, `{"template":"base","visibility":"private"}`)
+	code, job := do(t, "POST", srv.URL+"/v1/cron", k1,
+		`{"sandbox_id":"`+str(priv, "id")+`","schedule":"0 9 * * *","command":"echo secret"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("cron create = %d (%v)", code, job)
+	}
+	// The row goes the way the old lost-sandbox destroy took it: alone.
+	if err := st.DeleteSandbox(t.Context(), str(priv, "id")); err != nil {
+		t.Fatal(err)
+	}
+	listed := func(key string) int {
+		_, out := do(t, "GET", srv.URL+"/v1/cron", key, "")
+		jobs, _ := out["jobs"].([]any)
+		return len(jobs)
+	}
+	for name, key := range map[string]string{"another member": k2, "the creator": k1} {
+		if n := listed(key); n != 0 {
+			t.Errorf("%s sees %d orphaned jobs, want 0", name, n)
+		}
+	}
+	if n := listed(kop); n != 1 {
+		t.Errorf("an operator sees %d orphaned jobs, want 1", n)
+	}
+	if code, _ := do(t, "DELETE", srv.URL+"/v1/cron/"+str(job, "id"), k2, ""); code == http.StatusOK {
+		t.Error("another member deleted an orphaned job")
+	}
+	if code, _ := do(t, "DELETE", srv.URL+"/v1/cron/"+str(job, "id"), kop, ""); code != http.StatusOK {
+		t.Errorf("operator delete of an orphan = %d, want 200", code)
+	}
+}

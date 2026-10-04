@@ -67,6 +67,19 @@ var ErrVaultName = errors.New("secret name must be an env identifier (letters, d
 // An update keeps the original creator: a secret belongs to whoever put it
 // there, not to whoever last rotated its value.
 func (s *Store) PutSecret(ctx context.Context, orgID, name, value string, secret, autoInject bool, createdBy ...string) (VaultSecret, error) {
+	return s.putSecret(ctx, orgID, name, value, secret, &autoInject, createdBy...)
+}
+
+// PutSecretKeepingAutoInject is PutSecret for a save that does not mention
+// auto_inject: a new entry starts off, a replaced one keeps its setting. One
+// statement, so a concurrent SetSecretAutoInject is never overwritten by a
+// value read before it.
+func (s *Store) PutSecretKeepingAutoInject(ctx context.Context, orgID, name, value string, secret bool, createdBy ...string) (VaultSecret, error) {
+	return s.putSecret(ctx, orgID, name, value, secret, nil, createdBy...)
+}
+
+// putSecret stores an entry; autoInject nil leaves a replaced entry's flag as it is.
+func (s *Store) putSecret(ctx context.Context, orgID, name, value string, secret bool, autoInject *bool, createdBy ...string) (VaultSecret, error) {
 	name = strings.TrimSpace(name)
 	if sandbox.ValidEnvName(name) != nil {
 		return VaultSecret{}, ErrVaultName
@@ -87,7 +100,7 @@ func (s *Store) PutSecret(ctx context.Context, orgID, name, value string, secret
 		kind = VaultKindSecret
 	}
 	auto := 0
-	if autoInject {
+	if autoInject != nil && *autoInject {
 		auto = 1
 	}
 	owner := ""
@@ -95,15 +108,30 @@ func (s *Store) PutSecret(ctx context.Context, orgID, name, value string, secret
 		owner = createdBy[0]
 	}
 	now := time.Now().Unix()
+	setAuto := ", auto_inject = ?"
+	args := []any{orgID, name, enc, last4, kind, auto, owner, now, now, enc, last4, kind, auto, now}
+	if autoInject == nil {
+		setAuto = ""
+		args = append(args[:12], now)
+	}
 	if _, err := s.exec(ctx,
 		`INSERT INTO vault_secrets (org_id, name, value, last4, kind, auto_inject, created_by, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(org_id, name) DO UPDATE SET value = ?, last4 = ?, kind = ?, auto_inject = ?, updated_at = ?`,
-		orgID, name, enc, last4, kind, auto, owner, now, now, enc, last4, kind, auto, now,
+		 ON CONFLICT(org_id, name) DO UPDATE SET value = ?, last4 = ?, kind = ?`+setAuto+`, updated_at = ?`,
+		args...,
 	); err != nil {
 		return VaultSecret{}, err
 	}
-	out := VaultSecret{Name: name, Kind: kind, AutoInject: autoInject, Last4: last4,
+	stored := auto == 1
+	if autoInject == nil {
+		// Reported, not decided: the write above already left the flag alone.
+		if err := s.queryRow(ctx, `SELECT auto_inject FROM vault_secrets WHERE org_id = ? AND name = ?`,
+			orgID, name).Scan(&auto); err != nil {
+			return VaultSecret{}, err
+		}
+		stored = auto == 1
+	}
+	out := VaultSecret{Name: name, Kind: kind, AutoInject: stored, Last4: last4,
 		Scope: ScopeAll, CreatedBy: owner, CreatedAt: now, UpdatedAt: now}
 	if kind == VaultKindEnv {
 		out.Value = value
@@ -212,6 +240,24 @@ func (s *Store) SetSecretScope(ctx context.Context, orgID, name, scope string) (
 	res, err := s.exec(ctx,
 		`UPDATE vault_secrets SET scope = ?, updated_at = ? WHERE org_id = ? AND name = ?`,
 		scope, time.Now().Unix(), orgID, name)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// SetSecretAutoInject turns auto-injection on or off without touching the
+// value, so a caller never has to re-type a credential to flip it.
+// ok=false means no such secret.
+func (s *Store) SetSecretAutoInject(ctx context.Context, orgID, name string, autoInject bool) (bool, error) {
+	auto := 0
+	if autoInject {
+		auto = 1
+	}
+	res, err := s.exec(ctx,
+		`UPDATE vault_secrets SET auto_inject = ?, updated_at = ? WHERE org_id = ? AND name = ?`,
+		auto, time.Now().Unix(), orgID, name)
 	if err != nil {
 		return false, err
 	}

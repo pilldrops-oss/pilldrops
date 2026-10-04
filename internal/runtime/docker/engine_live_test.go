@@ -144,18 +144,10 @@ func TestEngineStatsReportsUsage(t *testing.T) {
 	}
 }
 
-func TestEngineTopAndInspectSize(t *testing.T) {
+func TestEngineInspectSize(t *testing.T) {
 	e, cid := liveContainer(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-
-	titles, procs, err := e.Top(ctx, cid, "-eo pid,comm")
-	if err != nil {
-		t.Fatalf("top: %v", err)
-	}
-	if len(titles) < 2 || len(procs) == 0 {
-		t.Errorf("top returned titles=%v procs=%d, want columns and at least one process", titles, len(procs))
-	}
 
 	if _, _, code, err := e.Exec(ctx, cid, execConfig{
 		Cmd: []string{"/bin/sh", "-c", "dd if=/dev/zero of=/tmp/blob bs=1M count=8 2>/dev/null"},

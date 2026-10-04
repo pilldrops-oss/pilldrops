@@ -294,7 +294,7 @@ func TestBooleanFlagsRoundTrip(t *testing.T) {
 	if !job.Enabled {
 		t.Fatal("a new cron job should be enabled")
 	}
-	due, err := s.DueCronJobs(ctx, time.Now().Unix(), 10)
+	due, err := s.DueCronJobs(ctx, "", time.Now().Unix(), 10)
 	if err != nil {
 		t.Fatalf("due: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestBooleanFlagsRoundTrip(t *testing.T) {
 	if _, err := s.SetCronEnabled(ctx, "org-b", job.ID, false); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
-	due, err = s.DueCronJobs(ctx, time.Now().Unix(), 10)
+	due, err = s.DueCronJobs(ctx, "", time.Now().Unix(), 10)
 	if err != nil {
 		t.Fatalf("due after disable: %v", err)
 	}

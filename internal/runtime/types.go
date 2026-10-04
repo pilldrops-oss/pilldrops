@@ -70,6 +70,12 @@ var (
 	// ErrImageNotPublished means the artifact store has no build for the tag.
 	// Not a failure: plain registry images answer this and fall through to a pull.
 	ErrImageNotPublished = errors.New("image is not published to the artifact store")
+	// ErrProtectedProcess means the pid is the sandbox's own keepalive, whose
+	// death ends the sandbox: the caller's input, so a 4xx.
+	ErrProtectedProcess = errors.New("that process keeps the sandbox alive and cannot be signalled")
+	// ErrWontStayUp means a revive's start succeeded and a state read then
+	// showed the instance stopped again: a crash, not an engine still settling.
+	ErrWontStayUp = errors.New("would not stay up after restart")
 )
 
 // Resources is a per-sandbox CPU/RAM allocation.
@@ -323,6 +329,24 @@ type Liveness interface {
 	Alive() bool
 }
 
+// OOMKilledReporter is an optional Liveness companion: whether an instance
+// that Alive reports dead was killed for exceeding its memory limit.
+type OOMKilledReporter interface {
+	OOMKilled() bool
+}
+
+// Reviver is an optional Liveness companion. Casualty reports that the last
+// Alive read found the instance stopped by its own engine restarting (dockerd
+// without live-restore) rather than dead; Revive starts it again and returns
+// the instance to use from then on, its published ports re-read. EngineStarted
+// is when the engine now running started, zero when unknown: a death under the
+// same engine as the last revive is the instance's own doing.
+type Reviver interface {
+	Casualty() bool
+	Revive(ctx context.Context) (Instance, error)
+	EngineStarted() time.Time
+}
+
 // Instance is one running sandbox's compute. It is nil while paused/stopped.
 type Instance interface {
 	ID() string
@@ -392,9 +416,11 @@ type Runtime interface {
 }
 
 // Adopter is implemented by runtimes whose instances outlive the daemon; Adopt
-// reattaches to the live instance for sandboxID.
+// reattaches to the instance for sandboxID. ErrNotFound means there is none;
+// any other error means the runtime could not tell, and nothing may be decided
+// from it.
 type Adopter interface {
-	Adopt(ctx context.Context, sandboxID string) (Instance, bool)
+	Adopt(ctx context.Context, sandboxID string) (Instance, error)
 }
 
 // Sweeper garbage-collects instances not in known, the full set of sandbox ids
@@ -511,6 +537,13 @@ type CheckpointInfo struct {
 type Checkpointer interface {
 	Checkpoint(ctx context.Context, inst Instance, dst SnapshotRef) (CheckpointInfo, error)
 	RestoreCheckpoint(ctx context.Context, inst Instance, src SnapshotRef, spec BootSpec) (Instance, error)
+}
+
+// PausedCheckpointer is an optional Checkpointer capability: capture a paused
+// sandbox from its pause snapshot, without starting it. A runtime without it
+// has its paused sandboxes woken for the capture and paused again.
+type PausedCheckpointer interface {
+	CheckpointPaused(ctx context.Context, sandboxID string, snap, dst SnapshotRef) (CheckpointInfo, error)
 }
 
 // PortableCapture is an optional Runtime capability: make a capture directory

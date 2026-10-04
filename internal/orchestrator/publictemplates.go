@@ -1,8 +1,15 @@
 package orchestrator
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"maps"
 	"net/http"
+	"net/http/httptest"
 
+	"github.com/pilldrops-oss/pilldrops/internal/cluster"
+	"github.com/pilldrops-oss/pilldrops/internal/store"
 	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
 
@@ -11,6 +18,72 @@ import (
 // publicCatalog must redact.
 func (s *Server) registerPublicTemplateRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/templates/public", s.handlePublicTemplates)
+	mux.HandleFunc("GET /v1/templates", s.auth(s.handleTemplates))
+}
+
+// handleTemplates relays a node's catalogue and marks each entry with
+// available: whether some healthy, uncordoned node can boot it, by the
+// scheduler's own rule. /v1/nodes is operator-only, so this is the only way a
+// tenant can grey out a template no node will take; it names no node.
+func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
+	rec := httptest.NewRecorder()
+	s.proxyToNode(rec, r, http.MethodGet, r.URL.Path)
+	var cat []map[string]any
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &cat) != nil {
+		maps.Copy(w.Header(), rec.Header())
+		w.WriteHeader(rec.Code)
+		_, _ = w.Write(rec.Body.Bytes()) //nolint:errcheck // best-effort: headers are committed
+		return
+	}
+	now := s.now()
+	// An older node lists internal templates; they never reach a tenant.
+	listed := make([]map[string]any, 0, len(cat))
+	for _, t := range cat {
+		id, _ := t["id"].(string)
+		if templates.Internal(id) {
+			continue
+		}
+		// The same Request a create of this template places with.
+		place := cluster.Request{Template: id, Runtime: templateRuntime(id), NoBuild: s.noReadyBuild(r.Context(), id)}
+		t["available"], _ = s.reg.TemplateSupport(place, now, cluster.NodeTTL)
+		listed = append(listed, t)
+	}
+	writeJSON(w, http.StatusOK, listed)
+}
+
+// handleImagesList relays a node's image list without its internal templates,
+// which an older node still lists.
+func (s *Server) handleImagesList(w http.ResponseWriter, r *http.Request) {
+	rec := httptest.NewRecorder()
+	s.proxyToNode(rec, r, http.MethodGet, "/v1/images")
+	var page struct {
+		Images []map[string]any `json:"images"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &page) != nil {
+		maps.Copy(w.Header(), rec.Header())
+		w.WriteHeader(rec.Code)
+		_, _ = w.Write(rec.Body.Bytes()) //nolint:errcheck // best-effort: headers are committed
+		return
+	}
+	listed := make([]map[string]any, 0, len(page.Images))
+	for _, img := range page.Images {
+		if id, _ := img["id"].(string); !templates.Internal(id) {
+			listed = append(listed, img)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"images": listed})
+}
+
+// noReadyBuild reports that the store knows tmpl has no ready build, so a node
+// that would have to fetch it cannot boot it. Without a store, or on a read
+// error, it says false and leaves the answer to the node.
+func (s *Server) noReadyBuild(ctx context.Context, tmpl string) bool {
+	st := s.st.Load()
+	if st == nil || tmpl == "" {
+		return false
+	}
+	_, err := st.ReadyBuildForTemplate(ctx, tmpl)
+	return errors.Is(err, store.ErrNoReadyBuild)
 }
 
 func (s *Server) handlePublicTemplates(w http.ResponseWriter, r *http.Request) {
@@ -23,7 +96,7 @@ func (s *Server) handlePublicTemplates(w http.ResponseWriter, r *http.Request) {
 // form). Env must be copied: the slice shares the catalogue's backing array,
 // so redacting in place would strip the authenticated endpoint too.
 func publicCatalog() []templates.Template {
-	cat := templates.Catalog()
+	cat := templates.Listed()
 	out := make([]templates.Template, 0, len(cat))
 	for _, t := range cat {
 		if len(t.Env) > 0 {

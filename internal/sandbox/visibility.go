@@ -1,6 +1,9 @@
 package sandbox
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 // Visibility values. A sandbox is org-visible unless its creator says
 // otherwise, which is what every sandbox was before visibility existed: an
@@ -94,4 +97,25 @@ func CreatedByCaller(createdBy, callerKeyID string) bool {
 // third column that says so, not a quiet reinterpretation of this one.
 func ReachableAnonymously(visibility, createdBy string) bool {
 	return Visible("", visibility, createdBy, "", false)
+}
+
+// PreviewGeneration is the revocation generation a browser preview token is
+// bound to: the visibility, marked when the preview is public, and the count of
+// access flips so far. The count is what retracts: every flip of visibility or
+// public bumps it, so a token minted before a flip never validates again, even
+// once the settings are flipped back. flips 0 renders exactly the generation
+// used before the count existed, so tokens minted then keep working until the
+// next flip. The minting portal and the verifying orchestrator both call this
+// so they cannot drift.
+func PreviewGeneration(visibility string, public bool, flips int64) string {
+	if visibility == "" {
+		visibility = VisibilityOrg
+	}
+	if public {
+		visibility += "+public"
+	}
+	if flips > 0 {
+		visibility += "#" + strconv.FormatInt(flips, 10)
+	}
+	return visibility
 }

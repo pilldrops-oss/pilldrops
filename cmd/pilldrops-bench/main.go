@@ -17,19 +17,21 @@ import (
 )
 
 var (
-	host     = flag.String("host", "http://localhost:18080", "server base URL")
-	key      = flag.String("key", os.Getenv("PILLDROPS_API_KEY"), "API key")
-	template = flag.String("template", "base", "template to create")
-	mode     = flag.String("mode", "ramp", "ramp | churn | invoke | latency")
-	step     = flag.Int("step", 5, "ramp: sandboxes added per stage")
-	interval = flag.Int("interval", 4, "ramp: seconds per stage")
-	maxN     = flag.Int("max", 300, "ramp: hard stop count")
-	memFloor = flag.Int("mem-floor-mb", 2048, "ramp: stop if mem_available drops below")
-	loadMax  = flag.Float64("load-max", 0, "ramp: stop if 1-min load average exceeds (0 = off)")
-	start    = flag.String("start", "", "persistent workload command run in each sandbox (real load, not an idle pod)")
-	memMB    = flag.Int("mem", 0, "memory_mb per sandbox (0 = template default); small values pack more per node")
-	conc     = flag.Int("c", 10, "churn/invoke: concurrency")
-	total    = flag.Int("n", 200, "churn/invoke: total requests; latency: samples to take")
+	host = flag.String("host", "http://localhost:18080", "server base URL")
+	key  = flag.String("key", "", "API key (default $PILLDROPS_API_KEY)")
+	// GET /v1/host is node-wide, so a tenant key is refused on it.
+	operatorKey = flag.String("operator-key", "", "operator key for host stats (GET /v1/host) (default $PILLDROPS_OPERATOR_KEY, then -key)")
+	template    = flag.String("template", "base", "template to create")
+	mode        = flag.String("mode", "ramp", "ramp | churn | invoke | latency")
+	step        = flag.Int("step", 5, "ramp: sandboxes added per stage")
+	interval    = flag.Int("interval", 4, "ramp: seconds per stage")
+	maxN        = flag.Int("max", 300, "ramp: hard stop count")
+	memFloor    = flag.Int("mem-floor-mb", 2048, "ramp: stop if mem_available drops below")
+	loadMax     = flag.Float64("load-max", 0, "ramp: stop if 1-min load average exceeds (0 = off)")
+	start       = flag.String("start", "", "persistent workload command run in each sandbox (real load, not an idle pod)")
+	memMB       = flag.Int("mem", 0, "memory_mb per sandbox (0 = template default); small values pack more per node")
+	conc        = flag.Int("c", 10, "churn/invoke: concurrency")
+	total       = flag.Int("n", 200, "churn/invoke: total requests; latency: samples to take")
 
 	// latency mode. Runtime, runner class and commit have no safe default, so they are required.
 	cacheState  = flag.String("cache", "hot", "latency: cold | warm | hot — the template cache state to establish before sampling")
@@ -50,11 +52,15 @@ var (
 type client struct{ c *http.Client }
 
 func (cl client) req(method, path, body string) (int, []byte) {
+	return cl.reqAs(*key, method, path, body)
+}
+
+func (cl client) reqAs(apiKey, method, path, body string) (int, []byte) {
 	r, err := http.NewRequest(method, *host+path, bytes.NewBufferString(body))
 	if err != nil {
 		return 0, nil
 	}
-	r.Header.Set("Authorization", "Bearer "+*key)
+	r.Header.Set("Authorization", "Bearer "+apiKey)
 	r.Header.Set("Content-Type", "application/json")
 	resp, err := cl.c.Do(r)
 	if err != nil {
@@ -96,11 +102,20 @@ func (cl client) exec(id, cmd string) {
 	cl.req("POST", "/v1/sandboxes/"+id+"/exec", string(body))
 }
 
-func (cl client) hostStats() map[string]any {
-	_, b := cl.req("GET", "/v1/host", "")
+func (cl client) hostStats() (map[string]any, error) {
+	k := *operatorKey
+	if k == "" {
+		k = *key
+	}
+	code, b := cl.reqAs(k, "GET", "/v1/host", "")
+	if code != http.StatusOK {
+		return nil, fmt.Errorf("GET /v1/host answered %d: host stats need an operator key (-operator-key or PILLDROPS_OPERATOR_KEY)", code)
+	}
 	var m map[string]any
-	_ = json.Unmarshal(b, &m) //nolint:errcheck
-	return m
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, fmt.Errorf("GET /v1/host: %w", err)
+	}
+	return m, nil
 }
 
 // tracker records every created id so cleanup can sweep them.
@@ -117,8 +132,21 @@ func (t *tracker) all() []string {
 	return slices.Collect(maps.Keys(t.ids))
 }
 
+// keysFromEnv fills the keys left unset on the command line from the
+// environment. After flag.Parse rather than as flag defaults, so -help never
+// prints a secret.
+func keysFromEnv() {
+	if *key == "" {
+		*key = os.Getenv("PILLDROPS_API_KEY")
+	}
+	if *operatorKey == "" {
+		*operatorKey = os.Getenv("PILLDROPS_OPERATOR_KEY")
+	}
+}
+
 func main() {
 	flag.Parse()
+	keysFromEnv()
 	if *key == "" {
 		fmt.Fprintln(os.Stderr, "set -key or PILLDROPS_API_KEY")
 		os.Exit(2)
@@ -164,6 +192,11 @@ func main() {
 // runRamp adds step live sandboxes every interval seconds until a ceiling:
 // create failure, mem floor, or -max.
 func runRamp(cl client, tr *tracker) {
+	// The mem-floor and load ceilings read host stats; without them the ramp has no ceiling but -max.
+	if _, err := cl.hostStats(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	fmt.Printf("%-4s %-6s %-6s %-14s %-9s %-9s %s\n", "live", "cpu%", "load", "mem_used/total", "disk_used", "crt_p95ms", "note")
 	live := 0
 	for live < *maxN {
@@ -196,7 +229,11 @@ func runRamp(cl client, tr *tracker) {
 			}()
 		}
 		wg.Wait()
-		hs := cl.hostStats()
+		hs, err := cl.hostStats()
+		if err != nil {
+			fmt.Printf("\nstopped at %d concurrent — %v\n", live, err)
+			return
+		}
 		avail, _ := hs["mem_available_mb"].(float64)
 		memUsed, _ := hs["mem_used_mb"].(float64)
 		memTot, _ := hs["mem_total_mb"].(float64)

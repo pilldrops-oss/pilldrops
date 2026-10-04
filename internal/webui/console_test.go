@@ -308,3 +308,63 @@ func TestEveryAuthFormSharesTheShell(t *testing.T) {
 		}
 	}
 }
+
+func TestConsoleSignsInWithACustomerKey(t *testing.T) {
+	s, mux := consoleServer(t, newFakeAdmins())
+	s.SetKeyCheck(func(_ context.Context, key string) (string, error) {
+		switch key {
+		case "outage":
+			return "", context.DeadlineExceeded
+		case "pd_customer":
+			return "user", nil
+		case "pd_node":
+			return "operator", nil
+		}
+		return "", nil
+	})
+
+	rr := post(mux, "/dashboard/login", url.Values{"key": {"pd_customer"}})
+	if rr.Code != http.StatusFound {
+		t.Fatalf("valid key = %d, want 302 (body %q)", rr.Code, rr.Body.String())
+	}
+	var got *http.Cookie
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == SessionCookie {
+			got = c
+		}
+	}
+	// The /v1 layer reads a raw key in this cookie as that key.
+	if got == nil || got.Value != "pd_customer" || !got.HttpOnly || got.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("session cookie = %+v, want the key, HttpOnly, SameSite=Strict", got)
+	}
+
+	if rr := post(mux, "/dashboard/login", url.Values{"key": {"pd_revoked"}}); rr.Code != http.StatusUnauthorized {
+		t.Errorf("unknown key = %d, want 401", rr.Code)
+	}
+	if rr := post(mux, "/dashboard/login", url.Values{"key": {"session-signing-key"}}); rr.Code != http.StatusUnauthorized {
+		t.Errorf("the master key = %d, want 401: it is not a customer key", rr.Code)
+	}
+	if rr := post(mux, "/dashboard/login", url.Values{"key": {"outage"}}); rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("store error = %d, want 503", rr.Code)
+	}
+
+	// An operator-role key (node or bootstrap) must not open a console
+	// session; operators sign in with their admin account instead.
+	unknown := post(mux, "/dashboard/login", url.Values{"key": {"pd_revoked"}})
+	operator := post(mux, "/dashboard/login", url.Values{"key": {"pd_node"}})
+	if operator.Code != http.StatusUnauthorized {
+		t.Errorf("operator-role key = %d, want 401", operator.Code)
+	}
+	if operator.Body.String() != unknown.Body.String() {
+		t.Error("an operator-role key gets a different error than an unknown key")
+	}
+}
+
+func TestSignInOffersBothEmailAndKey(t *testing.T) {
+	body := string(signinHTML(""))
+	for _, want := range []string{`name="email"`, `name="password"`, `name="key"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("sign-in page lacks %s", want)
+		}
+	}
+}

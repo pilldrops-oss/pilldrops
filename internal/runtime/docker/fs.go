@@ -3,11 +3,13 @@ package docker
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os/exec"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -99,7 +101,7 @@ func (d *dockerFS) Read(ctx context.Context, p string) ([]byte, error) {
 		if strings.Contains(se, "No such file") {
 			return nil, fs.ErrNotExist
 		}
-		return nil, fmt.Errorf("read %s: %s", p, strings.TrimSpace(se))
+		return nil, fsFail("read "+p, nil, code, se)
 	}
 	return []byte(out), nil
 }
@@ -117,7 +119,7 @@ func (d *dockerFS) Write(ctx context.Context, p string, data []byte) error {
 			bytes.NewReader(data))
 		if err == nil {
 			if code != 0 {
-				return fmt.Errorf("write %s: %s", p, strings.TrimSpace(se))
+				return fsFail("write "+p, nil, code, se)
 			}
 			return nil
 		}
@@ -132,7 +134,7 @@ func (d *dockerFS) Write(ctx context.Context, p string, data []byte) error {
 	var se bytes.Buffer
 	cmd.Stderr = &se
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("write %s: %w %s", p, err, strings.TrimSpace(se.String()))
+		return fsFail("write "+p, err, 0, se.String())
 	}
 	return nil
 }
@@ -156,7 +158,7 @@ func (d *dockerFS) WriteFrom(ctx context.Context, p string, r io.Reader) (int64,
 		return 0, err
 	}
 	if code != 0 {
-		return 0, fmt.Errorf("write %s: %s", p, strings.TrimSpace(se))
+		return 0, fsFail("write "+p, nil, code, se)
 	}
 	return cr.n, nil
 }
@@ -184,9 +186,15 @@ func (c *countingReader) Read(b []byte) (int, error) {
 	return n, err
 }
 
+// refuseRemoveHome is the refusal of a remove of the sandbox home itself, on every runtime.
+const refuseRemoveHome = "refusing to remove the sandbox home"
+
 // listScript prints one line per entry: name\ttype(d|f)\tsize\tmtimeEpoch.
-// POSIX sh only, so it works on every slim base image.
-const listScript = `cd "$1" 2>/dev/null || exit 0
+// POSIX sh only, so it works on every slim base image. A missing path and a
+// file are told apart, as on firecracker, so both answer 404 and 400 alike.
+const listScript = `[ -e "$1" ] || { echo "list: No such file or directory" >&2; exit 1; }
+[ -d "$1" ] || { echo "list: Not a directory" >&2; exit 1; }
+cd "$1" || exit 1
 for e in * .*; do
   [ -e "$e" ] || continue
   case "$e" in .|..) continue;; esac
@@ -198,7 +206,7 @@ done`
 func (d *dockerFS) List(ctx context.Context, p string) ([]rt.DirEntry, error) {
 	out, se, code, err := d.shell(ctx, listScript, d.abs(p))
 	if err != nil || code != 0 {
-		return nil, fmt.Errorf("list %s: %w %s", p, err, strings.TrimSpace(se))
+		return nil, fsFail("list "+p, err, code, se)
 	}
 	var entries []rt.DirEntry
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -222,7 +230,7 @@ func (d *dockerFS) List(ctx context.Context, p string) ([]rt.DirEntry, error) {
 func (d *dockerFS) Mkdir(ctx context.Context, p string) error {
 	_, se, code, err := d.exec(ctx, "mkdir", "-p", "--", d.abs(p))
 	if err != nil || code != 0 {
-		return fmt.Errorf("mkdir %s: %w %s", p, err, strings.TrimSpace(se))
+		return fsFail("mkdir "+p, err, code, se)
 	}
 	return nil
 }
@@ -233,15 +241,19 @@ const moveScript = `mkdir -p "$(dirname "$2")" && mv "$1" "$2"`
 func (d *dockerFS) Move(ctx context.Context, src, dst string) error {
 	_, se, code, err := d.shell(ctx, moveScript, d.abs(src), d.abs(dst))
 	if err != nil || code != 0 {
-		return fmt.Errorf("move %s->%s: %w %s", src, dst, err, strings.TrimSpace(se))
+		return fsFail("move "+src+"->"+dst, err, code, se)
 	}
 	return nil
 }
 
 func (d *dockerFS) Remove(ctx context.Context, p string) error {
+	// rm -rf of the home empties it before failing on the directory itself.
+	if d.abs(p) == containerWorkdir {
+		return fmt.Errorf("%w: remove %s: %s", fs.ErrInvalid, p, refuseRemoveHome)
+	}
 	_, se, code, err := d.exec(ctx, "rm", "-rf", "--", d.abs(p))
 	if err != nil || code != 0 {
-		return fmt.Errorf("remove %s: %w %s", p, err, strings.TrimSpace(se))
+		return fsFail("remove "+p, err, code, se)
 	}
 	return nil
 }
@@ -255,7 +267,7 @@ func (d *dockerFS) Stat(ctx context.Context, p string) (rt.FileInfo, error) {
 		if strings.Contains(se, "No such file") {
 			return rt.FileInfo{}, fs.ErrNotExist
 		}
-		return rt.FileInfo{}, fmt.Errorf("stat %s: %s", p, strings.TrimSpace(se))
+		return rt.FileInfo{}, fsFail("stat "+p, nil, code, se)
 	}
 	parts := strings.SplitN(strings.TrimSpace(out), "|", 4)
 	if len(parts) < 3 {
@@ -274,6 +286,70 @@ func (d *dockerFS) Stat(ctx context.Context, p string) (rt.FileInfo, error) {
 		Mode:     mode,
 		Modified: time.Unix(mt, 0),
 	}, nil
+}
+
+// fsFail is a failed helper's error. Only a failure inside the container
+// is the caller's path problem, tagged with the sentinel its stderr names so
+// the API answers 404/409/403/400. A failure to run the helper at all (the
+// engine or CLI unreachable, docker.sock refused, docker exec's own 125) is
+// the node's, and a helper the image does not have (126/127) is the image's:
+// both are left untagged and reach the caller as a 503, never as a 403 for a
+// "permission denied" that was not about their path.
+func fsFail(what string, err error, code int, stderr string) error {
+	se := strings.TrimSpace(stderr)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		err, code = nil, exitErr.ExitCode()
+	}
+	switch {
+	case err != nil:
+		return fmt.Errorf("%s: node could not run the file operation: %w %s", what, err, se)
+	case code == 125 || dockerCLIFault(se):
+		return fmt.Errorf("%s: node could not run the file operation: %s", what, se)
+	case code == 126 || code == 127:
+		return fmt.Errorf("%s: the sandbox image lacks %s: %s", what, missingTool(se), se)
+	}
+	if kind := rt.FSKind(se); kind != nil {
+		return fmt.Errorf("%w: %s: %s", kind, what, se)
+	}
+	return fmt.Errorf("%s: %s", what, se)
+}
+
+// dockerCLIPrefixes open the errors the docker CLI writes for itself, as
+// opposed to what the command it ran in the container wrote. Matched only at
+// the start of stderr: a helper's own message starts with the helper's name
+// ("mkdir: …"), so a tenant path that happens to say docker.sock cannot pass
+// for one.
+var dockerCLIPrefixes = []string{
+	"error response from daemon",
+	"cannot connect to the docker daemon",
+	"permission denied while trying to connect to the docker daemon",
+	"error during connect",
+	"error: no such container",
+}
+
+func dockerCLIFault(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	for _, p := range dockerCLIPrefixes {
+		if strings.HasPrefix(lower, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// missingToolRe finds the binary an exec could not start, in runc's
+// `exec: "stat": executable file not found` and sh's `sh: 1: stat: not found`.
+var missingToolRe = regexp.MustCompile(`exec: "([^"]+)"|([^\s:]+): (?:not found|command not found|Permission denied)\s*$`)
+
+func missingTool(stderr string) string {
+	if m := missingToolRe.FindStringSubmatch(stderr); m != nil {
+		if m[1] != "" {
+			return m[1]
+		}
+		return m[2]
+	}
+	return "a tool this file operation needs"
 }
 
 var _ rt.FileSystem = (*dockerFS)(nil)

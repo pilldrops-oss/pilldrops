@@ -6,7 +6,7 @@ import (
 )
 
 func TestPrometheusMetricsEndpoint(t *testing.T) {
-	srv, key := newTestServer(t)
+	srv, key := newOperatorTestServer(t)
 
 	// This anonymous probe counts as one auth failure below.
 	if code, _ := getText(t, srv.URL+"/metrics", ""); code != 401 {

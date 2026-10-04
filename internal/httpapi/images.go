@@ -55,7 +55,7 @@ func (s *Server) handleImages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().Unix()
-	cat := templates.Catalog()
+	cat := templates.Listed()
 	out := make([]ImageInfo, 0, len(cat))
 	for _, t := range cat {
 		out = append(out, imageInfo(t, flags[t.ID], now))

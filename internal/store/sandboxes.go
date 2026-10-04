@@ -279,6 +279,18 @@ func (s *Store) ReviveLost(ctx context.Context, nodeID string, live map[string]s
 	return n, nil
 }
 
+// SandboxIDsOnTemplate returns the id of every stored sandbox on template, on
+// any node and in any state: a node keeps a capture while one names it.
+// ponytail: unindexed scan, run once per destroy of a capture's last loaded
+// user; index template if the table grows past what that read can afford.
+func (s *Store) SandboxIDsOnTemplate(ctx context.Context, template string) ([]string, error) {
+	return collectRows(ctx, s, `SELECT id FROM sandboxes WHERE template = ?`,
+		[]any{template}, scanInto(func(sc rowScanner) (string, error) {
+			var id string
+			return id, sc.Scan(&id)
+		}))
+}
+
 // SandboxByID returns one live sandbox row, any org.
 func (s *Store) SandboxByID(ctx context.Context, id string) (SandboxRecord, bool, error) {
 	return s.oneSandbox(ctx, `WHERE id = ?`, id)
@@ -298,6 +310,27 @@ func (s *Store) DeleteSandbox(ctx context.Context, id string) error {
 	}
 	_, err := s.exec(ctx, `DELETE FROM sandboxes WHERE id = ?`, id)
 	return err
+}
+
+// ForgetSandbox deletes a sandbox and everything bound to it: chat links and
+// messages, cron jobs, config, integrations and agent webhooks, then the row.
+// Every destroy path must come here, not to DeleteSandbox alone, or the bound
+// rows outlive it; an orphaned cron job on a private sandbox leaked its command
+// text to the whole org. The agent mirror deliberately survives, bounded by
+// retention. Per-table cleanup is best-effort; the sandbox row is deleted last.
+func (s *Store) ForgetSandbox(ctx context.Context, id string) error {
+	for _, forget := range []func(context.Context, string) error{
+		s.DeleteChatLinksForSandbox,
+		s.DeleteChatMessagesForSandbox,
+		s.DeleteCronJobsForSandbox,
+		s.DeleteSandboxConfig,
+		s.DeleteSandboxIntegrations,
+		s.DeleteAgentWebhooksForSandbox,
+		s.deletePreviewGeneration,
+	} {
+		_ = forget(ctx, id)
+	}
+	return s.DeleteSandbox(ctx, id)
 }
 
 // SandboxesByOrg returns the live sandboxes for one org, id-ordered.

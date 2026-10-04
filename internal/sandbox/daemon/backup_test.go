@@ -581,9 +581,8 @@ func TestBackupRefusalsNameWhatIsMissing(t *testing.T) {
 // the fake's own instance so the capture path still finds a checkpointer.
 type adoptAll struct{ *runtimetest.Fake }
 
-func (a adoptAll) Adopt(ctx context.Context, id string) (rt.Instance, bool) {
-	inst, err := a.Boot(ctx, rt.BootSpec{SandboxID: id})
-	return inst, err == nil
+func (a adoptAll) Adopt(ctx context.Context, id string) (rt.Instance, error) {
+	return a.Boot(ctx, rt.BootSpec{SandboxID: id})
 }
 
 // Retention used to live only in a struct field in this process: the backup
@@ -793,4 +792,160 @@ func waitPending(t *testing.T, st *store.Store, id string) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("the backup never reached pending")
+}
+
+// wakeCountRT counts the resumes that boot a paused sandbox again, and runs
+// onCapture inside each running capture.
+type wakeCountRT struct {
+	*runtimetest.Fake
+	wakes     int
+	onCapture func()
+}
+
+func (r *wakeCountRT) Checkpoint(ctx context.Context, inst rt.Instance, dst rt.SnapshotRef) (rt.CheckpointInfo, error) {
+	if r.onCapture != nil {
+		r.onCapture()
+	}
+	return r.Fake.Checkpoint(ctx, inst, dst)
+}
+
+func (r *wakeCountRT) Restore(ctx context.Context, snap rt.SnapshotRef, spec rt.BootSpec) (rt.Instance, error) {
+	r.wakes++
+	return r.Fake.Restore(ctx, snap, spec)
+}
+
+// snapshotCaptureRT captures a paused sandbox from its pause snapshot, as
+// docker does from its committed pause image.
+type snapshotCaptureRT struct {
+	*wakeCountRT
+	fromSnapshot int
+}
+
+func (r *snapshotCaptureRT) CheckpointPaused(_ context.Context, _ string, _, dst rt.SnapshotRef) (rt.CheckpointInfo, error) {
+	r.fromSnapshot++
+	return rt.CheckpointInfo{Kind: "disk"}, os.WriteFile(filepath.Join(dst.Path, "payload"), []byte("paused"), 0o600)
+}
+
+// After a node restart every firecracker sandbox comes back paused, and each
+// scheduled backup of one failed with "cannot checkpoint from state paused".
+func TestBackupOfAPausedSandbox(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		fromSnapshot bool
+	}{
+		{"woken, captured and paused again", false},
+		{"captured from its pause snapshot", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			st, err := store.Open(t.Context(), filepath.Join(dir, "state.db"))
+			if err != nil {
+				t.Fatalf("store: %v", err)
+			}
+			t.Cleanup(func() { st.Close() })
+			wake := &wakeCountRT{Fake: runtimetest.NewFake()}
+			snapRT := &snapshotCaptureRT{wakeCountRT: wake}
+			var runtime rt.Runtime = wake
+			if tc.fromSnapshot {
+				runtime = snapRT
+			}
+			d := New(Config{
+				Runtime: runtime, Backups: st, Blobs: newCountingBlobs(),
+				SnapshotDir: filepath.Join(dir, "snap"), IdleTimeout: time.Minute, HardTTL: time.Hour,
+			})
+			ctx := t.Context()
+			sb := createRunning(t, d)
+			if err := d.Pause(ctx, sb.ID); err != nil {
+				t.Fatalf("pause: %v", err)
+			}
+
+			row, err := d.Backup(ctx, sb.ID)
+			if err != nil {
+				t.Fatalf("backup of a paused sandbox: %v", err)
+			}
+			if b := waitBackup(t, st, row.ID); b.Status != store.BackupReady {
+				t.Fatalf("backup = %+v, want ready", b)
+			}
+			if got, _ := d.Get(sb.ID); got.State != StatePaused {
+				t.Errorf("sandbox is %s after the backup, want paused", got.State)
+			}
+			if tc.fromSnapshot && (snapRT.fromSnapshot != 1 || wake.wakes != 0) {
+				t.Errorf("snapshot captures = %d, wakes = %d; want one capture and no wake", snapRT.fromSnapshot, wake.wakes)
+			}
+			if !tc.fromSnapshot && wake.wakes != 1 {
+				t.Errorf("wakes = %d; a runtime that cannot capture a pause snapshot is woken once", wake.wakes)
+			}
+		})
+	}
+}
+
+// A capture that wakes a paused sandbox must not pause it under its owner, nor
+// keep an abandoned one alive: a 15-minute backup schedule reset its idle
+// clock on every run.
+func TestCaptureWakeRestoresTheIdleClockAndLeavesAUsedSandboxRunning(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		used bool
+		want State
+	}{
+		{"abandoned: paused again, idle clock kept", false, StatePaused},
+		{"used during the capture: left running", true, StateRunning},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			st, err := store.Open(t.Context(), filepath.Join(dir, "state.db"))
+			if err != nil {
+				t.Fatalf("store: %v", err)
+			}
+			t.Cleanup(func() { st.Close() })
+			clk := &manualClock{t: time.Unix(1_000_000, 0)}
+			r := &wakeCountRT{Fake: runtimetest.NewFake()}
+			d := New(Config{
+				Runtime: r, Backups: st, Blobs: newCountingBlobs(), Clock: clk,
+				SnapshotDir: filepath.Join(dir, "snap"), IdleTimeout: time.Hour, HardTTL: 24 * time.Hour,
+			})
+			ctx := t.Context()
+			sb := createRunning(t, d)
+			if err := d.Pause(ctx, sb.ID); err != nil {
+				t.Fatalf("pause: %v", err)
+			}
+			idle, _ := d.lastActive(sb.ID)
+			clk.Advance(time.Hour)
+			if tc.used {
+				r.onCapture = func() {
+					clk.Advance(time.Second)
+					if _, err := d.Exec(ctx, sb.ID, rt.ExecSpec{Cmd: "true"}); err != nil {
+						t.Errorf("exec during the capture: %v", err)
+					}
+				}
+			}
+
+			row, err := d.Backup(ctx, sb.ID)
+			if err != nil {
+				t.Fatalf("backup: %v", err)
+			}
+			waitBackup(t, st, row.ID)
+			got, _ := d.Get(sb.ID)
+			if got.State != tc.want {
+				t.Fatalf("state after the backup = %s, want %s", got.State, tc.want)
+			}
+			if after, _ := d.lastActive(sb.ID); !tc.used && !after.Equal(idle) {
+				t.Errorf("idle clock = %v after the backup, want %v from before the wake", after, idle)
+			}
+		})
+	}
+}
+
+// A resume of a sandbox already running is still its owner asking for it.
+func TestResumeOfARunningSandboxIsActivity(t *testing.T) {
+	clk := &manualClock{t: time.Unix(1_000_000, 0)}
+	d := New(Config{Runtime: runtimetest.NewFake(), Clock: clk, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour})
+	sb := createRunning(t, d)
+	clk.Advance(time.Minute)
+	if err := d.Resume(t.Context(), sb.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := d.lastActive(sb.ID); !got.Equal(clk.Now()) {
+		t.Errorf("idle clock = %v, want %v", got, clk.Now())
+	}
 }

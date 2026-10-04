@@ -173,6 +173,20 @@ type Sandbox struct {
 	oomSeen int
 	// serverUp is the last observed liveness of the registered start server.
 	serverUp bool
+	// probeFails counts the scans in a row whose exec into probeInst failed.
+	probeFails int
+	probeInst  rt.Instance
+	// revives counts casualty revives under the engine that started at
+	// reviveEngine: a container that dies again under the same engine is
+	// bounded to maxRevives; a new engine start was the engine's doing.
+	// revivedAt is the last one, which an unknown engine start counts from.
+	revives      int
+	reviveEngine time.Time
+	revivedAt    time.Time
+	// reviveFails counts revives in a row whose start failed without a
+	// confirmed stop; reviveRetryAt is when the next one may run.
+	reviveFails   int
+	reviveRetryAt time.Time
 }
 
 // SandboxInfo is an immutable snapshot of a sandbox's public state. The HTTP

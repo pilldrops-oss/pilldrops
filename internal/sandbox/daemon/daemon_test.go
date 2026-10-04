@@ -338,6 +338,18 @@ func (f *fakePersister) DeleteSandbox(ctx context.Context, id string) error {
 	return nil
 }
 
+func (f *fakePersister) SandboxIDsOnTemplate(_ context.Context, template string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var ids []string
+	for id, rec := range f.saved {
+		if rec.Template == template && !f.deleted[id] {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
 func (f *fakePersister) RecordUsage(ctx context.Context, _, _ string, u Usage) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -430,6 +442,77 @@ func TestShutdownPausesRunningSandboxes(t *testing.T) {
 	}
 	if rec.StartCmd != "python3 app.py" || rec.PublicPort != 8000 {
 		t.Errorf("persisted app config = (%q, %d), want (python3 app.py, 8000)", rec.StartCmd, rec.PublicPort)
+	}
+}
+
+// survivingRT's instances outlive the daemon and are adopted by the next one,
+// as docker's containers are.
+type survivingRT struct {
+	*runtimetest.Fake
+	live map[string]rt.Instance
+}
+
+func (r *survivingRT) Boot(ctx context.Context, spec rt.BootSpec) (rt.Instance, error) {
+	inst, err := r.Fake.Boot(ctx, spec)
+	if err == nil {
+		r.live[spec.SandboxID] = inst
+	}
+	return inst, err
+}
+
+func (r *survivingRT) Adopt(_ context.Context, id string) (rt.Instance, error) {
+	if inst, ok := r.live[id]; ok {
+		return inst, nil
+	}
+	return nil, rt.ErrNotFound
+}
+
+// Docker's shutdown pause is a commit that keeps no memory, and it ran out the
+// stop window for 7 of 9 containers; the container survives the restart and is
+// adopted, so it is left running. A memory-restoring runtime still pauses.
+func TestShutdownLeavesAdoptableInstancesRunningUnlessAPauseKeepsMemory(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		memoryRestore bool
+		want          State
+	}{
+		{"docker-like: left for adoption", false, StateRunning},
+		{"firecracker-like: paused", true, StatePaused},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &survivingRT{Fake: runtimetest.NewFake(), live: map[string]rt.Instance{}}
+			r.MemoryRestore = tc.memoryRestore
+			fp := newFakePersister(nil)
+			cfg := Config{Runtime: r, Store: fp, SnapshotDir: t.TempDir(), IdleTimeout: time.Hour, HardTTL: time.Hour}
+			d := New(cfg)
+			ctx := context.Background()
+			sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+
+			d.Shutdown(ctx)
+
+			fp.mu.Lock()
+			rec := fp.saved[sb.ID]
+			fp.mu.Unlock()
+			if rec.State != string(tc.want) {
+				t.Fatalf("persisted state after shutdown = %q, want %q", rec.State, tc.want)
+			}
+			if tc.memoryRestore {
+				return
+			}
+			if r.Stopped(sb.ID) {
+				t.Fatal("shutdown stopped the container the next daemon adopts")
+			}
+			fp.preload = []PersistedSandbox{rec}
+			next := New(cfg)
+			next.Start()
+			defer next.Stop()
+			if got, ok := next.Get(sb.ID); !ok || got.State != StateRunning {
+				t.Fatalf("after restart: state %q (present %v), want adopted running", got.State, ok)
+			}
+		})
 	}
 }
 

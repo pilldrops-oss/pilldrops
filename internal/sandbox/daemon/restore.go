@@ -2,26 +2,62 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
 
-// restoreFromStore reloads persisted sandboxes after a restart. Running records
-// with a live instance are adopted; records with a snapshot come back paused;
-// stopped, expired or unrestorable records this node owns are dropped.
-func (d *Daemon) restoreFromStore(ctx context.Context) {
+// restoreFromStore reloads persisted sandboxes after a restart. A running,
+// standby, lost or failed record whose instance still exists, live or stopped,
+// is adopted, and a stopped one started again; otherwise a record with a
+// snapshot comes back paused; stopped, expired or unrestorable records this node
+// owns are dropped. A record is never dropped while its instance exists.
+//
+// It reports whether it finished. It stops at the first instance lookup the
+// runtime cannot answer (dockerd still starting) and returns false without
+// dropping, rolling back or sweeping anything: "could not list" is not "none".
+// The reconciler calls it again; records restored on an earlier pass are skipped.
+func (d *Daemon) restoreFromStore(ctx context.Context) bool {
 	if d.cfg.Store == nil {
-		return
+		return true
 	}
+	d.mu.Lock()
+	if d.gone == nil {
+		d.gone = map[string]bool{}
+	}
+	d.mu.Unlock()
 	recs, err := d.cfg.Store.LoadSandboxes(ctx)
 	if err != nil {
-		d.log().Error("restore: load sandboxes failed", "error", err)
-		return
+		d.log().Error("restore: load sandboxes failed; retrying", "error", err)
+		return false
 	}
 	adopter, _ := d.cfg.Runtime.(rt.Adopter)
 	now := d.clock.Now()
+	type casualty struct {
+		id string
+		lv rt.Liveness
+		rv rt.Reviver
+	}
+	var casualties []casualty
+	// adopt looks the instance up; ok=false with a nil inst is "none".
+	adopt := func(id string) (inst rt.Instance, ok bool) {
+		inst, err := adopter.Adopt(context.Background(), id)
+		if err != nil && !errors.Is(err, rt.ErrNotFound) {
+			d.log().Error("restore: the runtime cannot list instances; leaving the rest of the records for the next pass",
+				"sandbox_id", id, "error", err)
+			return nil, false
+		}
+		return inst, true
+	}
+	complete := true
 	for _, r := range recs {
+		d.mu.RLock()
+		_, restored := d.boxes[r.ID]
+		d.mu.RUnlock()
+		if restored {
+			continue
+		}
 		// Only delete records this node provably owns: an unowned row on a
 		// shared database is usually another node's live sandbox. An empty
 		// Config.NodeID means unclustered, so every record is owned.
@@ -45,7 +81,12 @@ func (d *Daemon) restoreFromStore(ctx context.Context) {
 		case r.ExpiresAt > 0 && now.Unix() >= r.ExpiresAt:
 			// Stop a still-live instance before dropping so it is not leaked.
 			if adopter != nil {
-				if inst, ok := adopter.Adopt(context.Background(), r.ID); ok {
+				inst, ok := adopt(r.ID)
+				if !ok {
+					complete = false
+					break
+				}
+				if inst != nil {
 					if err := inst.Stop(context.Background()); err != nil {
 						d.log().Warn("restore: expired instance would not stop", "sandbox_id", r.ID, "error", err)
 					}
@@ -54,6 +95,9 @@ func (d *Daemon) restoreFromStore(ctx context.Context) {
 			drop("past hard TTL")
 			continue
 		}
+		if !complete {
+			break
+		}
 
 		// A standby sandbox's instance is frozen, not stopped, so it outlives the
 		// daemon exactly as a running one does and adopts the same way. It is
@@ -61,19 +105,37 @@ func (d *Daemon) restoreFromStore(ctx context.Context) {
 		// since the state it came back in is "running".
 		// "lost" is the control plane's mark on a node it reaped (store.StateLost).
 		// This node is back, so a VM that survived is adopted, not swept.
-		if (r.State == string(StateRunning) || r.State == string(StateStandby) || r.State == "lost") && adopter != nil {
-			if inst, ok := adopter.Adopt(context.Background(), r.ID); ok {
-				if fr, isFreezer := inst.(rt.Freezer); isFreezer && r.State == string(StateStandby) {
+		// "failed" is a row an older build kept for a container that would not
+		// start again; it is adopted and retried, and a crash now destroys it.
+		if (r.State == string(StateRunning) || r.State == string(StateStandby) ||
+			r.State == "lost" || r.State == string(StateFailed)) && adopter != nil {
+			inst, ok := adopt(r.ID)
+			if !ok {
+				complete = false
+				break
+			}
+			if inst != nil {
+				// A stopped instance (a host reboot) is started again the way the
+				// exit scan starts one a dockerd restart stopped.
+				rv, stopped := inst.(rt.Reviver)
+				stopped = stopped && rv.Casualty()
+				if fr, isFreezer := inst.(rt.Freezer); isFreezer && r.State == string(StateStandby) && !stopped {
 					if err := fr.Thaw(context.Background()); err != nil {
 						d.log().Warn("restore: thaw of an adopted standby sandbox failed",
 							"sandbox_id", r.ID, "error", err)
 					}
 				}
-				d.adoptRunning(ctx, r, inst, now)
+				if !d.adoptRunning(ctx, r, inst, now) {
+					continue
+				}
+				if lv, ok := inst.(rt.Liveness); ok && stopped {
+					casualties = append(casualties, casualty{r.ID, lv, rv})
+				}
 				continue
 			}
 		}
 
+		// Known gap: after a host reboot a firecracker sandbox lands here with no VM; never-paused is dropped, resumed pairs a stale snapshot with a newer overlay.
 		if r.Snapshot == "" {
 			drop("no snapshot to restore from, no live instance to adopt")
 			continue
@@ -92,13 +154,41 @@ func (d *Daemon) restoreFromStore(ctx context.Context) {
 		sb.meter.freeze(now)
 
 		d.mu.Lock()
-		d.boxes[r.ID] = sb
+		if !d.claim(r.ID, sb) {
+			d.mu.Unlock()
+			continue
+		}
 		rec := d.recordOf(sb)
 		d.mu.Unlock()
 		d.persistRec(ctx, rec) // state may have changed from running to paused
 		d.log().Info("sandbox restored as paused", "sandbox_id", r.ID, "previous_state", r.State)
 	}
 
+	// In the background: a start with retries and an app readiness wait per
+	// container, on a node full of them, held Start -- and with it the HTTP
+	// listener and heartbeat -- long enough for the control plane to reap the
+	// node. The casualties are already in d.boxes, so the sweep below keeps them.
+	if len(casualties) > 0 {
+		d.mu.Lock()
+		stopping := closed(d.reviveStop)
+		if !stopping {
+			d.revives.Add(1)
+		}
+		d.mu.Unlock()
+		if !stopping {
+			go func() {
+				defer d.revives.Done()
+				forEachTarget(context.Background(), len(casualties), lifecycleConcurrency, func(i int) {
+					c := casualties[i]
+					d.reviveCasualty(context.Background(), c.id, c.lv, c.rv)
+				})
+			}()
+		}
+	}
+
+	if !complete {
+		return false
+	}
 	// Sweep instances no record claims.
 	if sw, ok := d.cfg.Runtime.(rt.Sweeper); ok {
 		d.mu.RLock()
@@ -108,6 +198,29 @@ func (d *Daemon) restoreFromStore(ctx context.Context) {
 		}
 		d.mu.RUnlock()
 		sw.SweepUnknown(known)
+	}
+	d.mu.Lock()
+	d.gone = nil
+	d.mu.Unlock()
+	return true
+}
+
+// claim adds a restored sandbox unless it is in d.boxes already or was removed
+// while this restore was unfinished. The caller holds d.mu.
+func (d *Daemon) claim(id string, sb *Sandbox) bool {
+	if _, ok := d.boxes[id]; ok || d.gone[id] {
+		return false
+	}
+	d.boxes[id] = sb
+	return true
+}
+
+// forget removes a sandbox from d.boxes, remembering it while a restore is
+// unfinished. The caller holds d.mu.
+func (d *Daemon) forget(id string) {
+	delete(d.boxes, id)
+	if d.gone != nil {
+		d.gone[id] = true
 	}
 }
 
@@ -144,14 +257,18 @@ func (d *Daemon) sandboxFromRecord(r PersistedSandbox, now time.Time) *Sandbox {
 }
 
 // adoptRunning reattaches a live instance to its persisted record as running.
-func (d *Daemon) adoptRunning(ctx context.Context, r PersistedSandbox, inst rt.Instance, now time.Time) {
+// false means the sandbox was restored already, or removed since its row was read.
+func (d *Daemon) adoptRunning(ctx context.Context, r PersistedSandbox, inst rt.Instance, now time.Time) bool {
 	sb := d.sandboxFromRecord(r, now)
 	sb.State = StateRunning
 	sb.inst = inst
 	sb.LastActiveAt = now
 
 	d.mu.Lock()
-	d.boxes[r.ID] = sb
+	if !d.claim(r.ID, sb) {
+		d.mu.Unlock()
+		return false
+	}
 	rec := d.recordOf(sb)
 	d.mu.Unlock()
 	// The daemon restarted; the runtime membership table is empty even though
@@ -163,11 +280,15 @@ func (d *Daemon) adoptRunning(ctx context.Context, r PersistedSandbox, inst rt.I
 	}
 	d.persistRec(ctx, rec)
 	d.log().Info("sandbox restored as running (adopted live instance)", "sandbox_id", r.ID)
+	return true
 }
 
 // Shutdown pauses every running sandbox so the next Start can restore it, then
 // stops the reconciler. Instances that cannot be paused are stopped anyway.
 func (d *Daemon) Shutdown(ctx context.Context) {
+	// A revive holds its sandbox's op lock for up to reviveTimeout; the pauses
+	// below must not queue behind it.
+	d.stopRevives()
 	d.mu.RLock()
 	var ids []string
 	for id, sb := range d.boxes {
@@ -179,14 +300,21 @@ func (d *Daemon) Shutdown(ctx context.Context) {
 	}
 	d.mu.RUnlock()
 
-	canSnapshot := d.cfg.Runtime != nil && d.cfg.Runtime.Capabilities().Snapshot
+	var caps rt.Caps
+	if d.cfg.Runtime != nil {
+		caps = d.cfg.Runtime.Capabilities()
+	}
 	// A runtime whose instances outlive the daemon and are adopted by the next
 	// one loses nothing by leaving a sandbox running; stopping it after a
 	// failed pause left no snapshot and no instance, and the restart dropped it.
 	_, adoptable := d.cfg.Runtime.(rt.Adopter)
+	// A pause that keeps no memory (docker's commit) gives such an instance
+	// nothing the adopted container does not, and on the rig its commits ran
+	// out the stop window for 7 of 9 containers.
+	pause := caps.Snapshot && (caps.MemoryRestore || !adoptable)
 	pauseCtx := context.WithValue(ctx, shutdownKey{}, true)
 	for _, id := range ids {
-		if canSnapshot {
+		if pause {
 			if err := d.Pause(pauseCtx, id); err == nil {
 				continue
 			} else {
@@ -211,4 +339,39 @@ func (d *Daemon) Shutdown(ctx context.Context) {
 		}
 	}
 	d.Stop()
+}
+
+// reviveStopWait bounds how long stopping waits for revives to give up; a var
+// so tests can shrink it.
+var reviveStopWait = 10 * time.Second
+
+// stopRevives cancels restore's background revives and waits for them, at most
+// reviveStopWait. A cancelled revive leaves its sandbox as it was, for the next
+// start to adopt again.
+func (d *Daemon) stopRevives() {
+	d.reviveStopOnce.Do(func() {
+		d.mu.Lock()
+		close(d.reviveStop)
+		d.mu.Unlock()
+	})
+	done := make(chan struct{})
+	go func() {
+		d.revives.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(reviveStopWait):
+		d.log().Warn("stop: casualty revives still running; not waiting for them", "waited", reviveStopWait)
+	}
+}
+
+// closed reports whether ch is closed.
+func closed(ch chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }

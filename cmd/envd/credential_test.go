@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -306,4 +307,22 @@ func envdOnLoopback(t *testing.T, hashes *hashStore) pb.EnvdServiceClient {
 	}
 	t.Cleanup(func() { conn.Close() })
 	return pb.NewEnvdServiceClient(conn)
+}
+
+// A restored guest gets its credential once; a server the reaper starts again
+// must come back with it, not refuse every call.
+func TestARestartedServerKeepsThePushedHash(t *testing.T) {
+	t.Setenv("ENVD_TOKEN_HASH", "")
+	path := filepath.Join(t.TempDir(), "hash")
+	pushed := strings.Repeat("ab", 32)
+	if reply := handleCredCommand(credSetHash+" "+pushed, persistedHashStore(path)); reply != "OK" {
+		t.Fatalf("push = %q", reply)
+	}
+	if got := persistedHashStore(path).Get(); got != pushed {
+		t.Fatalf("restarted server hash = %q, want the pushed %q", got, pushed)
+	}
+	t.Setenv("ENVD_TOKEN_HASH", strings.Repeat("cd", 32))
+	if got := persistedHashStore(path).Get(); got != strings.Repeat("cd", 32) {
+		t.Fatalf("docker's env hash lost to a file: %q", got)
+	}
 }

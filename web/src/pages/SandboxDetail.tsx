@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, setSandboxSlug, slugUrl, setSandboxVisibility, IS_LOCAL_RUNTIME } from '../api'
+import { getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, setSandboxSlug, slugUrl, setSandboxVisibility, setPreviewAccess, absolutePreviewUrl, ApiError, IS_LOCAL_RUNTIME } from '../api'
 import UnsafeEmbedNotice from '../components/UnsafeEmbedNotice'
 import { useConfirm } from '../components/ConfirmModal'
 import { useToast } from '../components/Toast'
@@ -10,7 +10,8 @@ import FileBrowser from '../components/FileBrowser'
 import type { SandboxDetail as SandboxDetailType, Template, SandboxMetrics, PortStatus } from '../types'
 import { statusPill } from './Sandboxes'
 import { TemplateIcon } from '../components/templateIcons'
-import { usePreviewLink } from '../lib/previewToken'
+import { usePreviewLink, forgetPreviewTokens } from '../lib/previewToken'
+import { previewPortOf, withNoVncResize } from '../lib/previewPort'
 import SandboxTerminal from '../components/SandboxTerminal'
 
 function formatDate(ts: string): string {
@@ -49,13 +50,12 @@ function previewLabel(outcome?: string): string {
 }
 
 type QuickCmd = { label: string; cmd: string }
-function quickStart(template: string): { intro: string; cmds: QuickCmd[] } {
+function quickStart(template: string): { cmds: QuickCmd[] } {
   const t = (template || '').toLowerCase()
   const has = (...w: string[]) => w.some(x => t.includes(x))
 
   if (has('code-interpreter', 'python', 'jupyter', 'fastapi', 'flask', 'django', 'openclaw', 'py')) {
     return {
-      intro: 'Python 3.11 with numpy, pandas & matplotlib is ready. Try one:',
       cmds: [
         { label: 'Python version', cmd: 'python3 --version' },
         {
@@ -68,7 +68,6 @@ function quickStart(template: string): { intro: string; cmds: QuickCmd[] } {
   }
   if (has('node', 'typescript', 'next', 'js', 'deno', 'bun')) {
     return {
-      intro: 'Node 20 + TypeScript is ready. Try one:',
       cmds: [
         { label: 'Node version', cmd: 'node --version' },
         { label: 'Run JS', cmd: `node -e "console.log('hello from', process.version)"` },
@@ -78,7 +77,6 @@ function quickStart(template: string): { intro: string; cmds: QuickCmd[] } {
   }
   if (has('golang') || t === 'go' || t.startsWith('go')) {
     return {
-      intro: 'Go 1.22 toolchain is ready. Try one:',
       cmds: [
         { label: 'Go version', cmd: 'go version' },
         { label: 'Go env', cmd: 'go env GOPATH GOROOT' },
@@ -87,7 +85,6 @@ function quickStart(template: string): { intro: string; cmds: QuickCmd[] } {
   }
   if (has('rust', 'cargo')) {
     return {
-      intro: 'Rust toolchain is ready. Try one:',
       cmds: [
         { label: 'rustc version', cmd: 'rustc --version' },
         { label: 'cargo version', cmd: 'cargo --version' },
@@ -95,7 +92,6 @@ function quickStart(template: string): { intro: string; cmds: QuickCmd[] } {
     }
   }
   return {
-    intro: 'A minimal Debian shell. Try one:',
     cmds: [
       { label: 'System info', cmd: 'uname -a' },
       { label: 'List files', cmd: 'ls -la' },
@@ -105,6 +101,7 @@ function quickStart(template: string): { intro: string; cmds: QuickCmd[] } {
 }
 
 const ENVD_TERMINAL_PORT = 7681
+const ENVD_DESKTOP_PORT = 6080
 
 function QuickCommands({ template, onRun }: { template: string; onRun?: (cmd: string) => void }) {
   const { cmds } = quickStart(template)
@@ -192,14 +189,30 @@ export function PreviewTab({
   id,
   status,
   defaultPort,
+  outcome,
 }: {
   id: string
   status: string
   defaultPort?: number
+  outcome?: string
 }) {
-  const seed = String(defaultPort || 8000)
+  // No default yet means the port is still being resolved: nothing is loaded
+  // rather than a guess, since 8000 is wrong for a desktop. The default is
+  // followed as it resolves until the user picks a port of their own.
+  const seed = defaultPort ? String(defaultPort) : ''
   const [port, setPort] = useState(seed)
-  const [activePort, setActivePort] = useState(seed)
+  const [activePort, setActivePortRaw] = useState(seed)
+  const [followed, setFollowed] = useState(seed)
+  const [picked, setPicked] = useState(false)
+  if (seed !== followed && !picked) {
+    setFollowed(seed)
+    setPort(seed)
+    setActivePortRaw(seed)
+  }
+  function setActivePort(p: string) {
+    setPicked(true)
+    setActivePortRaw(p)
+  }
   const isRunning = status === 'running'
 
   const [detected, setDetected] = useState<PortStatus[] | null>(null)
@@ -221,14 +234,20 @@ export function PreviewTab({
   }
 
   const iframeUrl = usePreviewLink(id, activePort)
+  // The preview root is a directory listing whose root-relative links 404 under
+  // path-form previews, so the report gets a direct link.
+  const [previewPath, previewQuery] = iframeUrl.split('?')
+  const reportUrl = `${previewPath}report/${previewQuery ? `?${previewQuery}` : ''}`
+  const embedUrl = withNoVncResize(iframeUrl, outcome)
 
   function previewBody() {
     if (!isRunning) return <NotRunningNotice status={status} what="preview your application" />
-    if (!isPreviewCrossOrigin()) return <UnsafeEmbedNotice url={iframeUrl} what="preview" />
+    if (!isPreviewCrossOrigin()) return <UnsafeEmbedNotice url={embedUrl} what="preview" />
+    if (!activePort) return <div className="empty">Finding the preview port…</div>
     return (
       <iframe
         className="preview-iframe"
-        src={iframeUrl}
+        src={embedUrl}
         title={`Preview — port ${activePort}`}
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
       />
@@ -265,6 +284,11 @@ export function PreviewTab({
             className="btn"
           >
             Open in new tab ↗
+          </a>
+        )}
+        {isRunning && outcome === 'report' && iframeUrl && (
+          <a href={reportUrl} target="_blank" rel="noopener noreferrer" className="btn primary">
+            View report ↗
           </a>
         )}
       </div>
@@ -340,7 +364,11 @@ function NotRunningNotice({ status, what }: { status: string; what: string }) {
   )
 }
 
-function LogsTab({ id }: { id: string }) {
+// Colour and cursor escapes; the feed is plain text, so they would show as junk.
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
+
+export function LogsTab({ id }: { id: string }) {
   const [lines, setLines] = useState<string[]>([])
   const [note, setNote] = useState('')
   const [truncated, setTruncated] = useState(false)
@@ -354,7 +382,7 @@ function LogsTab({ id }: { id: string }) {
       getSandboxLogs(id)
         .then(r => {
           if (!alive) return
-          setLines(r.lines ?? [])
+          setLines((r.lines ?? []).map(l => l.replace(ANSI_RE, '')))
           setNote(r.note ?? '')
           setTruncated(r.truncated ?? false)
         })
@@ -368,36 +396,44 @@ function LogsTab({ id }: { id: string }) {
     if (autoScroll && bottomRef.current) bottomRef.current.scrollIntoView()
   }, [lines, autoScroll])
 
+  // Scrolling up to read stops following; the checkbox turns it back on.
   function handleScroll() {
     const el = containerRef.current
-    if (!el) return
-    setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 60)
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight >= 60) setAutoScroll(false)
   }
 
   return (
-    <div
-      ref={containerRef}
-      onScroll={handleScroll}
-      className="log-feed"
-      style={{
-        flex: 1, overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: 12.5,
-        background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: 14,
-      }}
-    >
-      {truncated && (
-        <div style={{ color: 'var(--faint)', marginBottom: 6 }}>… older output truncated</div>
-      )}
-      {lines.length === 0 ? (
-        <div className="empty" style={{ padding: '60px 20px' }}>
-          {note || 'No app output yet.'}
-          {!note && <p>stdout and stderr of the start command appear here.</p>}
-        </div>
-      ) : (
-        lines.map((l, i) => (
-          <div key={i} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{l}</div>
-        ))
-      )}
-      <div ref={bottomRef} />
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+      <div className="logbar">
+        <span className="hint">{lines.length} lines</span>
+        <label className="chk">
+          <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} /> auto-scroll
+        </label>
+      </div>
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="log-feed"
+        style={{
+          flex: 1, overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: 12.5,
+          background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: 14,
+        }}
+      >
+        {truncated && (
+          <div style={{ color: 'var(--faint)', marginBottom: 6 }}>… older output truncated</div>
+        )}
+        {lines.length === 0 ? (
+          <div className="empty" style={{ padding: '60px 20px' }}>
+            {note || 'No app output yet.'}
+            {!note && <p>stdout and stderr of the start command appear here.</p>}
+          </div>
+        ) : (
+          lines.map((l, i) => (
+            <div key={i} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{l}</div>
+          ))
+        )}
+        <div ref={bottomRef} />
+      </div>
     </div>
   )
 }
@@ -410,6 +446,7 @@ function SlugRow({ sandbox, onChanged }: { sandbox: SandboxDetailType; onChanged
   const [value, setValue] = useState(sandbox.slug ?? '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const toast = useToast()
   const host = slugUrl(sandbox.slug)
   async function save() {
     setBusy(true)
@@ -417,6 +454,7 @@ function SlugRow({ sandbox, onChanged }: { sandbox: SandboxDetailType; onChanged
     try {
       const updated = await setSandboxSlug(sandbox.id, value.trim())
       onChanged(updated.slug ?? '')
+      toast.success(updated.slug ? `Slug set to ${updated.slug}` : 'Slug cleared')
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -454,22 +492,61 @@ function SlugRow({ sandbox, onChanged }: { sandbox: SandboxDetailType; onChanged
   )
 }
 
-function InfoTab({ sandbox, onSlug }: { sandbox: SandboxDetailType; onSlug?: (slug: string) => void }) {
-  const rows: Array<{ key: string; value: string }> = [
-    { key: 'ID', value: sandbox.id },
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      className="copy-btn"
+      aria-label={`Copy ${label}`}
+      onClick={() =>
+        navigator.clipboard?.writeText(text).then(
+          () => {
+            setCopied(true)
+            window.setTimeout(() => setCopied(false), 1400)
+          },
+          () => {},
+        )
+      }
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  )
+}
+
+function storageLabel(sb: SandboxDetailType): string {
+  if (sb.storage_used_mb !== undefined) {
+    return `${fmtMB(sb.storage_used_mb)} of ${sb.storage_mb ? fmtMB(sb.storage_mb) : '—'}`
+  }
+  return sb.storage_mb ? `${fmtMB(sb.storage_mb)} (usage not reported)` : '—'
+}
+
+export function InfoTab({
+  sandbox,
+  previewPort,
+  onSlug,
+}: {
+  sandbox: SandboxDetailType
+  previewPort: number
+  onSlug?: (slug: string) => void
+}) {
+  const previewUrl = absolutePreviewUrl(sandbox.id, previewPort)
+  const rows: Array<{ key: string; value: string; copy?: string }> = [
+    { key: 'Name', value: sandbox.name || '—' },
+    { key: 'ID', value: sandbox.id, copy: sandbox.id },
     { key: 'Template', value: sandbox.template },
     { key: 'Status', value: sandbox.status },
+    { key: 'API access', value: sandbox.visibility === 'private' ? 'Only the key that created it' : 'Everyone in the org' },
+    { key: 'Preview URL', value: previewUrl, copy: previewUrl },
+    {
+      key: 'Ports',
+      value: `${previewPort} preview · ${ENVD_TERMINAL_PORT} terminal${sandbox.desktop_url ? ' · desktop' : ''}`,
+    },
     { key: 'Boot type', value: sandbox.boot_type || '—' },
     { key: 'Boot time', value: sandbox.boot_ms > 0 ? `${sandbox.boot_ms} ms` : '—' },
     { key: 'Created', value: formatDate(sandbox.created_at) },
     { key: 'Expires', value: formatDate(sandbox.expires_at) },
-    {
-      key: 'Storage',
-      value:
-        sandbox.storage_used_mb !== undefined
-          ? `${fmtMB(sandbox.storage_used_mb)} of ${sandbox.storage_mb ? fmtMB(sandbox.storage_mb) : '—'}`
-          : '—',
-    },
+    { key: 'Storage', value: storageLabel(sandbox) },
   ]
 
   return (
@@ -487,7 +564,10 @@ function InfoTab({ sandbox, onSlug }: { sandbox: SandboxDetailType; onSlug?: (sl
         {rows.map(r => (
           <div className="info-row" key={r.key}>
             <div className="info-key">{r.key}</div>
-            <div className="info-val">{r.value}</div>
+            <div className="info-val">
+              {r.value}
+              {r.copy && <> <CopyButton text={r.copy} label={r.key} /></>}
+            </div>
           </div>
         ))}
         <SlugRow sandbox={sandbox} onChanged={slug => onSlug?.(slug)} />
@@ -584,6 +664,9 @@ export default function SandboxDetail() {
   const location = useLocation()
 
   const [tab, setTabRaw] = useState<Tab>('shell')
+  // Mounted on first visit and then only hidden, so a tab switch keeps the shell and its history.
+  const [shellMounted, setShellMounted] = useState(false)
+  if (tab === 'shell' && !shellMounted) setShellMounted(true)
   const userPickedTab = useRef(false)
   const setTab = (t: Tab) => {
     userPickedTab.current = true
@@ -612,32 +695,47 @@ export default function SandboxDetail() {
     setTabRaw(defaultTabFor(tplMeta.outcome))
   }, [tplMeta])
   const [loading, setLoading] = useState(!sandbox)
+  // The list row that opened this page lacks what names a desktop's port, so
+  // the preview waits for the GET instead of opening on a guess.
+  const [fetched, setFetched] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  // Cleared on a 404 too, so a destroyed sandbox is not polled until unmount.
+  const pollRef = useRef<number | null>(null)
   const loadSandbox = useCallback(async () => {
     if (!id) return
     try {
       const data = await getSandbox(id)
+      // The GET now reports boot type/time itself, so it is trusted outright —
+      // not only kept around from the create response that opened this page.
       setSandbox(data)
+      setFetched(true)
       setError(null)
     } catch (e) {
       setError((e as Error).message)
+      if (e instanceof ApiError && e.status === 404 && pollRef.current !== null) {
+        window.clearInterval(pollRef.current)
+        pollRef.current = null
+      }
     }
     setLoading(false)
   }, [id])
 
   useEffect(() => {
     loadSandbox()
-    const interval = setInterval(loadSandbox, 5000)
-    return () => clearInterval(interval)
+    pollRef.current = window.setInterval(loadSandbox, 5000)
+    return () => {
+      if (pollRef.current !== null) window.clearInterval(pollRef.current)
+    }
   }, [loadSandbox])
 
-  const openUrl = usePreviewLink(sandbox?.id, sandbox?.public_port || 8000)
+  const previewPort = sandbox ? previewPortOf(sandbox, tplMeta) : 8000
+  const openUrl = usePreviewLink(sandbox?.id, previewPort)
 
   const confirmDialog = useConfirm()
   const toast = useToast()
-  const doAction = useCallback(async (fn: () => Promise<unknown>, confirmMsg?: string) => {
+  const doAction = useCallback(async (fn: () => Promise<unknown>, confirmMsg?: string, successMsg?: string) => {
     if (confirmMsg && !(await confirmDialog({
       title: 'Destroy sandbox?',
       body: confirmMsg,
@@ -648,6 +746,7 @@ export default function SandboxDetail() {
     try {
       await fn()
       await loadSandbox()
+      if (successMsg) toast.success(successMsg)
     } catch (e) {
       toast.error(errText(e))
     }
@@ -672,8 +771,31 @@ export default function SandboxDetail() {
     await doAction(async () => {
       const res = await setSandboxVisibility(id, isPrivate ? 'org' : 'private')
       if (res.wipe_skipped) toast.error(`Shared, but the agent logins were NOT removed: ${res.wipe_skipped}`)
+      else toast.success(isPrivate ? 'Shared with the org' : 'Made private')
     })
   }, [id, isPrivate, doAction, confirmDialog, toast])
+
+  const isPublicPreview = !!sandbox?.public_preview
+  // Only the creator or an operator may flip this — everyone else gets 404,
+  // same as the visibility flip. The web has no cheaper way to tell who is
+  // who, so it shows the control and lets a 404 from the real attempt hide it.
+  const [previewAccessHidden, setPreviewAccessHidden] = useState(false)
+  const previewAccessToggle = useCallback(async (next: boolean) => {
+    if (!id) return
+    setBusy(true)
+    try {
+      await setPreviewAccess(id, next)
+      // The flip moves the token's generation, retracting links minted under
+      // the old one; the cache must forget them too, or it keeps serving one.
+      forgetPreviewTokens(id)
+      await loadSandbox()
+      toast.success(next ? 'Preview is now public' : 'Preview now needs a token')
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) setPreviewAccessHidden(true)
+      else toast.error(errText(e))
+    }
+    setBusy(false)
+  }, [id, loadSandbox, toast])
 
   if (!id) return null
 
@@ -717,7 +839,7 @@ export default function SandboxDetail() {
             <TemplateIcon template={sb.template} />
           </div>
           <div>
-            <div className="detail-name">{sb.template}</div>
+            <div className="detail-name">{sb.name || sb.template}</div>
             <div className="detail-id">{sb.id}</div>
           </div>
           {(() => { const p = statusPill(sb.status || 'running'); return (
@@ -744,7 +866,7 @@ export default function SandboxDetail() {
             <button
               className="btn"
               disabled={busy}
-              onClick={() => doAction(() => pauseSandbox(id))}
+              onClick={() => doAction(() => pauseSandbox(id), undefined, 'Paused')}
             >
               Pause
             </button>
@@ -752,7 +874,7 @@ export default function SandboxDetail() {
             <button
               className="btn"
               disabled={busy}
-              onClick={() => doAction(() => resumeSandbox(id))}
+              onClick={() => doAction(() => resumeSandbox(id), undefined, 'Resumed')}
             >
               Resume
             </button>
@@ -762,25 +884,55 @@ export default function SandboxDetail() {
             className="btn"
             disabled={busy}
             title="Copy this sandbox, memory and running processes included"
-            onClick={() => doAction(() => forkSandbox(id).then((f) => navigate(`/sandbox/${f.id}`)))}
+            onClick={() => doAction(
+              () => forkSandbox(id).then((f) => { navigate(`/sandbox/${f.id}`); return f }),
+              undefined,
+              'Forked',
+            )}
           >
             Fork
           </button>
-          <button
-            className="btn"
-            disabled={busy}
-            title={isPrivate
-              ? 'Let everyone in your org use this sandbox (removes the agent logins inside it)'
-              : 'Make this sandbox visible only to your API key'}
-            onClick={shareToggle}
+          <label
+            className="detail-access"
+            title="Who can open, exec in and destroy this sandbox through the API. It does not change who can open the preview URL."
           >
-            {isPrivate ? 'Share with org' : 'Make private'}
-          </button>
+            API access
+            <select
+              className="sel"
+              disabled={busy}
+              value={isPrivate ? 'private' : 'org'}
+              onChange={e => { if ((e.target.value === 'private') !== isPrivate) void shareToggle() }}
+            >
+              <option value="org">Whole org</option>
+              <option value="private">Only my key</option>
+            </select>
+          </label>
+          {!previewAccessHidden && sb.public_preview !== undefined && (
+            <label
+              className="detail-access"
+              title={`Whether the app preview is reachable without a token. Ports ${ENVD_TERMINAL_PORT} `
+                + `(terminal) and ${ENVD_DESKTOP_PORT} (desktop) always need one regardless of this setting.`}
+            >
+              Preview
+              <select
+                className="sel"
+                disabled={busy}
+                value={isPublicPreview ? 'public' : 'token'}
+                onChange={e => {
+                  const next = e.target.value === 'public'
+                  if (next !== isPublicPreview) void previewAccessToggle(next)
+                }}
+              >
+                <option value="public">Public</option>
+                <option value="token">Token only</option>
+              </select>
+            </label>
+          )}
           </>}
           <button
             className="btn"
             disabled={busy}
-            onClick={() => doAction(() => refreshSandbox(id))}
+            onClick={() => doAction(() => refreshSandbox(id), undefined, 'TTL refreshed')}
             title="Extend TTL"
           >
             Refresh TTL
@@ -818,19 +970,22 @@ export default function SandboxDetail() {
       </div>
 
       <div className="tab-content">
-        {tab === 'shell' && (
-          <ShellTab id={id} status={sb.status} template={sb.template} />
+        {shellMounted && (
+          <div style={{ display: tab === 'shell' ? 'contents' : 'none' }}>
+            <ShellTab id={id} status={sb.status} template={sb.template} />
+          </div>
         )}
         {tab === 'files' && <FileBrowser id={id} />}
         {tab === 'preview' && (
           <PreviewTab
             id={id}
             status={sb.status}
-            defaultPort={sb.public_port}
+            defaultPort={fetched ? previewPort : undefined}
+            outcome={tplMeta?.outcome}
           />
         )}
         {tab === 'logs' && <LogsTab id={id} />}
-        {tab === 'info' && <InfoTab sandbox={sb} onSlug={slug => setSandbox(prev => (prev ? { ...prev, slug: slug || undefined } : prev))} />}
+        {tab === 'info' && <InfoTab sandbox={sb} previewPort={previewPort} onSlug={slug => setSandbox(prev => (prev ? { ...prev, slug: slug || undefined } : prev))} />}
       </div>
     </div>
   )

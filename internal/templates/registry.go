@@ -108,6 +108,9 @@ func discovered() []Template {
 // then the compiled-in entry with the same id, then generic defaults.
 func loadManifest(dir, id string) Template {
 	t, _ := builtin(id)
+	if card, ok := aliasCards[id]; ok {
+		t.Name, t.Description, t.Tags, t.Preinstalled = card.Name, card.Description, card.Tags, card.Preinstalled
+	}
 	t.ID = id
 	if t.Name == "" {
 		t.Name = id
@@ -163,6 +166,19 @@ func loadManifest(dir, id string) Template {
 		}
 	}
 	return t
+}
+
+// aliasCards describe aliases that are published as images of their own. An
+// alias inherits its canonical entry's launch settings, but not what the card
+// says is installed: python-3.11 is a slimmer image than code-interpreter, with
+// no matplotlib, and its card claimed otherwise until its template.json shipped.
+var aliasCards = map[string]Template{
+	"python-3.11": {
+		Name:         "Python 3.11",
+		Description:  "Python 3.11 + numpy, pandas, requests",
+		Tags:         []string{"python"},
+		Preinstalled: []string{"python3.11", "pip", "numpy", "pandas", "requests"},
+	},
 }
 
 // override sets *dst to v unless v is the zero value, which is what a field the

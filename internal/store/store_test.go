@@ -38,7 +38,7 @@ func TestAPIKeys(t *testing.T) {
 	if _, err := s.ValidateKey(t.Context(), "sf_live_wrong"); err == nil {
 		t.Fatalf("expected error for wrong key")
 	}
-	if err := s.RevokeKey(t.Context(), rec.ID, "default"); err != nil {
+	if err := s.RevokeKey(t.Context(), rec.ID, "default", true); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	if _, err := s.ValidateKey(t.Context(), plaintext); err == nil {
@@ -179,7 +179,7 @@ func TestListKeys(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("keys = %d, want 2", len(list))
 	}
-	if err := s.RevokeKey(t.Context(), a.ID, "default"); err != nil {
+	if err := s.RevokeKey(t.Context(), a.ID, "default", true); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	list, _ = s.ListKeys(t.Context(), "default")
@@ -199,17 +199,17 @@ func TestRevokeKeyIsOrgScoped(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := s.RevokeKey(t.Context(), victim.ID, "u:attacker"); err != ErrKeyNotFound {
+	if err := s.RevokeKey(t.Context(), victim.ID, "u:attacker", true); err != ErrKeyNotFound {
 		t.Fatalf("cross-org revoke err = %v, want ErrKeyNotFound", err)
 	}
 	if _, err := s.ValidateKey(t.Context(), plaintext); err != nil {
 		t.Fatalf("key died at another org's hands: %v", err)
 	}
-	if err := s.RevokeKey(t.Context(), "key_does_not_exist", "u:attacker"); err != ErrKeyNotFound {
+	if err := s.RevokeKey(t.Context(), "key_does_not_exist", "u:attacker", true); err != ErrKeyNotFound {
 		t.Fatalf("unknown-id revoke err = %v, want ErrKeyNotFound", err)
 	}
 
-	if err := s.RevokeKey(t.Context(), victim.ID, "u:victim"); err != nil {
+	if err := s.RevokeKey(t.Context(), victim.ID, "u:victim", true); err != nil {
 		t.Fatalf("owner revoke: %v", err)
 	}
 	if _, err := s.ValidateKey(t.Context(), plaintext); err == nil {

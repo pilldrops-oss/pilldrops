@@ -29,9 +29,11 @@ import LazyCodeEditor from '../components/LazyCodeEditor'
 import { editorLangFor } from '../components/editorLang'
 import {
   TemplateGallery,
+  bootableOn,
   PanelHeader,
   SummaryPanel,
   EnvEditor,
+  VaultSecretPicker,
   WhatsInside,
   ResourcePicker,
   LifetimePicker,
@@ -252,19 +254,21 @@ function PurposeConfig({ cfg }: { cfg: LaunchConfig }) {
             report is served on the preview URL. Leave blank to just open a terminal.
           </p>
         </div>
-        <div className="lm-sec">
-          <button
-            type="button"
-            className="pa-toggle"
-            aria-pressed={cfg.serveReport}
-            onClick={() => cfg.setServeReport(!cfg.serveReport)}
-          >
-            <span className={`pa-tg${cfg.serveReport ? ' on' : ''}`}>
-              <i />
-            </span>
-            Serve the HTML report on preview
-          </button>
-        </div>
+        {cfg.tpl?.outcome !== 'report' && (
+          <div className="lm-sec">
+            <button
+              type="button"
+              className="pa-toggle"
+              aria-pressed={cfg.serveReport}
+              onClick={() => cfg.setServeReport(!cfg.serveReport)}
+            >
+              <span className={`pa-tg${cfg.serveReport ? ' on' : ''}`}>
+                <i />
+              </span>
+              Serve the HTML report on preview
+            </button>
+          </div>
+        )}
       </>
     )
   }
@@ -330,6 +334,14 @@ export default function Deploy() {
     recordRecent({ template: t.id, name: t.name || t.id, at: Date.now(), body })
     setRecents(listRecents())
   })
+
+  // Deploy stays mounted across same-route navigations (nav link, "+ New"),
+  // so a stale "ready" screen from the last launch would otherwise persist.
+  // location.key is fresh on every navigation, including to this same path.
+  useEffect(() => {
+    launch.reset()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key])
 
   useEffect(() => {
     const t = cfg.tpl
@@ -420,6 +432,8 @@ export default function Deploy() {
       .catch(() => listPublicTemplates().then(setTemplates).catch(() => setTemplates([])))
   }, [])
 
+  const bootable = useMemo(() => bootableOn(templates), [templates])
+
   useEffect(() => {
     if (!wantTemplate || cfg.tpl) return
     const t = templates.find(x => x.id === wantTemplate)
@@ -458,6 +472,7 @@ export default function Deploy() {
             start: cfg.start,
             port: cfg.port,
             envList: cfg.envList,
+            secretRefs: cfg.secretRefs,
             previewPort: cfg.previewPort,
             timeoutInput: effLifetime.timeoutInput,
             idleInput: effLifetime.idleInput,
@@ -471,6 +486,7 @@ export default function Deploy() {
       cfg.start,
       cfg.port,
       cfg.envList,
+      cfg.secretRefs,
       cfg.previewPort,
       effLifetime,
     ],
@@ -483,9 +499,12 @@ export default function Deploy() {
         start: cfg.start,
         port: cfg.port,
         envList: cfg.envList,
+        cpu: cfg.cpu,
+        mem: cfg.mem,
+        isPublic,
         composed: composed ?? undefined,
       }),
-    [cfg.tpl, cfg.start, cfg.port, cfg.envList, composed],
+    [cfg.tpl, cfg.start, cfg.port, cfg.envList, cfg.cpu, cfg.mem, isPublic, composed],
   )
 
   const pilldropsExportConfig = useMemo(
@@ -926,6 +945,7 @@ export default function Deploy() {
                 onQuickLaunch={quickLaunch}
                 favorites={favs}
                 onToggleFavorite={id => setFavs(toggleFavorite(id))}
+                bootable={bootable}
               />
             </>
         </>
@@ -952,7 +972,7 @@ export default function Deploy() {
                   error={launch.error}
                   onReset={launch.reset}
                   service={cfg.kind === 'service' ? tpl : null}
-                  onOpen={id => navigate(`/sandbox/${id}`)}
+                  onOpen={id => navigate(`/sandbox/${id}`, { state: { sandbox: launch.result } })}
                 />
               </div>
             ) : (
@@ -1078,6 +1098,7 @@ export default function Deploy() {
                         custom={cfg.customEnv}
                         onCustomChange={cfg.setCustomEnv}
                       />
+                      <VaultSecretPicker selected={cfg.secretRefs} onChange={cfg.setSecretRefs} />
                       <p className="lm-help">
                         Injected into your app and terminal at boot — never shown in the preview URL or logs.
                       </p>

@@ -83,7 +83,7 @@ func Resolve(s Spec, tmpl TemplateDefaults, plan Limits, fleet Fleet, orgEgress 
 	out.TTL = ttl
 	out.IdleTimeout = IdleTimeout(s.IdleTimeout)
 	out.HibernateTimeout = HibernateTimeout(s.HibernateTimeout)
-	out.Port = appPort(s, tmpl)
+	out.Port = AppPort(s, tmpl)
 
 	net, advisories, err := egressPolicy(s, tmpl, orgEgress)
 	if err != nil {
@@ -207,7 +207,10 @@ func IdleTimeoutSeconds(d time.Duration) int64 {
 // defaultStartPort is the port a deploy publishes when the caller names none.
 const defaultStartPort = 8000
 
-func appPort(s Spec, tmpl TemplateDefaults) int {
+// AppPort is the port a create publishes as the sandbox's app port: the
+// requested one, else the deploy default when it runs a start command, else
+// the template's own (0 when it has none).
+func AppPort(s Spec, tmpl TemplateDefaults) int {
 	if s.Port > 0 {
 		return s.Port
 	}

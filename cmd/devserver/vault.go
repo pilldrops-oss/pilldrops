@@ -109,6 +109,13 @@ func vaultKey(owner, name string) string { return owner + "\x00" + name }
 // Put stores or replaces a secret. The value is encrypted before it touches
 // the struct so a persist can never leak plaintext.
 func (vs *VaultStore) Put(owner, name, value string, secret, autoInject bool) (*VaultSecret, error) {
+	return vs.put(owner, name, value, secret, &autoInject)
+}
+
+// put is Put with autoInject nil meaning "keep a replaced entry's setting",
+// decided under the same lock as the write so a concurrent SetAutoInject is
+// never overwritten by a value read before it.
+func (vs *VaultStore) put(owner, name, value string, secret bool, autoInject *bool) (*VaultSecret, error) {
 	if owner == "" || owner == "anon" {
 		// Anonymous callers share one identity, so nothing stored would be theirs alone.
 		return nil, fmt.Errorf("sign in to store secrets: open /dashboard/login and paste an API key (make dev prints one at start)")
@@ -136,12 +143,15 @@ func (vs *VaultStore) Put(owner, name, value string, secret, autoInject bool) (*
 		kind = "secret"
 	}
 	s := &VaultSecret{
-		Name: name, Owner: owner, Kind: kind, AutoInject: autoInject,
+		Name: name, Owner: owner, Kind: kind, AutoInject: autoInject != nil && *autoInject,
 		Cipher: base64.StdEncoding.EncodeToString(append(nonce, sealed...)),
 		Last4:  last4, CreatedAt: now, UpdatedAt: now,
 	}
 	if prev, ok := vs.secrets[vaultKey(owner, name)]; ok {
 		s.CreatedAt = prev.CreatedAt
+		if autoInject == nil {
+			s.AutoInject = prev.AutoInject
+		}
 	}
 	vs.secrets[vaultKey(owner, name)] = s
 	return vs.publicOf(s), vs.save()
@@ -217,6 +227,23 @@ func (vs *VaultStore) AutoInject(owner string) map[string]string {
 	return out
 }
 
+// SetAutoInject flips auto-injection without touching the value; false means
+// owner has no such secret.
+func (vs *VaultStore) SetAutoInject(owner, name string, autoInject bool) bool {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	s, ok := vs.secrets[vaultKey(owner, name)]
+	if !ok {
+		return false
+	}
+	s.AutoInject = autoInject
+	s.UpdatedAt = time.Now().Format(time.RFC3339)
+	if err := vs.save(); err != nil {
+		log.Printf("vault: persisting auto_inject failed: %v", err)
+	}
+	return true
+}
+
 func (vs *VaultStore) Delete(owner, name string) bool {
 	vs.mu.Lock()
 	defer vs.mu.Unlock()
@@ -265,19 +292,36 @@ func registerVaultRoutes(r chi.Router, vault *VaultStore, ownerID func(*http.Req
 			Name       string `json:"name"`
 			Value      string `json:"value"`
 			Secret     *bool  `json:"secret"`
-			AutoInject bool   `json:"auto_inject"`
+			AutoInject *bool  `json:"auto_inject"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
 			return
 		}
-		s, err := vault.Put(ownerID(r), body.Name, body.Value, body.Secret == nil || *body.Secret, body.AutoInject)
+		// A rotation that does not mention auto_inject keeps it.
+		s, err := vault.put(ownerID(r), body.Name, body.Value, body.Secret == nil || *body.Secret, body.AutoInject)
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		writeJSON(w, s)
+	})
+	r.Patch("/v1/secrets/{name}", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			AutoInject *bool `json:"auto_inject"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.AutoInject == nil {
+			http.Error(w, `{"error":"auto_inject is required: true or false"}`, http.StatusBadRequest)
+			return
+		}
+		name := chi.URLParam(r, "name")
+		if !vault.SetAutoInject(ownerID(r), name, *body.AutoInject) {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, map[string]any{"name": name, "auto_inject": *body.AutoInject})
 	})
 	r.Delete("/v1/secrets/{name}", func(w http.ResponseWriter, r *http.Request) {
 		if !vault.Delete(ownerID(r), chi.URLParam(r, "name")) {

@@ -99,11 +99,6 @@ type Manager struct {
 	diskPressure bool // set by monitor when disk >80%
 	log          *zap.Logger
 	mu           sync.RWMutex
-
-	// rootfsSums memoises root-image digests by path+size+mtime; its own lock so
-	// hashing a 200 MB image never holds the lock the active set is read under.
-	sumMu      sync.Mutex
-	rootfsSums map[string]string
 }
 
 // checkHostDeps fails at startup, naming the missing binary, instead of letting
@@ -802,12 +797,18 @@ func (m *Manager) Alive(sandboxID string) bool {
 	if !ok || sb.Machine == nil {
 		return false
 	}
+	// The SDK reports no pid once the VMM it launched has exited, so no pid is
+	// a dead VMM, not an unknown one; read as alive, an OOM-killed VM listed
+	// as running until its TTL.
 	pid := sb.Machine.Pid()
 	if pid <= 0 {
-		return true
+		return false
 	}
 	return syscall.Kill(pid, 0) == nil
 }
+
+// OOMKilled reports whether a sandbox's VMM was killed for exceeding its cgroup memory.max.
+func (m *Manager) OOMKilled(sandboxID string) bool { return vmmOOMKilled(sandboxID) }
 
 func (m *Manager) ActiveSandboxes() []SandboxInfo {
 	m.mu.RLock()

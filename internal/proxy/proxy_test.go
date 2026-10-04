@@ -136,14 +136,16 @@ func TestProxyResolverErrors(t *testing.T) {
 	}
 }
 
-func TestProxyNoAppOnPortReturns404(t *testing.T) {
+// An unpublished port is the caller's to fix (publish it at create), and a 404
+// read as a wrong sandbox id (API I1.15).
+func TestProxyNoAppOnPortReturns400(t *testing.T) {
 	res := &stubResolver{err: rt.ErrNoAppOnPort}
 	h := Handler(res)
 	req := gatedReq("GET", "/preview/sb_1/9999/")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("code = %d, want 404", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("code = %d, want 400", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "no app listening") {
 		t.Fatalf("body = %q, want a no-app-on-port message", rec.Body.String())

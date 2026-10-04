@@ -36,3 +36,16 @@ func OrgAssertKeyGuardError(clustered, devInsecure bool, orgAssertKey string) er
 		"X-Org-Override answers 403. Generate one with `openssl rand -hex 32`, set it here, and " +
 		"give nodes its public half. Set DEV_INSECURE=1 for a single-tenant dev box only")
 }
+
+// VaultKeyGuardError refuses a clustered control plane with no
+// VAULT_SECRET_KEY. Without it every provider-key connect is refused at
+// request time, which a fleet found only when a tenant first tried one.
+func VaultKeyGuardError(clustered, devInsecure, allowPlaintext bool, vaultKey string) error {
+	if !clustered || devInsecure || allowPlaintext || vaultKey != "" {
+		return nil
+	}
+	return errors.New("VAULT_SECRET_KEY is not set — refusing to start a clustered control plane " +
+		"that cannot encrypt tenants' provider API keys (vault_secrets). Generate one with " +
+		"`openssl rand -hex 32` and set it here only, never on a node. Set DEV_INSECURE=1 or " +
+		"ALLOW_PLAINTEXT_VAULT=1 for a single-tenant dev box only")
+}

@@ -79,6 +79,12 @@ export interface NodeInfo {
   status: string
   first_seen: number
   last_seen: number
+  /** Templates held locally; null/absent means the node does not enumerate and boots anything. */
+  templates?: string[] | null
+  /** The node can fetch a template it does not hold. */
+  can_fetch_templates?: boolean
+  /** "firecracker", "docker" or "process"; absent on a node too old to report it. */
+  runtime?: string
   capacity: {
     cpu_cores: number
     cpu_percent: number
@@ -191,12 +197,24 @@ export interface CustomDomain {
   created_at: number
 }
 
+/**
+ * Capabilities is GET /v1/capabilities (fleet scope): what the deployment can
+ * do, so the UI can show a disabled feature's reason up front instead of
+ * waiting for the action to fail.
+ */
+export interface Capabilities {
+  /** True only once PORTAL_SANDBOX_DOMAIN gives custom domains a CNAME target. */
+  custom_domains: boolean
+}
+
 /** VaultSecret is GET /v1/secrets: name and last4 only, never the value. */
 export interface VaultSecret {
   name: string
   last4: string
   /** Present only for non-credential settings (gateway URL, model); never for API keys. */
   value?: string
+  /** Injected into every new sandbox in the org without a secret_refs entry. */
+  auto_inject?: boolean
   created_at: string
   updated_at: string
 }
@@ -261,6 +279,11 @@ export interface CreateSandboxResp {
   /** Browser template: ready-to-use tokened links. */
   viewer_url?: string
   cdp_url?: string
+  /** "cold" or "snapshot"; reported by create only, not by the detail GET. */
+  boot_type?: string
+  boot_ms?: number
+  /** Set when `public: true` would not do what was asked (e.g. a desktop/terminal port). */
+  warning?: string
 }
 
 export interface ExecResp {
@@ -358,6 +381,8 @@ export interface Template {
   primary_input?: TemplatePrimaryInput
   /** Surface a launch lands on: terminal|preview|screen|report|verdict|endpoint|connection. */
   outcome?: string
+  /** Whether some schedulable node can boot it; absent on a server too old to say (treat as available). */
+  available?: boolean
 }
 
 export interface TemplatePrimaryInput {
@@ -402,6 +427,16 @@ export interface SandboxDetail {
   storage_mb?: number
   /** Measured disk usage, MB; absent when the runtime cannot report it. */
   storage_used_mb?: number
+  /** Preview URL on the app port; the detail GET's only record of public_port. */
+  url?: string
+  /** Preview URL on the desktop port; present when the sandbox has a desktop. */
+  desktop_url?: string
+  /**
+   * Whether the preview is reachable without a token. Absent on a server with
+   * no public-preview concept (a node with no orchestrator in front) — treat
+   * that as "the control is not available", not as false.
+   */
+  public_preview?: boolean
 }
 
 export interface FunctionInfo {
