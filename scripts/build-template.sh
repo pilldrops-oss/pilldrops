@@ -68,7 +68,7 @@ tar xf "/tmp/${TEMPLATE}.tar" -C "${TMPDIR}/rootfs"
 # a containment control, not a tidiness one. `cp` follows a symlink at the
 # DESTINATION and writes through it, and an absolute symlink inside an extracted
 # rootfs resolves against the HOST's root, not the rootfs. The openclaw image
-# ships /sbin/init -> /lib/systemd/systemd, so `cp … rootfs/sbin/init` aimed at
+# (since removed) shipped /sbin/init -> /lib/systemd/systemd, so `cp … rootfs/sbin/init` aimed at
 # the host's own systemd; this script runs as root, and it was only ETXTBSY —
 # systemd being PID 1 on that machine — that turned it into a build failure
 # instead of a corrupted host (measured 2026-09-21, twice, reproducibly). Any
@@ -105,23 +105,6 @@ fi
 cp --remove-destination bin/pilldrops-linux "${TMPDIR}/rootfs/usr/local/bin/pilldrops"
 chmod +x "${TMPDIR}/rootfs/usr/local/bin/pilldrops"
 
-# agentd goes only into templates whose launch manifest says kind=agent; ask the
-# binary (`agentd -check`) rather than keep a list here that would drift.
-IS_AGENT=""
-if [ ! -f "bin/agentd" ]; then
-    echo "=== bin/agentd not found — building it now ==="
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/agentd ./cmd/agentd/
-fi
-# Use the host build for the question; the linux binary may not run here.
-if go run ./cmd/agentd -template "${TEMPLATE}" -check >/dev/null 2>&1; then
-    IS_AGENT="yes"
-    echo "=== ${TEMPLATE} is an agent template — injecting agentd ==="
-    cp --remove-destination bin/agentd "${TMPDIR}/rootfs/usr/local/bin/agentd"
-    chmod +x "${TMPDIR}/rootfs/usr/local/bin/agentd"
-    # The journal and queue live on the writable overlay so they survive pause/resume.
-    mkdir -p "${TMPDIR}/rootfs/var/lib/agentd"
-fi
-
 # One copy, embedded by internal/templatebuild for the node's build API and
 # read from the same file here, so both build paths boot identically.
 cp --remove-destination internal/templatebuild/assets/overlay-init "${TMPDIR}/rootfs/sbin/overlay-init"
@@ -142,18 +125,11 @@ if [ -f "${TEMPLATE_DIR}/start.sh" ]; then
 fi
 
 # PID 1, from the same file internal/templatebuild embeds. The in-tree build
-# keeps the two lines templatebuild drops: the agentd placeholder (substituted
-# below, or deleted) and the tagged start.sh line, whose marker comment goes
-# with it.
+# keeps the one line templatebuild drops: the tagged start.sh line, whose
+# marker comment goes with it.
 cp --remove-destination internal/templatebuild/assets/init "${TMPDIR}/rootfs/sbin/init"
 
-# -template lets agentd read its own commands from the launch manifest.
-if [ -n "${IS_AGENT}" ]; then
-    AGENTD_LINE="s|__AGENTD__|/usr/local/bin/agentd -template ${TEMPLATE} >/var/log/agentd.log 2>\&1 \&|"
-else
-    AGENTD_LINE="/__AGENTD__/d"
-fi
-sed -i.bak -e "${AGENTD_LINE}" -e 's| # __INTREE_ONLY__||' "${TMPDIR}/rootfs/sbin/init"
+sed -i.bak -e 's| # __INTREE_ONLY__||' "${TMPDIR}/rootfs/sbin/init"
 rm -f "${TMPDIR}/rootfs/sbin/init.bak"
 chmod +x "${TMPDIR}/rootfs/sbin/init"
 

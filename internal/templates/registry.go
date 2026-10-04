@@ -132,7 +132,6 @@ func loadManifest(dir, id string) Template {
 			override(&t.Outcome, m.Outcome)
 			override(&t.HasServer, m.HasServer)
 			override(&t.PrimaryInput, m.PrimaryInput)
-			override(&t.Agent, m.Agent)
 			overridePositive(&t.CPU, m.CPU)
 			overridePositive(&t.MemoryMB, m.MemoryMB)
 			overridePositive(&t.StorageMB, m.StorageMB)

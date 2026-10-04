@@ -314,7 +314,6 @@ func (d *Daemon) Create(ctx context.Context, spec CreateSpec) (info SandboxInfo,
 		SandboxID: id,
 		Template: rt.Template{
 			Name: spec.Template, Image: spec.Image, Ports: spec.Ports, Env: guestEnv(spec, id),
-			AgentID: agentTemplateID(spec.Template),
 		},
 		VCPU:      vcpu,
 		MemMiB:    memMiB,
@@ -579,16 +578,6 @@ func (d *Daemon) flushUsage(ctx context.Context, id, orgID string, u Usage) {
 	if err := d.cfg.Store.RecordUsage(ctx, id, orgID, u); err != nil {
 		d.log().Error("record usage failed", "sandbox_id", id, "org_id", orgID, "error", err)
 	}
-}
-
-// agentTemplateID returns the canonical id when the template is kind=agent, else "".
-// Tags are deliberately not consulted: openclaw carries the "agent" tag but is kind=app.
-func agentTemplateID(name string) string {
-	t, ok := templates.Resolve(name)
-	if !ok || t.Kind != templates.KindAgent || t.Agent == nil {
-		return ""
-	}
-	return t.ID
 }
 
 // snapshotDir is where the template fetcher materialised a template's files.

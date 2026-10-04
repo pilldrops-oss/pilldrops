@@ -3,22 +3,14 @@
 # tooling its card advertises. Run before listing or relisting templates.
 #
 #   API_URL=https://pilldrops.com API_KEY=sf_... ./scripts/verify-templates.sh
-#   ./scripts/verify-templates.sh --all          # include android family (slow)
-#   ./scripts/verify-templates.sh security loadtest   # just these ids
+#   ./scripts/verify-templates.sh playwright desktop   # just these ids
 #
 # For each template: create, exec its probe, destroy. PASS = probe exit 0.
 set -u
 
 API_URL="${API_URL:-http://localhost:8080}"
 API_KEY="${API_KEY:-}"
-INCLUDE_HEAVY=0
-ONLY=()
-for a in "$@"; do
-  case "$a" in
-    --all) INCLUDE_HEAVY=1 ;;
-    *) ONLY+=("$a") ;;
-  esac
-done
+ONLY=("$@")
 
 command -v jq >/dev/null || { echo "jq required" >&2; exit 2; }
 auth=(-H "Authorization: Bearer ${API_KEY}")
@@ -32,28 +24,12 @@ declare -A PROBES=(
   # every single `docker run` dies with EINVAL. Only the run catches that.
   [docker]='[ "$(docker run --rm alpine echo ok)" = ok ] && docker compose version && docker buildx version'
   [code-interpreter]='python3 -c "import numpy, pandas, matplotlib, scipy, sklearn" && node --version'
-  [fastapi]='python3 -c "import fastapi, uvicorn, sqlalchemy, httpx"'
   [node]='node --version && tsx --version && tsc --version'
-  [nextjs]='node -e "require(\"/root/app/package.json\")" && test -d /root/app/node_modules/next'
   [go]='go version'
   [rust]='rustc --version && cargo --version'
-  [claude]='claude --version'
-  [codex]='codex --version'
-  [grok]='grok --version'
-  [opencode]='opencode --version'
-  [amp]='amp --version'
-  [openclaw]='python3 -c "import playwright, selenium, bs4, flask" && command -v chromium'
   [playwright]='npx playwright --version && test -d "${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}"'
   [browser]='test -x /usr/local/bin/start.sh && ls /ms-playwright | grep -q chromium'
   [desktop]='command -v chromium && pgrep -x chromium >/dev/null'
-  [security]='osv-scanner --version && gitleaks version && command -v pdscan && test -x /usr/local/bin/start.sh'
-  [loadtest]='k6 version && command -v pdload && test -x /usr/local/bin/start.sh'
-)
-# KVM emulator templates take minutes to boot; only with --all.
-declare -A HEAVY_PROBES=(
-  [android]='adb version'
-  [android-headless]='adb version'
-  [mobile-test]='adb version && test -f /usr/local/bin/harness.sh || adb version'
 )
 
 ids=()
@@ -61,7 +37,6 @@ if [ ${#ONLY[@]} -gt 0 ]; then
   ids=("${ONLY[@]}")
 else
   ids=("${!PROBES[@]}")
-  [ "$INCLUDE_HEAVY" = 1 ] && ids+=("${!HEAVY_PROBES[@]}")
 fi
 
 # The screen stack every template image carries, which is what
@@ -93,7 +68,7 @@ DESKTOP_PROBE="for c in ${DESKTOP_BINS}; do command -v \$c >/dev/null || { echo 
 
 pass=0; fail=0; failed_ids=()
 for id in "${ids[@]}"; do
-  probe="${PROBES[$id]:-${HEAVY_PROBES[$id]:-}}"
+  probe="${PROBES[$id]:-}"
   if [ -z "$probe" ]; then echo "?? $id (no probe defined)"; continue; fi
   if [ "${PD_SKIP_DESKTOP_PROBE:-0}" != 1 ]; then
     probe="${DESKTOP_PROBE} && ${probe}"

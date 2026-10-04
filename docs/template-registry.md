@@ -61,10 +61,7 @@ the template's built-in app.
 | `desktop` | Chromium in fluxbox over noVNC (browser-in-a-URL); see §Desktop |
 | *any template* | add `PD_DESKTOP=1` at create for a desktop on port 6080 |
 | `playwright` | headless Playwright + recordings server (`pwtest`, `pwrecord`) |
-| `playwright-headed` | watch tests run live over noVNC; artifacts at `/recordings/` |
-| `claude-terminal` | browser terminal (ttyd) with Claude Code CLI preinstalled |
 | `code-interpreter` | Python + Jupyter, numpy/pandas/sklearn |
-| `claude`, `codex`, `grok`, `opencode`, `amp` | coding-agent CLIs (use via `exec` or pair with ttyd) |
 | `docker` | Docker Engine + Compose + Buildx, daemon already running: `docker run -p 8000:80 …` is live on the preview URL. Firecracker only — a Docker-runtime node refuses it at create, see [runtimes.md](runtimes.md) |
 | `base`, `node`, `go` | plain toolchains |
 
@@ -134,9 +131,9 @@ the canvas is the remote screen, not a file target.
 
 | use case | approach | feasibility |
 |---|---|---|
-| Claude Code in a terminal in the browser | `claude-terminal` (ttyd) | ✅ shipped |
+| Claude Code in a terminal in the browser | any template: install via `exec`, use the built-in web terminal (ttyd, 7681) | ✅ pattern proven |
 | Playwright headless + recording + serving | `playwright` | ✅ shipped |
-| Playwright headed — watch live + recording | `playwright-headed` (Xvfb + noVNC) | ✅ shipped |
+| Playwright headed — watch live + recording | `playwright` with `PD_DESKTOP=1` (Xvfb + noVNC) | ✅ pattern proven |
 | Any GUI Linux app in a URL | desktop pattern: launch the app instead of Chromium on Xvfb | ✅ pattern proven |
 | Claude Desktop (GUI app) in a sandbox | Linux Electron build on the desktop pattern; official app is mac/win only, community Linux builds exist. Practical near-term: claude.ai in the `desktop` template works today | ⚠️ doable, unofficial build |
 | VS Code in the browser | `code-server` on the preview port | ✅ easy next template |
@@ -152,14 +149,14 @@ the canvas is the remote screen, not a file target.
   `--no-sandbox`.
 - The guest has DNS + HTTP(S) egress only (host firewall allowlists 53/80/443).
 - One app port per sandbox (the published `port`); put multiple surfaces
-  behind one server (see playwright-headed: noVNC + `/recordings/` on 8000).
+  behind one server (see `playwright`: test runner + `/recordings/` on 8000).
 - The app port is **8000** on every template. It is what a start command binds
   and what the preview proxy routes to by default (`fcAppPort`), so a template
   publishing another *app* port is unreachable; `TestOneAppPort` fails a
   catalogue row that tries. The platform ports are the exception — 7681
-  (terminal), 6080 (desktop), 6002 (agent) are reachable on every sandbox
-  regardless, and `desktop` declares 6080 as its preview port because its
-  surface is the platform viewer rather than an app of its own.
+  (terminal) and 6080 (desktop) are reachable on every sandbox regardless,
+  and `desktop` declares 6080 as its preview port because its surface is the
+  platform viewer rather than an app of its own.
 - The desktop stack is added to every template image by
   `scripts/build-template.sh` after the template's own build, so a template
   Dockerfile should not install `xvfb`/`x11vnc`/`novnc`/`fluxbox` itself.

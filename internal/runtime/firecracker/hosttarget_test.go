@@ -7,8 +7,8 @@ import (
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
 
-// Everything the node dials — the preview proxy, the web terminal, the agent —
-// must go to the address the node can reach, not to the guest's own IP. Under
+// Everything the node dials — the preview proxy, the web terminal — must go
+// to the address the node can reach, not to the guest's own IP. Under
 // FC_NETNS that guest IP is the same 192.168.30.2 in every sandbox and routes
 // from nowhere on the host, which is what made previews 502.
 //
@@ -68,10 +68,6 @@ func TestTargetsUseTheNodeReachableAddress(t *testing.T) {
 				term, err := c.inst.TerminalTarget()
 				if err != nil || term != c.want+":7681" {
 					t.Errorf("%s TerminalTarget = %q, %v; want %q", c.path, term, err, c.want+":7681")
-				}
-				agent, _, err := c.inst.(rt.AgentTargeter).AgentTarget()
-				if err != nil || agent != c.want+":6002" {
-					t.Errorf("%s AgentTarget = %q, %v; want %q", c.path, agent, err, c.want+":6002")
 				}
 			}
 		})

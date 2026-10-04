@@ -69,30 +69,35 @@ export default function Domains() {
 
   return (
     <div className="wrap">
-      <h1>Domains</h1>
-      <p className="muted">
-        Put your own hostname in front of a <strong>public</strong> sandbox. Create the CNAME
-        record we show, and the host starts serving within a minute. A wildcard
-        (<code>*.vms.example.com</code>, no sandbox) addresses every sandbox of your org by label.
-      </p>
+      <div className="h1row">
+        <div>
+          <h1 className="h1">Domains</h1>
+          <p>
+            Put your own hostname in front of a <b>public</b> sandbox. Create the CNAME
+            record we show, and the host starts serving within a minute. A wildcard
+            (<code>*.vms.example.com</code>, no sandbox) addresses every sandbox of your org by label.
+          </p>
+        </div>
+      </div>
 
-      <form className="row" onSubmit={add}>
-        <input value={host} onChange={e => setHost(e.target.value)}
-               placeholder="app.example.com" aria-label="host" required />
-        <input value={sandbox} onChange={e => setSandbox(e.target.value)}
-               placeholder="sandbox id (blank for a wildcard)" aria-label="sandbox" />
-        <input value={port} onChange={e => setPort(e.target.value)}
-               placeholder="port (8000)" aria-label="port" inputMode="numeric" />
-        <button type="submit" disabled={busy || !host.trim()}>Add domain</button>
-      </form>
+      <div className="panel vault-panel">
+        <form className="vault-add" onSubmit={add}>
+          <input className="pa-input mono vault-input" value={host} onChange={e => setHost(e.target.value)}
+                 placeholder="app.example.com" aria-label="host" required />
+          <input className="pa-input mono vault-input" value={sandbox} onChange={e => setSandbox(e.target.value)}
+                 placeholder="sandbox id (blank for a wildcard)" aria-label="sandbox" />
+          <input className="pa-input mono vault-add-name" value={port} onChange={e => setPort(e.target.value)}
+                 placeholder="port (8000)" aria-label="port" inputMode="numeric" />
+          <button type="submit" className="btn primary" disabled={busy || !host.trim()}>Add domain</button>
+        </form>
+        {loadErr && <p className="lm-error">{loadErr}</p>}
+      </div>
 
-      {loading && <p className="muted">Loading…</p>}
-      {loadErr && <p className="err">{loadErr}</p>}
-
-      {!loading && rows.length === 0 && <p className="muted">No domains yet.</p>}
+      {loading && <p className="vault-empty">Loading…</p>}
+      {!loading && rows.length === 0 && <p className="vault-empty">No domains yet.</p>}
 
       {rows.length > 0 && (
-        <table className="tbl">
+        <table className="tbl panel">
           <thead>
             <tr><th>Host</th><th>Sandbox</th><th>Status</th><th>DNS record</th><th /></tr>
           </thead>
@@ -102,11 +107,11 @@ export default function Domains() {
                 <td>{d.host}</td>
                 <td>{d.wildcard ? '(any, by label)' : `${d.sandbox_id}:${d.port}`}</td>
                 <td>
-                  <span className={d.status === 'active' ? 'badge ok' : 'badge warn'}>{d.status}</span>
-                  {d.error && <div className="muted small">{d.error}</div>}
+                  <span className={d.status === 'active' ? 'pill run' : 'pill pau'}><span className="pd" />{d.status}</span>
+                  {d.error && <div className="lm-error">{d.error}</div>}
                 </td>
                 <td><code>{d.record}</code></td>
-                <td><button onClick={() => remove(d)}>Remove</button></td>
+                <td><button className="btn ghost" onClick={() => remove(d)}>Remove</button></td>
               </tr>
             ))}
           </tbody>

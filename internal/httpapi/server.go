@@ -24,7 +24,7 @@ import (
 // Server bundles the daemon and store behind an HTTP API.
 type Server struct {
 	authc *authcache.Cache
-	// agentFeature is build-tagged so the core build carries an empty struct.
+	// agentFeature is an empty struct: the agent surface is not part of this build.
 	agentFeature
 	deploys        *deployTracker
 	d              *daemon.Daemon
@@ -66,7 +66,7 @@ type Server struct {
 	// filesMaxBytes is the per-file cap on /files uploads, which are exempt
 	// from maxBodyBytes so a large file is bounded by a limit that names itself.
 	filesMaxBytes int64 // PD_FILES_MAX_BYTES, default 1 GiB
-	// functionFeature is build-tagged like agentFeature.
+	// functionFeature carries real state, unlike the empty agentFeature.
 	functionFeature
 	// imageAllowlist restricts body.Image to these registry prefixes when
 	// non-empty (PILLDROPS_IMAGE_ALLOWLIST). Empty allows any registry.
@@ -144,10 +144,6 @@ func (s *Server) logImagePolicy() {
 
 // Close releases the rate limiters' evictors. Optional in short-lived processes.
 func (s *Server) Close() { s.limiter.close(); s.previewLimiter.close(); s.authFailLimiter.close() }
-
-// DefaultAgentEventRetentionDays is the mirrored-event retention when
-// AGENT_EVENT_RETENTION_DAYS is unset. Exported for cmd/gendocs.
-const DefaultAgentEventRetentionDays = 30
 
 // Limits returns the resolved protective limits.
 func (s *Server) Limits() (maxActive, rateRPS, rateBurst int) {
@@ -256,7 +252,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 	route("POST /v1/sandboxes/{id}/visibility", s.auth(s.handleVisibility))
 	route("POST /v1/sandboxes/{id}/timeout", s.auth(s.handleTimeout))
 	route("POST /v1/sandboxes/{id}/refresh", s.auth(s.handleRefresh))
-	route("GET /v1/sandboxes/{id}/channels", s.auth(s.handleChannels))
 
 	// Config is applied per-exec, so a change lands on the next command.
 	route("POST /v1/sandboxes/{id}/config", s.auth(s.handleConfigSet))

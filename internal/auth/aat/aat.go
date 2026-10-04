@@ -1,6 +1,6 @@
 // Package aat implements Agent Access Tokens, sfa_<id>_<secret>: revocable,
 // sandbox-bound, scoped credentials of which only the SHA-256 is stored.
-// agentd must not import this package: a sandbox cannot mint its own credentials.
+// No in-guest code must import this package: a sandbox cannot mint its own credentials.
 package aat
 
 import (

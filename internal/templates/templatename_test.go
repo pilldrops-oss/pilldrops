@@ -10,7 +10,7 @@ import (
 // a shipped id. Lives here because internal/runtime must not import the catalogue.
 func TestEveryCatalogueTemplateIDIsValid(t *testing.T) {
 	cat := Catalog()
-	if len(cat) < 10 {
+	if len(cat) < 9 {
 		t.Fatalf("Catalog() returned %d templates; this test is not seeing the catalogue", len(cat))
 	}
 	for _, tmpl := range cat {

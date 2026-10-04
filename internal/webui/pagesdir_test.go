@@ -122,28 +122,3 @@ func TestAnalyticsSkipsPagesWithoutHead(t *testing.T) {
 		t.Errorf("mangled a page with no head: %q", got)
 	}
 }
-
-func TestWorkstationLauncherIsServed(t *testing.T) {
-	os.Unsetenv(AnalyticsDomainEnv)
-	s, err := New("", "docker", "public", false, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mux := http.NewServeMux()
-	s.Register(mux)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/workstation", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/workstation = %d (synced into internal/webui/dist?)", rec.Code)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, `name="robots" content="noindex"`) {
-		t.Error("launcher is indexable")
-	}
-	if !strings.Contains(body, "/v1/templates") {
-		t.Error("launcher does not read the template catalogue")
-	}
-	if !strings.Contains(body, "chat-link") {
-		t.Error("launcher does not offer to connect a phone")
-	}
-}

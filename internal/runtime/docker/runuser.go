@@ -6,28 +6,18 @@ import (
 
 // sandboxRunUser is the unprivileged identity plain-template tenant code runs
 // as. Numeric so no /etc/passwd entry is needed on any base image; 1001 rather
-// than 1000 because 1000 is `node` (agentRunUser) in the official node images.
+// than 1000 because 1000 is `node` in the official node images.
 const (
 	sandboxRunUID  = "1001"
 	sandboxRunUser = sandboxRunUID + ":" + sandboxRunUID
 	sandboxRunHome = containerWorkdir
 )
 
-// androidRunUser is the identity budtmo/docker-android declares in its image
-// config. A different uid on the exec surface would leave adb unable to see the emulator.
-const androidRunUser = "1300:1301"
-
 // rootReason names why a sandbox's tenant surface still runs as uid 0, or
 // returns "" when it drops. Only image-backed services stay root: their
 // entrypoints (postgres initdb, nginx binding :80) must start as root and
 // drop privilege themselves. A tenant reaches that class only via image+ports.
-func rootReason(service bool, devices []string, deviceUser string) string {
-	if len(devices) > 0 {
-		if deviceUser == "" {
-			return "device passthrough by a builtin that declares no run user (builtinService.runUser is empty)"
-		}
-		return ""
-	}
+func rootReason(service bool) string {
 	if service {
 		return "image-backed service: its own entrypoint must start as root to initialise and then drop privilege itself"
 	}
@@ -35,16 +25,9 @@ func rootReason(service bool, devices []string, deviceUser string) string {
 }
 
 // dropUser is the identity the tenant surface runs as; "" means uid 0.
-// Devices are checked before service because every device builtin is also a service.
-func dropUser(service bool, devices []string, agentDropped bool, deviceUser string) string {
-	if rootReason(service, devices, deviceUser) != "" {
+func dropUser(service bool) string {
+	if rootReason(service) != "" {
 		return ""
-	}
-	if len(devices) > 0 {
-		return deviceUser
-	}
-	if agentDropped {
-		return agentRunUser
 	}
 	return sandboxRunUser
 }
@@ -76,8 +59,9 @@ func execPathPrefix(user string) string {
 }
 
 // privilegeHandover is the shell prologue root PID 1 runs before dropping: it
-// chowns the workspace and /root/app (the nextjs starter) to user and nothing
-// else. Also fixes up root-owned workspaces in snapshots taken before the drop.
+// chowns the workspace and /root/app (a baked-in starter app, if present) to
+// user and nothing else. Also fixes up root-owned workspaces in snapshots
+// taken before the drop.
 func privilegeHandover(user string) string {
 	if user == "" {
 		return ""

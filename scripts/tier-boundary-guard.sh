@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tier boundary guard: the control plane (cmd/orchestrator), node agents
-# (cmd/sandboxd, cmd/sandboxd-fleet) and in-guest binaries (cmd/envd, agentd)
+# (cmd/sandboxd, cmd/sandboxd-fleet) and the in-guest binary (cmd/envd)
 # must not link each other's packages. Checked against the link closure
 # (`go list -deps`), since a transitive dependency ships just as surely.
 #
@@ -20,21 +20,6 @@ check() {
     fail=1
   else
     echo "  ok  cmd/${bin}: no ${what}"
-  fi
-}
-
-# checktags <binary> <build-tags> <description> <forbidden-package-regex>
-# The tags must reach `go list` itself or the closure reported is the default build's.
-checktags() {
-  local bin="$1" tags="$2" what="$3" pattern="$4" bad
-  bad=$(CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go list -deps -tags "${tags}" "./cmd/${bin}" \
-        | grep -E "github.com/pilldrops-oss/pilldrops/internal/(${pattern})(/|\$)" || true)
-  if [ -n "$bad" ]; then
-    echo "::error::cmd/${bin} built with -tags ${tags} must not depend on ${what}:"
-    echo "$bad" | sed 's/^/    /'
-    fail=1
-  else
-    echo "  ok  cmd/${bin} [-tags ${tags}]: no ${what}"
   fi
 }
 
@@ -70,8 +55,8 @@ checkdirect() {
 
 # A worker node must never hold payment credentials, sign-in secrets or customer
 # email. clerkauth, mailer and trials no longer exist but stay listed so a fork that
-# adds them back is caught. extras/bridge/discord, not all of extras/bridge: Telegram is reachable from the node API.
-CONTROL_PLANE='orchestrator|cluster|clerkauth|mailer|trials|extras/bridge/discord|dodopay|stripe'
+# adds them back is caught.
+CONTROL_PLANE='orchestrator|cluster|clerkauth|mailer|trials|dodopay|stripe'
 for bin in sandboxd sandboxd-fleet; do
   check "$bin" "control-plane packages" "$CONTROL_PLANE"
 done
@@ -88,14 +73,10 @@ check orchestrator "the node-local operator dashboard" 'dashboard'
 # cmd/sandboxd-fleet is the lean node agent: no embedded SPA, no operator dashboard.
 check sandboxd-fleet "dashboard or embedded-UI packages" 'webui|dashboard'
 
-# `-tags core` must produce a node that runs sandboxes and nothing else: nothing from
-# internal/extras and no cron sweeper (aigw and mcpcat are gone but stay listed). auth/aat
-# is absent on purpose: internal/store links it unconditionally, so the rule cannot pass yet.
-checktags sandboxd-fleet core "the optional product packages" \
-  'extras|cron|mcpcat|aigw'
-# Optional features live under internal/extras. Only the two packages that wire
-# routes and boot features may link them, and only from files tagged !core (the
-# check above proves that). Every other internal package is engine.
+# Optional features live under internal/extras. Only internal/httpapi and
+# internal/nodeboot, the two packages that wire routes and boot features, may
+# link them (functionroutes.go and api.go do the linking). Every other
+# internal package is engine.
 extras_ok=1
 for pkg in $(CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go list ./internal/... \
     | sed 's#github.com/pilldrops-oss/pilldrops/internal/##' \
@@ -110,9 +91,9 @@ for pkg in $(CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go list ./internal/... \
 done
 [ "$extras_ok" -eq 1 ] && echo "  ok  engine packages: no internal/extras"
 
-# cmd/envd and cmd/agentd ship inside a customer's sandbox; of internal/auth
-# only sbtoken (a random token, hash-only) may cross that line.
-for bin in envd agentd; do
+# cmd/envd ships inside a customer's sandbox; of internal/auth only sbtoken
+# (a random token, hash-only) may cross that line.
+for bin in envd; do
   check "$bin" "server-side auth packages" \
     'auth/(aat|adminauth|authcache|orgassert|previewtoken)'
 done

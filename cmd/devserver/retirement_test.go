@@ -76,7 +76,7 @@ func TestDevserverOwnsNoAPIRouteAlone(t *testing.T) {
 	if len(orphans) > 0 {
 		t.Errorf("cmd/devserver serves %d /v1 route(s) that neither the control plane nor a node "+
 			"serves:\n  %s\n\nThat route works when you run the portal locally and is MISSING on a "+
-			"fleet — which is how /v1/threads 404'd for every fleet user while its tests passed. "+
+			"fleet — which is how a route has 404'd for every fleet user while its tests passed. "+
 			"Put the handler in internal/orchestrator (shared store) or internal/httpapi (touches a "+
 			"sandbox), not here.", len(orphans), strings.Join(orphans, "\n  "))
 	}

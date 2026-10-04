@@ -39,7 +39,7 @@ func TestParseSlugHost(t *testing.T) {
 		{"myapp." + d, "myapp", true},
 		{"w1-api." + d, "w1-api", true},
 		{"8000-sb1." + d, "", false},  // port form
-		{"agent-sb1." + d, "", false}, // agent origin
+		{"agent-sb1." + d, "", false}, // agent- prefix stays reserved in ValidSlug
 		{"www." + d, "", false},       // reserved
 		{"MyApp." + d, "", false},     // callers lower-case first; uppercase is not a slug
 		{"a.b." + d, "", false},
@@ -91,7 +91,7 @@ func TestSlugHostRoutesToTheHoldersIDAndPort(t *testing.T) {
 		t.Fatalf("body = %q", body)
 	}
 
-	// The id form still routes by id, and the agent origin is untouched.
+	// The id form still routes by id.
 	tok = previewtoken.Token([]byte(hostGateSecret), "sb1", 8000, "u:cust1")
 	req = httptest.NewRequest("GET", "http://x/?ptok="+tok, nil)
 	req.Host = "8000-sb1.sb.pilldrops.com"
@@ -125,7 +125,7 @@ func TestSlugHostTokenStillBindsToTheID(t *testing.T) {
 	}
 }
 
-func TestUnknownSlugFallsThroughAndAgentHostStillWins(t *testing.T) {
+func TestUnknownSlugFallsThrough(t *testing.T) {
 	nextHit := ""
 	_, h := slugRouter(t, "127.0.0.1:1", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { nextHit = r.URL.Path }))
 
@@ -137,12 +137,14 @@ func TestUnknownSlugFallsThroughAndAgentHostStillWins(t *testing.T) {
 		t.Fatalf("unknown slug did not reach next (path %q, status %d)", nextHit, rec.Code)
 	}
 
-	nextHit = ""
+	// agent-sb1 is also an unknown label now (no agent-host routing left);
+	// it must refuse rather than reach next or any rewritten path.
 	req = httptest.NewRequest("GET", "http://x/v1/agent/status", nil)
 	req.Host = "agent-sb1.sb.pilldrops.com"
-	h.ServeHTTP(httptest.NewRecorder(), req)
-	if nextHit != "/v1/sandboxes/sb1/agent/status" {
-		t.Fatalf("agent host saw %q, want the agent rewrite", nextHit)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("agent-sb1 host = %d, want 404", rec.Code)
 	}
 
 	// A resolver without BySlug keeps the old 404 for a non-id label.

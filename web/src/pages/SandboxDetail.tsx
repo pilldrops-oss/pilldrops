@@ -1,19 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { getChannels, getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, createChatLink, setSandboxSlug, slugUrl, setSandboxVisibility, IS_LOCAL_RUNTIME } from '../api'
+import { getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, setSandboxSlug, slugUrl, setSandboxVisibility, IS_LOCAL_RUNTIME } from '../api'
 import UnsafeEmbedNotice from '../components/UnsafeEmbedNotice'
 import { useConfirm } from '../components/ConfirmModal'
 import { useToast } from '../components/Toast'
 import { errText } from '../lib/errText'
 import { cpuReading, memReading, diskReading } from '../lib/liveMetrics'
 import FileBrowser from '../components/FileBrowser'
-import { ModelTab, KeysTab, IntegrationsTab, ChannelsTab } from '../components/WorkstationTabs'
-import { ConnectCard } from '../components/agent/ConnectCard'
-import { TimelineTab } from '../components/agent/TimelineTab'
-import { agentTabsVisible, previewLabel } from './agentTabGate'
-import { IsolationCard } from '../components/agent/IsolationCard'
-import { AgentPanel } from '../components/agent/AgentPanel'
-import type { ChatLinkResp } from '../api'
 import type { SandboxDetail as SandboxDetailType, Template, SandboxMetrics, PortStatus } from '../types'
 import { statusPill } from './Sandboxes'
 import { TemplateIcon } from '../components/templateIcons'
@@ -28,10 +21,9 @@ function formatDate(ts: string): string {
   }
 }
 
-type Tab = 'agent' | 'timeline' | 'connect' | 'shell' | 'terminal' | 'files' | 'preview' | 'logs' | 'info' | 'model' | 'keys' | 'integrations' | 'channels'
+type Tab = 'shell' | 'terminal' | 'files' | 'preview' | 'logs' | 'info'
 
-function defaultTabFor(outcome?: string, kind?: string): Tab {
-  if (kind === 'agent') return 'agent'
+function defaultTabFor(outcome?: string): Tab {
   switch (outcome) {
     case 'screen':
     case 'report':
@@ -41,6 +33,18 @@ function defaultTabFor(outcome?: string, kind?: string): Tab {
       return 'preview'
     default:
       return 'shell'
+  }
+}
+
+/** previewLabel names the Preview tab after the manifest's outcome. */
+function previewLabel(outcome?: string): string {
+  switch (outcome) {
+    case 'screen': return 'Screen'
+    case 'report': return 'Report'
+    case 'verdict': return 'Verdict'
+    case 'endpoint': return 'Endpoint'
+    case 'connection': return 'Connection'
+    default: return 'Preview'
   }
 }
 
@@ -423,19 +427,22 @@ function SlugRow({ sandbox, onChanged }: { sandbox: SandboxDetailType; onChanged
     <div className="info-row">
       <div className="info-key">Slug</div>
       <div className="info-val">
-        <input
-          className="sb-name-input"
-          value={value}
-          disabled={busy}
-          maxLength={63}
-          placeholder="myapp"
-          aria-label="Sandbox slug"
-          onChange={e => setValue(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') void save() }}
-        />
-        <button className="btn" disabled={busy || value.trim() === (sandbox.slug ?? '')} onClick={() => void save()} style={{ marginLeft: 8 }}>
-          Save
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            className="sb-name-input"
+            style={{ flex: 1, minWidth: 0 }}
+            value={value}
+            disabled={busy}
+            maxLength={63}
+            placeholder="myapp"
+            aria-label="Sandbox slug"
+            onChange={e => setValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') void save() }}
+          />
+          <button className="btn" disabled={busy || value.trim() === (sandbox.slug ?? '')} onClick={() => void save()}>
+            Save
+          </button>
+        </div>
         {host && (
           <div>
             <a href={host} target="_blank" rel="noopener noreferrer">{host}</a>
@@ -602,7 +609,7 @@ export default function SandboxDetail() {
   }, [sandbox?.template])
   useEffect(() => {
     if (userPickedTab.current || !tplMeta) return
-    setTabRaw(defaultTabFor(tplMeta.outcome, tplMeta.kind))
+    setTabRaw(defaultTabFor(tplMeta.outcome))
   }, [tplMeta])
   const [loading, setLoading] = useState(!sandbox)
   const [error, setError] = useState<string | null>(null)
@@ -625,25 +632,6 @@ export default function SandboxDetail() {
     const interval = setInterval(loadSandbox, 5000)
     return () => clearInterval(interval)
   }, [loadSandbox])
-
-  const [chatLink, setChatLink] = useState<ChatLinkResp | null>(null)
-  const [linkBusy, setLinkBusy] = useState(false)
-
-  const connectPhone = useCallback(async () => {
-    if (!id) return
-    setLinkBusy(true)
-    try {
-      setChatLink(await createChatLink(id, false))
-    } catch (e) {
-      const raw = (e as Error).message
-      setError(
-        /404|not found/i.test(raw)
-          ? 'This deployment doesn’t have the messaging bridge — phone linking needs the hosted fleet.'
-          : raw,
-      )
-    }
-    setLinkBusy(false)
-  }, [id])
 
   const openUrl = usePreviewLink(sandbox?.id, sandbox?.public_port || 8000)
 
@@ -687,16 +675,6 @@ export default function SandboxDetail() {
     })
   }, [id, isPrivate, doAction, confirmDialog, toast])
 
-  const [anyChannelUsable, setAnyChannelUsable] = useState(false)
-  useEffect(() => {
-    if (!id || tplMeta?.kind !== 'agent') return
-    let live = true
-    getChannels(id)
-      .then(r => { if (live) setAnyChannelUsable((r.channels ?? []).some(c => c.available)) })
-      .catch(() => {})
-    return () => { live = false }
-  }, [id, tplMeta?.kind])
-
   if (!id) return null
 
   if (loading && !sandbox) {
@@ -719,28 +697,11 @@ export default function SandboxDetail() {
   const sb = sandbox!
   const isRunning = sb.status === 'running'
 
-  const isAgent = agentTabsVisible(tplMeta)
-
   const tabs: Array<{ id: Tab; label: string }> = [
-    ...(isAgent
-      ? ([
-          { id: 'agent', label: 'Agent' },
-          { id: 'timeline', label: 'Timeline' },
-          { id: 'connect', label: 'Connect' },
-        ] as Array<{ id: Tab; label: string }>)
-      : []),
     { id: 'shell', label: 'Terminal' },
     { id: 'files', label: 'Files' },
     { id: 'preview', label: previewLabel(tplMeta?.outcome) },
     { id: 'logs', label: 'Logs' },
-    ...(tplMeta?.agent
-      ? ([
-          { id: 'model', label: 'Model' },
-          { id: 'keys', label: 'Keys' },
-          { id: 'integrations', label: 'Integrations' },
-          ...(anyChannelUsable ? [{ id: 'channels' as Tab, label: 'Channels' }] : []),
-        ] as Array<{ id: Tab; label: string }>)
-      : []),
     { id: 'info', label: 'Info' },
   ]
 
@@ -824,16 +785,6 @@ export default function SandboxDetail() {
           >
             Refresh TTL
           </button>
-          {tplMeta?.agent && (
-            <button
-              className="btn"
-              disabled={linkBusy}
-              onClick={connectPhone}
-              title="Text this workstation from Telegram"
-            >
-              {linkBusy ? 'Minting…' : 'Connect phone'}
-            </button>
-          )}
           <button
             className="btn danger"
             disabled={busy}
@@ -849,23 +800,6 @@ export default function SandboxDetail() {
         </div>
         {error && sandbox && (
           <p className="lm-error" style={{ marginTop: 10 }}>{error}</p>
-        )}
-        {chatLink && (
-          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
-            {chatLink.telegram_url ? (
-              <a className="btn" href={chatLink.telegram_url} target="_blank" rel="noopener noreferrer">
-                Open Telegram ↗
-              </a>
-            ) : (
-              <span style={{ fontSize: 12 }}>
-                Send <code>/link {chatLink.code}</code> to your bot.
-              </span>
-            )}
-            <span style={{ fontSize: 12, color: 'var(--sub)' }}>
-              Single use, expires in {chatLink.expires_in}. The agent keeps its approval
-              prompts on this link — grant autonomy at launch if you want it to act unattended.
-            </span>
-          </div>
         )}
       </div>
 
@@ -895,19 +829,7 @@ export default function SandboxDetail() {
             defaultPort={sb.public_port}
           />
         )}
-        {tab === 'agent' && isAgent && <AgentPanel sandboxID={id} />}
-        {tab === 'timeline' && isAgent && <TimelineTab sandboxID={id} />}
-        {tab === 'connect' && isAgent && (
-          <>
-            <ConnectCard sandboxID={id} />
-            <IsolationCard sandboxID={id} />
-          </>
-        )}
         {tab === 'logs' && <LogsTab id={id} />}
-        {tab === 'model' && <ModelTab id={id} />}
-        {tab === 'keys' && <KeysTab id={id} />}
-        {tab === 'integrations' && <IntegrationsTab id={id} />}
-        {tab === 'channels' && <ChannelsTab id={id} />}
         {tab === 'info' && <InfoTab sandbox={sb} onSlug={slug => setSandbox(prev => (prev ? { ...prev, slug: slug || undefined } : prev))} />}
       </div>
     </div>

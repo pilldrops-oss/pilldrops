@@ -12,7 +12,7 @@ var slugRe = regexp.MustCompile(`^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // reservedSlugs are labels the platform serves itself under the sandbox domain.
 var reservedSlugs = map[string]bool{
-	"agent": true, "www": true, "api": true, "app": true, "dashboard": true, "portal": true, "mail": true,
+	"www": true, "api": true, "app": true, "dashboard": true, "portal": true, "mail": true,
 }
 
 // ValidLabel reports whether s is a lowercase label of at most max bytes:
@@ -50,7 +50,7 @@ func ValidSlug(s string) error {
 		return fmt.Errorf("slug %q is reserved", s)
 	}
 	if strings.HasPrefix(s, "agent-") {
-		return fmt.Errorf("slug %q: the agent- prefix is reserved for agent origins", s)
+		return fmt.Errorf("slug %q: the agent- prefix is reserved", s)
 	}
 	return nil
 }

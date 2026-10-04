@@ -14,7 +14,6 @@ export function roleOf(t: Template): ServiceRole {
     if (tags.includes('database') || tags.includes('sql')) return 'database'
     return 'other'
   }
-  if (t.kind === 'agent') return 'agent'
   if (t.kind === 'test' || tags.includes('browser')) return 'browser'
   if (t.kind === 'app' || t.kind === 'code' || t.kind === 'shell') return 'app'
   return 'other'

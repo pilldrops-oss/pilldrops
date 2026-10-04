@@ -8,11 +8,8 @@ func TestFleetPathsCoverEveryProxiedResource(t *testing.T) {
 	forwarded := []string{
 		"/v1/sandboxes",
 		"/v1/sandboxes/sb_123/exec",
-		"/v1/sandboxes/sb_123/chat",
-		"/v1/sandboxes/sb_123/integrations",
 		"/v1/cron",
 		"/v1/cron/cron_123/run",
-		"/v1/integrations",
 	}
 	for _, p := range forwarded {
 		if !isFleetPath(p) {

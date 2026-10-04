@@ -55,28 +55,6 @@ func TestConfigEmptyValueUnsets(t *testing.T) {
 	}
 }
 
-func TestModelAndBaseURLMapToTheAgentsOwnEnvNames(t *testing.T) {
-	srv, key, _, _, api := newCronSandboxWithAPI(t)
-	_ = api
-	code, out := do(t, "POST", srv+"/v1/sandboxes", key, `{"template":"claude"}`)
-	if code != http.StatusCreated {
-		t.Fatalf("create = %d %v", code, out)
-	}
-	sb, _ := out["id"].(string)
-
-	code, out = do(t, "POST", srv+"/v1/sandboxes/"+sb+"/config", key,
-		`{"model":"claude-sonnet-4-6","base_url":"https://gw.example.com"}`)
-	if code != http.StatusOK {
-		t.Fatalf("set model = %d %v", code, out)
-	}
-	if got := execIn(t, srv, key, sb, "printenv ANTHROPIC_MODEL"); got != "claude-sonnet-4-6" {
-		t.Errorf("ANTHROPIC_MODEL = %q — the UI should not need to know that name", got)
-	}
-	if got := execIn(t, srv, key, sb, "printenv ANTHROPIC_BASE_URL"); got != "https://gw.example.com" {
-		t.Errorf("ANTHROPIC_BASE_URL = %q", got)
-	}
-}
-
 func TestConfigReadBackMasksSecrets(t *testing.T) {
 	srv, key, sb, _ := newCronSandbox(t)
 	do(t, "POST", srv+"/v1/sandboxes/"+sb+"/config", key,

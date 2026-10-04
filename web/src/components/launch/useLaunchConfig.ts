@@ -1,13 +1,11 @@
 import { useState, useMemo, useEffect } from 'react'
 
 import type { Template, Plan, LimitsInfo } from '../../types'
-import { absolutePreviewUrl, getLimits, listSecrets } from '../../api'
-import { defaultModeFor, type AgentMode } from '../agent/ModeLadder'
+import { absolutePreviewUrl, getLimits } from '../../api'
 
 import { type LifetimeKey } from '../../lib/lifetime'
 
-import { type AgentConfig } from '../../lib/launchAgents'
-import { type AccessMode, type CustomEnv, type Kind, agentFor, buildEnvList, kindOf } from '../../lib/launchKinds'
+import { type CustomEnv, type Kind, buildEnvList, kindOf } from '../../lib/launchKinds'
 import { starterFiles, starterStart } from '../../lib/launchStarters'
 import { genSecret } from '../../lib/launchBody'
 
@@ -42,21 +40,6 @@ export interface LaunchConfig {
   setCustomEnv: (rows: CustomEnv[]) => void
 
   kind: Kind
-  agent: AgentConfig | null
-  accessMode: AccessMode
-  setAccessMode: (m: AccessMode) => void
-  agentMode: AgentMode
-  setAgentMode: (m: AgentMode) => void
-  apiKey: string
-  setApiKey: (v: string) => void
-  baseUrl: string
-  setBaseUrl: (v: string) => void
-  model: string
-  setModel: (v: string) => void
-  mcpJson: string
-  setMcpJson: (v: string) => void
-  task: string
-  setTask: (v: string) => void
   testCmd: string
   setTestCmd: (v: string) => void
   serveReport: boolean
@@ -71,9 +54,6 @@ export interface LaunchConfig {
   setupCmds: string[]
 
   plan: Plan | null
-
-  vaultNames: string[]
-  refreshVault: () => void
 }
 
 export function useLaunchConfig(): LaunchConfig {
@@ -103,22 +83,6 @@ export function useLaunchConfig(): LaunchConfig {
     }
   }, [])
 
-  const [vaultNames, setVaultNames] = useState<string[]>([])
-  const refreshVault = () => {
-    listSecrets()
-      .then(s => setVaultNames(s.map(x => x.name)))
-      .catch(() => {})
-  }
-
-  useEffect(refreshVault, [])
-
-  const [accessMode, setAccessMode] = useState<AccessMode>('terminal')
-  const [agentModeChoice, setAgentModeChoice] = useState<AgentMode | undefined>(undefined)
-  const [apiKey, setApiKey] = useState('')
-  const [baseUrl, setBaseUrl] = useState('')
-  const [model, setModel] = useState('')
-  const [mcpJson, setMcpJson] = useState('')
-  const [task, setTask] = useState('')
   const [testCmd, setTestCmd] = useState('')
   const [serveReport, setServeReport] = useState(true)
   const [primaryValue, setPrimaryValue] = useState('')
@@ -140,12 +104,6 @@ export function useLaunchConfig(): LaunchConfig {
     setDeclaredEnv(seeded)
     setCustomEnv([])
 
-    setAccessMode('terminal')
-    setApiKey('')
-    setBaseUrl('')
-    setModel('')
-    setMcpJson(agentFor(t)?.configExample ?? '')
-    setTask('')
     setTestCmd(kindOf(t) === 'test' ? (t.start_suggestion ?? 'npx playwright test') : '')
     setServeReport(true)
     setPrimaryValue('')
@@ -161,7 +119,6 @@ export function useLaunchConfig(): LaunchConfig {
   )
 
   const kind: Kind = tpl ? kindOf(tpl) : 'web'
-  const agent = tpl ? agentFor(tpl) : null
 
   const previewPort = port ? parseInt(port, 10) : tpl?.default_port ?? tpl?.port ?? 8000
   const previewUrl = absolutePreviewUrl('<id>', previewPort)
@@ -202,21 +159,6 @@ export function useLaunchConfig(): LaunchConfig {
     customEnv,
     setCustomEnv,
     kind,
-    agent,
-    accessMode,
-    setAccessMode,
-    agentMode: agentModeChoice ?? defaultModeFor(tpl?.agent),
-    setAgentMode: setAgentModeChoice,
-    apiKey,
-    setApiKey,
-    baseUrl,
-    setBaseUrl,
-    model,
-    setModel,
-    mcpJson,
-    setMcpJson,
-    task,
-    setTask,
     testCmd,
     setTestCmd,
     serveReport,
@@ -228,7 +170,5 @@ export function useLaunchConfig(): LaunchConfig {
     previewUrl,
     setupCmds,
     plan: billing?.plan ?? null,
-    vaultNames,
-    refreshVault,
   }
 }

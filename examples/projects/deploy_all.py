@@ -151,7 +151,7 @@ setInterval(update,1000);update();addLog('Dashboard loaded');
 # ─── 3. FastAPI + SQLite (Python) ────────────────────
 
 fastapi_app = deploy("3. FastAPI + SQLite (Python API)", {
-    "template": "fastapi", "timeout": 600, "port": 8000,
+    "template": "python-3.11", "timeout": 600, "port": 8000,
     "files": [
         {"path": "main.py", "content": """from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel

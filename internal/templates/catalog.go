@@ -50,7 +50,6 @@ type Template struct {
 	Kind         string        `json:"kind,omitempty"`
 	PrimaryInput *PrimaryInput `json:"primary_input,omitempty"`
 	Outcome      string        `json:"outcome,omitempty"`
-	Agent        *AgentMeta    `json:"agent,omitempty"`
 
 	// Image and Ports mark an image-backed service template booted from a
 	// published image with its own entrypoint. Platform-defined, so exempt from
@@ -99,52 +98,6 @@ var catalog = []Template{
 		Aliases:         []string{"python-3.11", "python-data-science", "code-interpreter-v1"},
 	},
 	{
-		// Shares the code-interpreter image; see canonicalTemplate.
-		ID: "research", Name: "Deep Research",
-		Description: "Research workspace: Python + requests/pandas ready — describe your question with ✨ AI Configure (it writes the plan), findings served on the preview URL.",
-		Language:    "python", Icon: "🔎", Tags: []string{"research", "python", "report", "use-case"},
-		CPU: 2, MemoryMB: 2048, StorageMB: 4096, Visibility: "public",
-		Preinstalled:    []string{"python3.11", "requests", "pandas", "matplotlib", "node20"},
-		StartSuggestion: "python3 -m http.server $PORT",
-		DefaultPort:     8000,
-		Aliases:         []string{"deep-research"},
-	},
-	{
-		// Shares the code-interpreter image; see canonicalTemplate.
-		ID: "web-scraper", Name: "Web Scraper",
-		Description: "Scrape a page in seconds: the Python starter fetches, extracts and serves the results — point ✨ AI Configure at your target site and it writes the scraper.",
-		Language:    "python", Icon: "🕷", Tags: []string{"scraping", "python", "use-case"},
-		CPU: 2, MemoryMB: 1024, StorageMB: 4096, Visibility: "public",
-		Preinstalled:    []string{"python3.11", "requests", "pandas"},
-		StartSuggestion: "python3 scrape.py",
-		SetupSuggestion: []string{"pip install -q beautifulsoup4"},
-		DefaultPort:     8000,
-		Aliases:         []string{"scraper"},
-	},
-	{
-		// Shares the node image. Launches public by default so external services can reach it.
-		ID: "webhook-inbox", Name: "Webhook Inbox",
-		Description: "A live URL that catches webhooks: every request is logged to a page that updates in real time. Paste the public URL into Stripe, GitHub, or anything that POSTs.",
-		Language:    "node", Icon: "📥", Tags: []string{"webhooks", "testing", "use-case"},
-		CPU: 1, MemoryMB: 512, StorageMB: 2048, Visibility: "public",
-		Preinstalled:    []string{"node20"},
-		StartSuggestion: "node inbox.js",
-		DefaultPort:     8000,
-		Aliases:         []string{"webhook-tester"},
-	},
-	{
-		ID: "fastapi", Name: "FastAPI",
-		Description: "FastAPI + uvicorn, SQLAlchemy, Pydantic, httpx pre-installed on Python 3.11",
-		Language:    "python", Icon: "🚀", Tags: []string{"python", "api", "fastapi"},
-		CPU: 2, MemoryMB: 1024, StorageMB: 4096, Visibility: "public",
-		Preinstalled:    []string{"python3.11", "fastapi", "uvicorn", "sqlalchemy", "httpx"},
-		StartSuggestion: "uvicorn main:app --host 0.0.0.0 --port $PORT",
-		// Load-bearing on docker nodes, which boot bare python:3.11-slim for this
-		// id; drop once an enriched fastapi image ships.
-		SetupSuggestion: []string{"pip install fastapi uvicorn"},
-		DefaultPort:     8000,
-	},
-	{
 		ID: "browser", Name: "Browser",
 		Description: "Headless Chromium you watch and control in the browser — lightweight computer-use, no VNC or desktop.",
 		Language:    "node", Icon: "🌐",
@@ -173,56 +126,6 @@ var catalog = []Template{
 		DefaultPort:  rt.DesktopPort,
 	},
 	{
-		ID: "android", Name: "Android Emulator",
-		Description: "Android 14 emulator (KVM-accelerated) with a browser-viewable screen + Appium & adb inside — mobile E2E testing and app agents",
-		Language:    "android", Icon: "🤖",
-		Tags: []string{"mobile", "emulator", "e2e", "appium", "computer-use"},
-		CPU:  4, MemoryMB: 8192, StorageMB: 16384, Visibility: "public",
-		Port:         6080,
-		Preinstalled: []string{"android14", "appium", "adb"},
-		HasServer:    true,
-		ServerDesc:   "Android screen (noVNC) on the preview URL",
-		DefaultPort:  6080,
-		Aliases:      []string{"android-emulator", "android-14"},
-	},
-	{
-		ID: "android-headless", Name: "Android Emulator (headless CI)",
-		Description: "Headless Android 14 emulator + Appium for CI/E2E — no screen streaming (lower overhead); the preview URL is the Appium WebDriver endpoint",
-		Language:    "android", Icon: "🤖",
-		Tags: []string{"mobile", "emulator", "e2e", "appium", "ci", "headless"},
-		CPU:  4, MemoryMB: 8192, StorageMB: 16384, Visibility: "public",
-		Port:         4723,
-		Preinstalled: []string{"android14", "appium"},
-		HasServer:    true,
-		ServerDesc:   "Appium WebDriver endpoint on the preview URL",
-		DefaultPort:  4723,
-		Aliases:      []string{"android-ci", "android-appium"},
-	},
-	{
-		ID: "mobile-test", Name: "Mobile Test Session",
-		Description: "Zero-setup mobile E2E: drop your test script in, it runs on a headless Android 14 emulator with automatic screen recording — the sandbox URL shows live progress, then the full report (video, screenshot, log, artifacts). One command: pilldrops test ./suite.sh",
-		Language:    "android", Icon: "▶",
-		Tags: []string{"mobile", "e2e", "testing", "recording", "report", "ci"},
-		CPU:  4, MemoryMB: 8192, StorageMB: 16384, Visibility: "public",
-		Port:         8765,
-		Preinstalled: []string{"android14", "recording"},
-		HasServer:    true,
-		ServerDesc:   "Live test progress + report on the preview URL",
-		DefaultPort:  8765,
-		Aliases:      []string{"android-test", "mobile-e2e"},
-	},
-	{
-		// Contains no OpenClaw; the id is kept because sandboxes re-boot from
-		// their stored template id. Real OpenClaw is "openclaw-agent".
-		ID: "openclaw", Name: "Browser Agent (Python)",
-		Description: "Browser automation in Python: Chromium + playwright, selenium, beautifulsoup4, flask pre-installed",
-		Language:    "python", Icon: "🦾", Tags: []string{"python", "browser", "automation"},
-		Aliases: []string{"browser-agent"},
-		CPU:     4, MemoryMB: 4096, StorageMB: 5120, Visibility: "public",
-		Preinstalled: []string{"python3.11", "chromium", "playwright", "selenium"},
-		DefaultPort:  8000,
-	},
-	{
 		ID: "playwright", Name: "Playwright (E2E testing)",
 		Description: "Pre-baked Playwright + Chromium (browsers & OS deps included) — write E2E tests, run them, serve the HTML report. Zero install.",
 		Language:    "node", Icon: "pw",
@@ -234,90 +137,6 @@ var catalog = []Template{
 		Aliases:         []string{"playwright-test", "e2e"},
 	},
 	{
-		ID: "security", Name: "Security review",
-		Description: "Scan code you own: osv-scanner finds known-vulnerable dependencies, gitleaks finds committed secrets, and pdscan checks a URL's response headers. GREEN/RED verdict + report on the preview URL. No active probing.",
-		Language:    "python", Icon: "⛨",
-		Tags: []string{"security", "testing", "dependencies", "secrets", "report"},
-		CPU:  2, MemoryMB: 2048, StorageMB: 4096, Visibility: "public",
-		Port:         8000, // report server (start.sh) — preview URL = the report
-		Preinstalled: []string{"osv-scanner", "gitleaks", "python3"},
-		HasServer:    true,
-		ServerDesc:   "Security report on the preview URL",
-		DefaultPort:  8000,
-		Aliases:      []string{"scan", "sec"},
-	},
-	{
-		ID: "loadtest", Name: "Load test (k6)",
-		Description: "Pre-baked k6 load generator: pdload <url> ramps virtual users, checks thresholds and publishes a GREEN/RED report on the preview URL. Test only targets you own.",
-		Language:    "javascript", Icon: "▮",
-		Tags: []string{"testing", "load", "performance", "k6", "report"},
-		CPU:  2, MemoryMB: 2048, StorageMB: 4096, Visibility: "public",
-		Port:         8000, // report server (start.sh) — preview URL = the report
-		Preinstalled: []string{"k6", "python3"},
-		HasServer:    true,
-		ServerDesc:   "Load-test report on the preview URL",
-		DefaultPort:  8000,
-		Aliases:      []string{"k6", "stress-test"},
-	},
-	{
-		ID: "claude", Name: "Claude Code",
-		Description: "Node 20 + Claude Code CLI (@anthropic-ai/claude-code)",
-		Language:    "node", Icon: "cc", Tags: []string{"agent", "coding-cli"},
-		CPU: 1, MemoryMB: 1024, StorageMB: 2048, Visibility: "public",
-		Preinstalled: []string{"node20", "claude-code"},
-		DefaultPort:  8000,
-	},
-	{
-		ID: "codex", Name: "Codex",
-		Description: "Node 20 + OpenAI Codex CLI (@openai/codex)",
-		Language:    "node", Icon: "cx", Tags: []string{"agent", "coding-cli"},
-		CPU: 1, MemoryMB: 1024, StorageMB: 2048, Visibility: "public",
-		Preinstalled: []string{"node20", "codex"},
-		DefaultPort:  8000,
-	},
-	{
-		ID: "grok", Name: "Grok",
-		Description: "Node 20 + Grok CLI",
-		Language:    "node", Icon: "gk", Tags: []string{"agent", "coding-cli"},
-		CPU: 1, MemoryMB: 1024, StorageMB: 2048, Visibility: "public",
-		Preinstalled: []string{"node20", "grok"},
-		DefaultPort:  8000,
-	},
-	{
-		ID: "opencode", Name: "OpenCode",
-		Description: "Node 20 + OpenCode (opencode-ai)",
-		Language:    "node", Icon: "oc", Tags: []string{"agent", "coding-cli"},
-		CPU: 1, MemoryMB: 1024, StorageMB: 2048, Visibility: "public",
-		Preinstalled: []string{"node20", "opencode"},
-		DefaultPort:  8000,
-	},
-	{
-		ID: "openclaw-agent", Name: "OpenClaw",
-		Description: "Node 24 + OpenClaw — multi-channel AI gateway agent (github.com/openclaw/openclaw); bring any provider key",
-		Language:    "node", Icon: "ow", Tags: []string{"agent", "coding-cli", "channels"},
-		// Heavier than the thin CLI agents: carries its own gateway, channel bridges and memory index.
-		CPU: 2, MemoryMB: 2048, StorageMB: 4096, Visibility: "public",
-		Preinstalled: []string{"node24", "openclaw", "git"},
-		DefaultPort:  8000,
-	},
-	{
-		ID: "hermes", Name: "Hermes",
-		Description: "Node 24 + Hermes Agent — self-improving, tool-calling, provider-agnostic (bring any provider key)",
-		Language:    "node", Icon: "hm", Tags: []string{"agent", "coding-cli"},
-		// Heavier than the thin CLI agents: carries its own tooling, skills and memory index.
-		CPU: 2, MemoryMB: 2048, StorageMB: 4096, Visibility: "public",
-		Preinstalled: []string{"node24", "hermes", "git"},
-		DefaultPort:  8000,
-	},
-	{
-		ID: "amp", Name: "Amp",
-		Description: "Node 20 + Amp CLI (@sourcegraph/amp)",
-		Language:    "node", Icon: "⚡", Tags: []string{"agent", "coding-cli"},
-		CPU: 1, MemoryMB: 1024, StorageMB: 2048, Visibility: "public",
-		Preinstalled: []string{"node20", "amp"},
-		DefaultPort:  8000,
-	},
-	{
 		ID: "node", Name: "Node + TypeScript",
 		Description: "Node 20 + typescript, tsx, ts-node",
 		Language:    "node", Icon: "ts", Tags: []string{"node", "typescript"},
@@ -326,16 +145,6 @@ var catalog = []Template{
 		StartSuggestion: "node server.js",
 		DefaultPort:     8000,
 		Aliases:         []string{"node-20"},
-	},
-	{
-		ID: "nextjs", Name: "Next.js",
-		Description: "Next.js starter app pre-baked at /root/app — npm run dev serves instantly",
-		Language:    "node", Icon: "▲", Tags: []string{"node", "react", "nextjs"},
-		CPU: 2, MemoryMB: 2048, StorageMB: 4096, Visibility: "public",
-		Preinstalled:    []string{"node20", "nextjs starter (/root/app)"},
-		StartSuggestion: "cd /root/app && npm run dev",
-		// Not 3000: runtimes inject PORT=8000 and the starter binds ${PORT:-3000}.
-		DefaultPort: 8000,
 	},
 	{
 		ID: "go", Name: "Go",
@@ -356,61 +165,6 @@ var catalog = []Template{
 		StartSuggestion: "cargo run",
 		DefaultPort:     8000,
 		Aliases:         []string{"rust-1.77"},
-	},
-
-	// Image-backed services: Preinstalled names the service version, not tools on a PATH.
-	{
-		ID: "postgres", Name: "Postgres",
-		Description: "PostgreSQL 16 relational database.",
-		Language:    "sql", Icon: "🐘", Tags: []string{"database", "sql", "postgres"},
-		CPU: 2, MemoryMB: 1024, StorageMB: 4096, Visibility: "public",
-		Image: "postgres:16", Ports: []int{5432},
-		// The official image refuses to start without POSTGRES_PASSWORD.
-		Env: []TemplateEnv{
-			{Name: "POSTGRES_PASSWORD", Required: true, Secret: true},
-			{Name: "POSTGRES_DB", Value: "app"},
-		},
-		Preinstalled: []string{"postgresql-16"},
-		DefaultPort:  5432,
-	},
-	{
-		ID: "redis", Name: "Redis",
-		Description: "Redis 7 in-memory data store / cache.",
-		Language:    "shell", Icon: "🔴", Tags: []string{"database", "cache", "redis"},
-		CPU: 2, MemoryMB: 512, StorageMB: 2048, Visibility: "public",
-		Image: "redis:7", Ports: []int{6379},
-		Preinstalled: []string{"redis-7"},
-		DefaultPort:  6379,
-	},
-	{
-		ID: "mysql", Name: "MySQL",
-		Description: "MySQL 8 relational database.",
-		Language:    "sql", Icon: "🐬", Tags: []string{"database", "sql", "mysql"},
-		CPU: 2, MemoryMB: 1024, StorageMB: 4096, Visibility: "public",
-		Image: "mysql:8", Ports: []int{3306},
-		Env: []TemplateEnv{
-			{Name: "MYSQL_ROOT_PASSWORD", Required: true, Secret: true},
-		},
-		Preinstalled: []string{"mysql-8"},
-		DefaultPort:  3306,
-	},
-	{
-		ID: "mongodb", Name: "MongoDB",
-		Description: "MongoDB 7 document database.",
-		Language:    "shell", Icon: "🍃", Tags: []string{"database", "nosql", "mongodb"},
-		CPU: 2, MemoryMB: 1024, StorageMB: 4096, Visibility: "public",
-		Image: "mongo:7", Ports: []int{27017},
-		Preinstalled: []string{"mongodb-7"},
-		DefaultPort:  27017,
-	},
-	{
-		ID: "kafka", Name: "Kafka",
-		Description: "Apache Kafka 3.8 event streaming platform.",
-		Language:    "shell", Icon: "📨", Tags: []string{"queue", "streaming", "kafka"},
-		CPU: 2, MemoryMB: 2048, StorageMB: 4096, Visibility: "public",
-		Image: "apache/kafka:3.8.0", Ports: []int{9092},
-		Preinstalled: []string{"kafka-3.8"},
-		DefaultPort:  9092,
 	},
 }
 

@@ -359,7 +359,7 @@ if (location.hash.indexOf('#key=') === 0) {
 /* ───────────────────────── endpoint spec ───────────────────────── */
 // One entry per endpoint. path vars: {id} = active sandbox, {name}/{keyid} = per-card inputs.
 var SECTIONS = [
-{ id:'templates', num:'01', title:'Templates', desc:'Ready-made environments — python, node, go, code-interpreter, playwright, desktop, and the coding-agent CLIs (claude, codex, opencode, amp, grok).', eps:[
+{ id:'templates', num:'01', title:'Templates', desc:'Ready-made environments — python-3.11, node, go, code-interpreter, playwright, desktop; install a coding-agent CLI (Claude Code, Codex, OpenCode…) on any of them through exec.', eps:[
   { m:'GET', p:'/v1/templates', sum:'List available templates',
     desc:'Returns every template this deployment can boot, with default cpu/memory sizing. Use the <code>id</code> (or its alias) as <code>"template"</code> when creating a sandbox.' },
 ]},

@@ -463,10 +463,10 @@ func tail(s string, n int) string {
 	return "…" + s[len(s)-n:]
 }
 
-// initScript is the shared assets/init with the in-tree build's two extra
-// lines dropped: an image converted through the API carries neither agentd nor
-// a baked /usr/local/bin/start.sh, so the placeholder and the tagged line would
-// only be noise in the guest's PID 1.
+// initScript is the shared assets/init with the in-tree build's extra line
+// dropped: an image converted through the API carries no baked
+// /usr/local/bin/start.sh, so the tagged line would only be noise in the
+// guest's PID 1.
 func initScript() ([]byte, error) {
 	b, err := assets.ReadFile("assets/init")
 	if err != nil {
@@ -474,7 +474,7 @@ func initScript() ([]byte, error) {
 	}
 	var keep []string
 	for _, line := range strings.Split(string(b), "\n") {
-		if strings.Contains(line, "__AGENTD__") || strings.Contains(line, "__INTREE_ONLY__") {
+		if strings.Contains(line, "__INTREE_ONLY__") {
 			continue
 		}
 		keep = append(keep, line)

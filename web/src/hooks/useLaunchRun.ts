@@ -1,34 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
-  createSandbox, destroySandbox, getAgentStatus, getPreviewStatus, getSandbox, postLaunchSample,
+  createSandbox, destroySandbox, getPreviewStatus, getSandbox, postLaunchSample,
 } from '../api'
 import type { CreateSandboxReq, CreateSandboxResp, Template } from '../types'
 import type { Kind } from '../lib/launchKinds'
 import { cancellableCreate } from '../lib/cancellableCreate'
 import { pollPreviewReady, type PollResult } from '../lib/previewStatus'
-import { pollAgentReady } from '../lib/agentReady'
 import { probeSettles, REVERIFY_INTERVAL_MS, REVERIFY_MAX_TICKS } from '../lib/reverify'
-import { shouldAutoOpen, AUTO_OPEN_DELAY_MS } from '../lib/autoOpen'
 import { track } from '../lib/telemetry'
 
 export type LaunchPhase = 'form' | 'running' | 'done' | 'error'
 
 /**
  * useLaunchRun owns everything that happens after the deploy form is submitted:
- * the cancellable create, the readiness probe, the two post-launch watchers
- * (preview re-verify and sandbox status), and the auto-open timer.
+ * the cancellable create, the readiness probe, and the two post-launch
+ * watchers (preview re-verify and sandbox status).
  *
  * `onLaunched` fires once a create succeeds, so the page can record the launch
- * in its recents list. Navigation on auto-open happens here because the timer
- * that triggers it lives here too.
+ * in its recents list.
  */
 export function useLaunchRun(
   kind: Kind | undefined,
   onLaunched?: (template: Template, body: CreateSandboxReq) => void,
 ) {
-  const navigate = useNavigate()
-
   const [phase, setPhase] = useState<LaunchPhase>('form')
   const [result, setResult] = useState<CreateSandboxResp | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -36,10 +30,8 @@ export function useLaunchRun(
   const [previewOutcome, setPreviewOutcome] = useState<PollResult | null>(null)
   const [lastAttempt, setLastAttempt] = useState<{ body: CreateSandboxReq; template: Template } | null>(null)
   const [liveStatus, setLiveStatus] = useState<string | null>(null)
-  const [autoOpening, setAutoOpening] = useState(false)
 
   const cancelRef = useRef<(() => void) | null>(null)
-  const userActed = useRef(false)
   const onLaunchedRef = useRef(onLaunched)
   onLaunchedRef.current = onLaunched
 
@@ -92,25 +84,6 @@ export function useLaunchRun(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, result?.id])
 
-  useEffect(() => {
-    const go = shouldAutoOpen({
-      phase,
-      outcome: previewOutcome?.state,
-      kind,
-      visible: typeof document === 'undefined' ? true : !document.hidden,
-      userActed: userActed.current,
-    })
-    if (!go || !result?.id) {
-      setAutoOpening(false)
-      return
-    }
-    setAutoOpening(true)
-    const id = result.id
-    const t = window.setTimeout(() => navigate(`/sandbox/${id}`), AUTO_OPEN_DELAY_MS)
-    return () => window.clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, previewOutcome, result?.id, kind])
-
   const run = useCallback(async (body: CreateSandboxReq, t: Template, defaultPort?: number) => {
     if (phase === 'running') return
     setPhase('running')
@@ -140,15 +113,10 @@ export function useLaunchRun(
         setVerifying(true)
         const port = body.port ?? defaultPort
         const sleep = (ms: number) => new Promise<void>(r => { window.setTimeout(r, ms) })
-        const outcome = kind === 'agent'
-          ? await pollAgentReady({
-              probe: () => getAgentStatus(resp.id),
-              sleep, now: () => Date.now(), deadlineMs: 90_000,
-            })
-          : await pollPreviewReady({
-              probe: () => getPreviewStatus(resp.id, port),
-              sleep, now: () => Date.now(), deadlineMs: 60_000,
-            })
+        const outcome = await pollPreviewReady({
+          probe: () => getPreviewStatus(resp.id, port),
+          sleep, now: () => Date.now(), deadlineMs: 60_000,
+        })
         setPreviewOutcome(outcome)
         if (outcome.state === 'ready') {
           void postLaunchSample(t.id, Date.now() - launchT0).catch(() => {})
@@ -170,11 +138,6 @@ export function useLaunchRun(
 
   const cancel = useCallback(() => { cancelRef.current?.() }, [])
 
-  const cancelAutoOpen = useCallback(() => {
-    userActed.current = true
-    setAutoOpening(false)
-  }, [])
-
   const reset = useCallback(() => {
     setPhase('form')
     setResult(null)
@@ -184,7 +147,7 @@ export function useLaunchRun(
   }, [])
 
   return {
-    phase, result, error, verifying, previewOutcome, lastAttempt, liveStatus, autoOpening,
-    run, cancel, cancelAutoOpen, reset, setPhase,
+    phase, result, error, verifying, previewOutcome, lastAttempt, liveStatus,
+    run, cancel, reset, setPhase,
   }
 }

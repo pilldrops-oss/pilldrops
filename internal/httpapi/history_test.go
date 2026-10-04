@@ -20,7 +20,7 @@ func TestHistoryEndpoints(t *testing.T) {
 		DurationSecs: 42, VCPU: 2, MemMiB: 512, Logs: "hello from mine",
 	}
 	theirs := store.HistoryRecord{
-		ID: "sb-theirs", OrgID: "other", Template: "redis",
+		ID: "sb-theirs", OrgID: "other", Template: "node",
 		ExitState: "crashed", CreatedAt: 2000, DestroyedAt: 2010,
 		DurationSecs: 10, Logs: "secret tenant logs",
 	}

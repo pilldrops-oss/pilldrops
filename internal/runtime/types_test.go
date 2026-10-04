@@ -2,37 +2,13 @@ package runtime
 
 import (
 	"errors"
-	"net"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/pilldrops-oss/pilldrops/internal/extras/agent/agentd"
 )
-
-// agentd ships inside the guest and cannot import this package, so the port is
-// declared twice and only this test keeps the copies equal.
-func TestPlatformPortsMatchTheServicesThatBindThem(t *testing.T) {
-	if AgentPort != agentd.DefaultPort {
-		t.Errorf("runtime.AgentPort = %d but agentd.DefaultPort = %d — the proxy would "+
-			"dial a port agentd is not listening on", AgentPort, agentd.DefaultPort)
-	}
-	_, portStr, err := net.SplitHostPort(agentd.LoopbackAddr)
-	if err != nil {
-		t.Fatalf("agentd.LoopbackAddr = %q is not a host:port: %v", agentd.LoopbackAddr, err)
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		t.Fatalf("agentd.LoopbackAddr port %q is not a number", portStr)
-	}
-	if port != AgentPort {
-		t.Errorf("agentd.LoopbackAddr binds :%d but runtime.AgentPort is %d", port, AgentPort)
-	}
-}
 
 func TestPlatformPortsAreDistinct(t *testing.T) {
 	seen := map[int]string{}
-	for name, p := range map[string]int{"TerminalPort": TerminalPort, "AgentPort": AgentPort, "DesktopPort": DesktopPort} {
+	for name, p := range map[string]int{"TerminalPort": TerminalPort, "DesktopPort": DesktopPort} {
 		if other, dup := seen[p]; dup {
 			t.Fatalf("%s and %s are both %d; one service would shadow the other", name, other, p)
 		}
@@ -41,7 +17,7 @@ func TestPlatformPortsAreDistinct(t *testing.T) {
 }
 
 func TestIsPlatformPort(t *testing.T) {
-	for _, p := range []int{TerminalPort, AgentPort, DesktopPort} {
+	for _, p := range []int{TerminalPort, DesktopPort} {
 		if !IsPlatformPort(p) {
 			t.Errorf("IsPlatformPort(%d) = false for a platform port", p)
 		}
@@ -53,7 +29,7 @@ func TestIsPlatformPort(t *testing.T) {
 				"shadowed by the platform", p)
 		}
 	}
-	for _, p := range []int{0, -1, TerminalPort - 1, TerminalPort + 1, AgentPort - 1, AgentPort + 1,
+	for _, p := range []int{0, -1, TerminalPort - 1, TerminalPort + 1,
 		DesktopPort - 1, DesktopPort + 1} {
 		if IsPlatformPort(p) {
 			t.Errorf("IsPlatformPort(%d) = true, want false", p)

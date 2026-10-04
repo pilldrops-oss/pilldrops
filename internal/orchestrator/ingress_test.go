@@ -57,26 +57,6 @@ func TestAppPreviewHostRewritesIntoThePathForm(t *testing.T) {
 	}
 }
 
-// "agent-sb1" splits into ("agent", "sb1") and "agent" is not a port, so the
-// agent origin must claim the request rather than let it fall through to the
-// site router. With no sandbox placed, the claim shows up as the agent origin's 404.
-func TestAgentHostIsNotEatenByThePortParse(t *testing.T) {
-	h, sink := mountIngress(t, ingressDomain)
-
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, ingressReq("agent-sb1."+ingressDomain, "/v1/agent/status"))
-
-	if strings.HasPrefix(sink.path, "/preview/") {
-		t.Errorf("agent host was rewritten to %q — the app-preview parse claimed it and the agent origin never ran", sink.path)
-	}
-	if sink.hits != 0 {
-		t.Errorf("agent host fell through to the normal router (%d hits, path %q) — this is the defect where a share-link recipient was served the marketing site", sink.hits, sink.path)
-	}
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404 from the agent origin for an unplaced sandbox", w.Code)
-	}
-}
-
 func TestEmptyDomainDisablesHostIngress(t *testing.T) {
 	h, sink := mountIngress(t, "")
 
@@ -194,5 +174,18 @@ func TestNonDomainHostFallsThroughUntouched(t *testing.T) {
 	}
 	if sink.path != "/v1/sandboxes" || sink.rawQuery != "limit=3" {
 		t.Errorf("path/query = %q/%q, want /v1/sandboxes and limit=3 untouched", sink.path, sink.rawQuery)
+	}
+}
+
+// With no agent origin, agent-<id>.<domain> is an ordinary unknown host.
+func TestAgentHostFallsThroughToTheDashboard(t *testing.T) {
+	s := NewServer("k", "n")
+	s.sandboxDomain = "sb.example"
+	reached := false
+	h := s.hostIngress(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
+	req := httptest.NewRequest("GET", "http://agent-sb1.sb.example/", nil)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if !reached {
+		t.Fatal("agent-<id>.<domain> did not fall through to the next handler")
 	}
 }

@@ -1,7 +1,6 @@
 package sandbox
 
 import (
-	"strings"
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/egress"
@@ -25,21 +24,10 @@ const (
 	serviceDefaultVCPU  = 2
 )
 
-var validAgentModes = map[string]bool{
-	"": true, "supervised": true, "guided": true, "autonomous": true,
-}
-
-// AgentModeEnv is the variable an explicit agent_mode reaches the guest through.
-const AgentModeEnv = "PILLDROPS_AGENT_MODE"
-
 // Validate checks everything decidable without a plan, a catalogue or a fleet,
 // so cheap refusals happen before anything is reserved or booted. The
 // validators are passed in so this package does not depend on the registry.
 func (s Spec) Validate(knownTemplate func(string) bool, nameOK func(string) (string, error), repoOK func(url, ref string) error) (name string, err error) {
-	if !validAgentModes[s.AgentMode] {
-		// Refused, not ignored: dropping it would launch in a wider posture than asked.
-		return "", invalid(`agent_mode must be "supervised", "guided" or "autonomous"`)
-	}
 	// An image-backed create names its exact image, so it need not be in the catalogue.
 	// A snapshot-backed one is the same case: the control plane has already
 	// resolved the name to the id its capture was published under, and which
@@ -84,11 +72,6 @@ func Resolve(s Spec, tmpl TemplateDefaults, plan Limits, fleet Fleet, orgEgress 
 	out.TemplateID = s.Template
 	if tmpl.ID != "" {
 		out.TemplateID = tmpl.ID
-	}
-
-	// The last env entry wins at the runtime, so do not override a caller-set value.
-	if s.AgentMode != "" && !envHasKey(s.Env, AgentModeEnv) {
-		out.Env = append(append([]string(nil), s.Env...), AgentModeEnv+"="+s.AgentMode)
 	}
 
 	out.VCPU, out.MemMiB, out.StorageMB = resources(s, tmpl, plan)
@@ -234,15 +217,6 @@ func appPort(s Spec, tmpl TemplateDefaults) int {
 	}
 	// A template with a built-in server declares its port; otherwise nothing is published.
 	return tmpl.Port
-}
-
-func envHasKey(env []string, name string) bool {
-	for _, e := range env {
-		if k, _, ok := strings.Cut(e, "="); ok && k == name {
-			return true
-		}
-	}
-	return false
 }
 
 // clamp bounds v to [lo, hi]; a non-positive hi means no ceiling.

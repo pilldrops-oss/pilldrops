@@ -61,11 +61,7 @@ func TestSinglePortRuntimeRefusesAnUndeclaredPort(t *testing.T) {
 	if code, _ := createJSON(t, srv, key, `{"template":"base","port":8000}`); code != http.StatusCreated {
 		t.Fatalf("port 8000 = %d, want 201 (positive control)", code)
 	}
-	// A port the template declares is published at boot, so it is fine.
-	if code, out := createJSON(t, srv, key, `{"template":"postgres","port":5432}`); code != http.StatusCreated {
-		t.Fatalf("declared port 5432 on postgres = %d %v, want 201", code, out)
-	}
-	// So is one the request itself declares.
+	// A port the request itself declares is fine.
 	if code, out := createJSON(t, srv, key, `{"template":"base","ports":[3000],"port":3000}`); code != http.StatusCreated {
 		t.Fatalf("request-declared port 3000 = %d %v, want 201", code, out)
 	}

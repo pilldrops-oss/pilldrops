@@ -37,7 +37,6 @@ func TestStoreBackedRoutesExistWhenTheStoreArrivesLate(t *testing.T) {
 
 	for _, tc := range []struct{ method, path, body string }{
 		{http.MethodGet, "/v1/projects", ""},
-		{http.MethodGet, "/v1/threads", ""},
 		{http.MethodGet, "/v1/secrets", ""},
 		{http.MethodGet, "/v1/launch-stats?templates=base", ""},
 		{http.MethodPost, "/v1/ai/configure", `{"prompt":"x"}`},
@@ -70,13 +69,13 @@ func TestStoreBackedRoutesDegradeRatherThanVanish(t *testing.T) {
 	s := NewServer("fleet-key", "node-token")
 	handler := s.Routes()
 
-	r := httptest.NewRequest(http.MethodGet, "/v1/threads", nil)
+	r := httptest.NewRequest(http.MethodGet, "/v1/projects", nil)
 	r.Header.Set("Authorization", "Bearer fleet-key")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
 
 	if w.Code == http.StatusNotFound {
-		t.Fatal("/v1/threads = 404 with no store — it should exist and report 503")
+		t.Fatal("/v1/projects = 404 with no store — it should exist and report 503")
 	}
 	if w.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503 'store not ready' (body %q)", w.Code, w.Body.String())

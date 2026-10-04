@@ -6,7 +6,6 @@ package docker
 import (
 	"bytes"
 	"context"
-	"embed"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -24,11 +23,6 @@ import (
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
-
-// sessionHarness is the mobile-test session UI and watcher injectHarness copies in.
-//
-//go:embed session_harness
-var sessionHarness embed.FS
 
 // appPort is the fixed in-container port apps bind via $PORT, published to a
 // random host port at boot.
@@ -51,18 +45,6 @@ func wantsDesktop(t rt.Template) bool {
 
 // containerWorkdir is the sandbox root inside every container.
 const containerWorkdir = "/workspace"
-
-// The unprivileged identity agentd runs under: the `node` user every official
-// node image ships, so no useradd is needed.
-const (
-	agentRunUser = "node"
-	agentRunHome = "/home/node"
-	// Under HOME because an unprivileged process cannot write /var/lib.
-	agentStateDir = agentRunHome + "/.agentd"
-)
-
-// agentdPort is where the agent supervisor listens in the container.
-const agentdPort = rt.AgentPort
 
 // Resource backstops applied when BootSpec leaves the limits at 0. There is
 // deliberately no --ulimit nproc: RLIMIT_NPROC is per-uid host-wide, and
@@ -99,31 +81,18 @@ func cliHostPath() string {
 	return "/opt/pilldrops/bin/pilldrops-linux"
 }
 
-// agentdHostPath is the node's agentd binary, bind-mounted into agent sandboxes.
-func agentdHostPath() string {
-	if p := os.Getenv("PD_AGENTD_PATH"); p != "" {
-		return p
-	}
-	return "/opt/pilldrops/bin/agentd"
-}
-
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
 }
 
-// nonAgentBaseImages maps every non-agent template id and alias to its base
-// image. A map rather than a switch so agentIDCollision can range over it.
+// nonAgentBaseImages maps every template id and alias to its base image.
 // Ids that resolve to the debian default are omitted.
 var nonAgentBaseImages = map[string]string{
 	"code-interpreter": "python:3.11-slim-bookworm", "python-3.11": "python:3.11-slim-bookworm",
 	"python-data-science": "python:3.11-slim-bookworm", "code-interpreter-v1": "python:3.11-slim-bookworm",
-	"fastapi": "python:3.11-slim-bookworm", "openclaw": "python:3.11-slim-bookworm",
-	"research": "python:3.11-slim-bookworm", "deep-research": "python:3.11-slim-bookworm",
-	"web-scraper": "python:3.11-slim-bookworm", "scraper": "python:3.11-slim-bookworm",
 
-	"node": "node:20-slim", "nextjs": "node:20-slim",
-	"webhook-inbox": "node:20-slim", "webhook-tester": "node:20-slim",
+	"node": "node:20-slim",
 
 	"go": "golang:1.22-bookworm", "go-1.22": "golang:1.22-bookworm",
 
@@ -137,9 +106,6 @@ var nonAgentBaseImages = map[string]string{
 // the debian base.
 func imageFor(name string) string {
 	key := strings.ToLower(strings.TrimSpace(name))
-	if m, ok := templates.AgentMetaFor(key); ok && m.BaseImage != "" {
-		return m.BaseImage
-	}
 	if img, ok := nonAgentBaseImages[key]; ok {
 		return img
 	}
@@ -153,7 +119,7 @@ type Runtime struct {
 	// imageAllowlist and imageRequireDigest mirror internal/httpapi's tenant
 	// image policy (this package cannot import httpapi). They apply only to
 	// tenant-supplied images, never to platform template pulls, or an
-	// allowlist would block python-3.11/android on any cold node.
+	// allowlist would block python-3.11 on any cold node.
 	imageAllowlist     []string
 	imageRequireDigest bool
 	// ociRuntime (SANDBOXD_DOCKER_RUNTIME, e.g. "runsc") runs toolbox sandboxes
@@ -282,9 +248,6 @@ func DeclaredCaps() rt.Caps {
 }
 
 func (r *Runtime) Prepare(ctx context.Context, t rt.Template) error {
-	if bs, ok := builtinServices[canonicalTemplate(t.Name)]; ok {
-		return r.ensureImage(ctx, bs.image)
-	}
 	return r.ensureImage(ctx, imageFor(t.Name))
 }
 
@@ -354,40 +317,17 @@ func (r *Runtime) Boot(ctx context.Context, spec rt.BootSpec) (rt.Instance, erro
 		return nil, errors.New("the docker runtime cannot enforce a per-sandbox egress policy; " +
 			"run this sandbox on a firecracker node with FC_NETNS=1, or create it without one")
 	}
-	// Checked before resolveBuiltin fills in a platform image, so only the
-	// tenant-supplied image is policy-checked.
+	// Tenant-supplied images are the only ones policy-checked.
 	if spec.Template.Image != "" {
 		if err := r.imageAllowed(spec.Template.Image); err != nil {
 			return nil, err
 		}
 	}
-	spec, devices := resolveBuiltin(spec)
-	img := spec.Template.Image // image-backed service template (or builtin service)
+	img := spec.Template.Image // image-backed service template
 	if img == "" {
 		img = r.templateImage(ctx, spec.Template.Name)
-	} else if warm := r.builtinWarmImage(ctx, spec.Template.Name); warm != "" {
-		img = warm
 	}
-	return r.bootImage(ctx, spec, img, devices)
-}
-
-// builtinWarmImage returns a builtin service's pre-warmed local image when this
-// node has baked one, else "".
-func (r *Runtime) builtinWarmImage(ctx context.Context, name string) string {
-	bs, ok := builtinServices[canonicalTemplate(name)]
-	if !ok || bs.warmTag == "" {
-		return ""
-	}
-	key := "warm:" + bs.warmTag
-	if _, ok := r.pulled.Load(key); ok {
-		return bs.warmTag
-	}
-	// As in ensureImage, code 0 with a run error means docker never ran.
-	if _, _, code, runErr := dockerOut(ctx, "image", "inspect", bs.warmTag); code == 0 && runErr == nil {
-		r.pulled.Store(key, struct{}{})
-		return bs.warmTag
-	}
-	return ""
+	return r.bootImage(ctx, spec, img)
 }
 
 // templateImage returns the enriched image when it is already built, else the

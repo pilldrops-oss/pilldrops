@@ -21,12 +21,12 @@ export function deploySteps(opts: {
   const { kind, hasFiles, hasSetup, hasStart } = opts
   const steps: string[] = ['Create sandbox']
   if (hasFiles) steps.push('Upload your files')
-  if (hasSetup) steps.push(kind === 'agent' ? 'Install the agent CLI' : 'Install dependencies')
-  const serves = hasStart || kind === 'agent' || kind === 'gui' || kind === 'service'
+  if (hasSetup) steps.push('Install dependencies')
+  const serves = hasStart || kind === 'gui' || kind === 'service'
   if (serves) {
     steps.push(`Start the ${START_NOUN[kind] ?? 'app'}`)
   }
-  steps.push(kind === 'agent' ? 'Agent ready' : 'App reachable')
+  steps.push('App reachable')
   return steps
 }
 
@@ -37,7 +37,7 @@ function stepStatus(i: number, active: number): 'done' | 'active' | 'pending' {
   return i === active ? 'active' : 'pending'
 }
 
-const START_NOUN: Partial<Record<Kind, string>> = { agent: 'agent', service: 'service', gui: 'GUI' }
+const START_NOUN: Partial<Record<Kind, string>> = { service: 'service', gui: 'GUI' }
 
 export type DeployPhaseState = 'running' | 'done' | 'error'
 
@@ -53,25 +53,19 @@ export function DeployProgress({
   onCancel,
   onRetry,
   service,
-  serviceEnv,
   onOpen,
-  autoOpening = false,
-  onCancelAutoOpen,
 }: {
   steps: string[]
   state: DeployPhaseState
   verifying?: boolean
   previewOutcome?: PollResult | null
   liveStatus?: string | null
-  autoOpening?: boolean
-  onCancelAutoOpen?: () => void
   result?: CreateSandboxResp | null
   error?: string | null
   onReset: () => void
   onCancel?: () => void
   onRetry?: () => void
   service?: Template | null
-  serviceEnv?: Record<string, string>
   onOpen?: (id: string) => void
 }) {
   const [elapsed, setElapsed] = useState(0)
@@ -107,23 +101,12 @@ export function DeployProgress({
   if (state === 'done' && result) {
     return (
       <>
-        {autoOpening && (
-          <div className="dp-autoopen" role="status">
-            <span>Ready — opening your workstation…</span>
-            {onCancelAutoOpen && (
-              <button type="button" className="lm-linkbtn" onClick={onCancelAutoOpen}>
-                Stay here
-              </button>
-            )}
-          </div>
-        )}
         <DeployReady
           result={result}
           previewOutcome={previewOutcome}
           liveStatus={liveStatus}
           onReset={onReset}
           service={service}
-          serviceEnv={serviceEnv}
           onOpen={onOpen}
         />
       </>
@@ -157,7 +140,7 @@ export function DeployProgress({
       <p className="dp-helper">
         {verifying
           ? 'Sandbox is up — waiting for the preview URL to answer.'
-          : 'One create call runs all of these in order server-side — typically 10–60s (agents install their CLI first).'}
+          : 'One create call runs all of these in order server-side — typically 10–60s.'}
       </p>
     </div>
   )
@@ -195,13 +178,11 @@ function DeployReady({
   liveStatus = null,
   onReset,
   service,
-  serviceEnv,
   onOpen,
 }: {
   result: CreateSandboxResp
   onReset: () => void
   service?: Template | null
-  serviceEnv?: Record<string, string>
   onOpen?: (id: string) => void
   previewOutcome?: PollResult | null
   liveStatus?: string | null
@@ -277,7 +258,7 @@ function DeployReady({
     if (service) {
       return (
         <>
-          <ServiceConnBlock conn={serviceConn(service, result.id, serviceEnv)} />
+          <ServiceConnBlock conn={serviceConn(service, result.id)} />
           <div className="dp-actions">{openBtn(true)}{copyIdBtn}</div>
         </>
       )

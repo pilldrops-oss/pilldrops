@@ -16,9 +16,8 @@ describe('roleOf', () => {
     expect(roleOf(tpl({ id: 'redis', kind: 'service', tags: ['database', 'cache', 'redis'] }))).toBe('cache')
   })
 
-  it('reads app, agent and browser roles from kind', () => {
+  it('reads app and browser roles from kind', () => {
     expect(roleOf(tpl({ id: 'fastapi', kind: 'app', tags: ['python', 'api'] }))).toBe('app')
-    expect(roleOf(tpl({ id: 'claude', kind: 'agent', tags: ['agent'] }))).toBe('agent')
     expect(roleOf(tpl({ id: 'playwright', kind: 'test', tags: ['browser', 'e2e'] }))).toBe('browser')
   })
 

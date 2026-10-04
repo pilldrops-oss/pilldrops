@@ -1,5 +1,3 @@
-//go:build !core
-
 package httpapi
 
 import (
@@ -130,31 +128,6 @@ func TestCronRunNowReportsFailure(t *testing.T) {
 	}
 }
 
-// The "base" template has no agent.
-func TestCronAgentModeRefusesANonAgentWorkstation(t *testing.T) {
-	srv, key, sb, _ := newCronSandbox(t)
-
-	code, out := do(t, "POST", srv+"/v1/cron", key,
-		`{"sandbox_id":"`+sb+`","schedule":"0 9 * * *","command":"read the CI","agent_mode":"guided"}`)
-	if code != http.StatusBadRequest {
-		t.Fatalf("create = %d %v, want 400", code, out)
-	}
-	msg, _ := out["error"].(string)
-	if !strings.Contains(msg, "agent") {
-		t.Errorf("the refusal does not explain what is missing: %q", msg)
-	}
-}
-
-func TestCronRejectsAnUnknownAgentMode(t *testing.T) {
-	srv, key, sb, _ := newCronSandbox(t)
-
-	code, out := do(t, "POST", srv+"/v1/cron", key,
-		`{"sandbox_id":"`+sb+`","schedule":"0 9 * * *","command":"read the CI","agent_mode":"yolo"}`)
-	if code != http.StatusBadRequest {
-		t.Fatalf("create = %d %v, want 400 for an unknown mode", code, out)
-	}
-}
-
 func TestCronShellJobStillHasNoAgentMode(t *testing.T) {
 	srv, key, sb, st := newCronSandbox(t)
 
@@ -170,5 +143,21 @@ func TestCronShellJobStillHasNoAgentMode(t *testing.T) {
 	if jobs[0].AgentMode != "" {
 		t.Errorf("agent_mode = %q on a plain shell job — every existing job would be "+
 			"rerouted through an agent", jobs[0].AgentMode)
+	}
+}
+
+// The engine schedules shell commands; an agent prompt has nothing to run it.
+func TestCronRefusesAgentMode(t *testing.T) {
+	srv, key := newTestServer(t)
+	id := createSandbox(t, srv.URL, key)
+	for _, mode := range []string{"guided", "autonomous"} {
+		code, out := do(t, "POST", srv.URL+"/v1/cron", key,
+			`{"sandbox_id":"`+id+`","schedule":"*/5 * * * *","command":"summarise","agent_mode":"`+mode+`"}`)
+		if code != 400 {
+			t.Fatalf("agent_mode %q = %d %v, want 400", mode, code, out)
+		}
+		if msg, _ := out["error"].(string); !strings.Contains(msg, "agent_mode is not supported") {
+			t.Errorf("agent_mode %q error = %q", mode, msg)
+		}
 	}
 }

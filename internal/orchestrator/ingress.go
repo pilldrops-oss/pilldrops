@@ -12,21 +12,20 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
-// Wildcard-host ingress serves <port>-<id>.<domain> (the sandbox app) and
-// agent-<id>.<domain> (its agent API). A separate origin per sandbox is the
-// browser's own boundary; the path form would put sandbox code on the dashboard's origin.
+// Wildcard-host ingress serves <port>-<id>.<domain> (the sandbox app).
+// A separate origin per sandbox is the browser's own boundary; the path form
+// would put sandbox code on the dashboard's origin.
 
 // hostIngress wraps the router with wildcard-host routing; with no domain
-// configured it returns next unchanged. The agent origin is chained behind
-// the app-preview parse, which reads "agent-sb1" as port "agent" and rejects it.
-// Customer hostnames are last: the platform's own forms win, and a host nobody
-// attached still falls through to the dashboard.
+// configured it returns next unchanged. Customer hostnames are last: the
+// platform's own forms win, and a host nobody attached still falls through to
+// the dashboard.
 func (s *Server) hostIngress(next http.Handler) http.Handler {
 	domain := strings.TrimSpace(s.sandboxDomain)
 	if domain == "" {
 		return next
 	}
-	return s.appPreviewOrigin(domain, s.agentOrigin(domain, s.customDomainOrigin(next)))
+	return s.appPreviewOrigin(domain, s.customDomainOrigin(next))
 }
 
 // appPreviewOrigin rewrites <port>-<id>.<domain>, or <slug>.<domain> at the
@@ -46,7 +45,7 @@ func (s *Server) appPreviewOrigin(domain string, next http.Handler) http.Handler
 			id, port, ok = s.slugTarget(r, host, domain)
 		}
 		if !ok {
-			// Could still be the agent origin; the next handler decides.
+			// Not a known sandbox host; the next handler decides (custom domain or dashboard).
 			next.ServeHTTP(w, r)
 			return
 		}

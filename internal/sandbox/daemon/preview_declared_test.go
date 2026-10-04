@@ -28,12 +28,4 @@ func TestSinglePortAdmitsDeclaredPorts(t *testing.T) {
 	if _, err := d.PreviewTarget(ctx, sb.ID, 3000, "default"); !errors.Is(err, rt.ErrNoAppOnPort) {
 		t.Fatalf("undeclared port 3000 err = %v, want ErrNoAppOnPort (control)", err)
 	}
-	// The catalogue's declared ports count even when the request listed none.
-	pg, _ := d.Create(ctx, CreateSpec{Template: "postgres"})
-	if err := d.StartServer(ctx, pg.ID, "true", 8000, nil); err != nil {
-		t.Fatalf("start server: %v", err)
-	}
-	if _, err := d.PreviewTarget(ctx, pg.ID, 5432, "default"); errors.Is(err, rt.ErrNoAppOnPort) {
-		t.Fatalf("catalogue-declared port 5432 refused: %v", err)
-	}
 }

@@ -6,7 +6,7 @@ import (
 )
 
 // TestBootImageGatesOptionalOCIRuntime source-inspects bootImage: the optional
-// runtime (e.g. gVisor) must reach only non-service, device-free sandboxes.
+// runtime (e.g. gVisor) must reach only non-service sandboxes.
 func TestBootImageGatesOptionalOCIRuntime(t *testing.T) {
 	body := sourceContaining(t, `func (r *Runtime) bootImage(`)
 	fnStart := strings.Index(body, "func (r *Runtime) bootImage(")
@@ -18,10 +18,10 @@ func TestBootImageGatesOptionalOCIRuntime(t *testing.T) {
 	if !strings.Contains(fn, `base = append(base, "--runtime", r.ociRuntime)`) {
 		t.Fatal("bootImage no longer passes --runtime r.ociRuntime — the optional gVisor hardening is not wired into the container argv")
 	}
-	// Dropping any of the three conditions breaks unset-default, services, or kvm templates.
-	guard := `if r.ociRuntime != "" && !service && len(devices) == 0 {`
+	// Dropping either condition breaks unset-default or services.
+	guard := `if r.ociRuntime != "" && !service {`
 	if !strings.Contains(fn, guard) {
-		t.Errorf("the --runtime guard is not %q — it must stay scoped to configured + non-service + non-device, or it will break service/device templates under gVisor", guard)
+		t.Errorf("the --runtime guard is not %q — it must stay scoped to configured + non-service, or it will break service templates under gVisor", guard)
 	}
 }
 

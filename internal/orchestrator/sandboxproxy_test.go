@@ -45,7 +45,7 @@ func agentGET(t *testing.T, orch *httptest.Server, path string, hdr http.Header)
 	return resp
 }
 
-func TestControlPlaneRelaysTheResumeCursorToTheNode(t *testing.T) {
+func TestSandboxProxyRelaysTheResumeCursorToTheNode(t *testing.T) {
 	var got http.Header
 	orch := fakeNode(t, func(w http.ResponseWriter, r *http.Request) {
 		got = r.Header.Clone()
@@ -74,7 +74,7 @@ func TestControlPlaneRelaysTheResumeCursorToTheNode(t *testing.T) {
 	}
 }
 
-func TestControlPlaneDoesNotRelayCookiesToNodes(t *testing.T) {
+func TestSandboxProxyDoesNotRelayCookiesToNodes(t *testing.T) {
 	var got http.Header
 	orch := fakeNode(t, func(w http.ResponseWriter, r *http.Request) {
 		got = r.Header.Clone()
@@ -92,7 +92,7 @@ func TestControlPlaneDoesNotRelayCookiesToNodes(t *testing.T) {
 }
 
 // http.Client.Timeout includes reading the body, so any value caps how long a stream may be watched.
-func TestControlPlaneStreamsAgentEventsPastTheOldTimeout(t *testing.T) {
+func TestSandboxProxyStreamsEventsPastTheOldTimeout(t *testing.T) {
 	s := fleetServer("apikey", "nodetoken")
 	if s.stream.Timeout != 0 {
 		t.Fatalf("stream client Timeout = %v; an event stream dies after that long",
@@ -112,7 +112,7 @@ func TestControlPlaneStreamsAgentEventsPastTheOldTimeout(t *testing.T) {
 }
 
 // Reads the stream while the node still holds it open, so a buffering relay fails.
-func TestControlPlaneDeliversFramesAsTheyArrive(t *testing.T) {
+func TestSandboxProxyDeliversFramesAsTheyArrive(t *testing.T) {
 	release := make(chan struct{})
 	orch := fakeNode(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -157,7 +157,7 @@ func TestControlPlaneDeliversFramesAsTheyArrive(t *testing.T) {
 }
 
 // A followed 303 would drop the claim's Set-Cookie after the single-use code was spent.
-func TestControlPlaneRelaysARedirectInsteadOfFollowingIt(t *testing.T) {
+func TestSandboxProxyRelaysARedirectInsteadOfFollowingIt(t *testing.T) {
 	var hits int
 	orch := fakeNode(t, func(w http.ResponseWriter, r *http.Request) {
 		hits++
@@ -191,7 +191,7 @@ func TestControlPlaneRelaysARedirectInsteadOfFollowingIt(t *testing.T) {
 }
 
 // The spend cap is a PATCH; tightening the catch-all to GET/POST/DELETE would break it.
-func TestControlPlaneProxiesEveryAgentMethod(t *testing.T) {
+func TestSandboxProxyProxiesEveryMethod(t *testing.T) {
 	var seen []string
 	orch := fakeNode(t, func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.Method+" "+r.URL.Path)
@@ -222,7 +222,7 @@ func TestControlPlaneProxiesEveryAgentMethod(t *testing.T) {
 	}
 }
 
-func TestQueryStringSurvivesTheHop(t *testing.T) {
+func TestSandboxProxyQueryStringSurvivesTheHop(t *testing.T) {
 	var rawQuery string
 	orch := fakeNode(t, func(w http.ResponseWriter, r *http.Request) {
 		rawQuery = r.URL.RawQuery

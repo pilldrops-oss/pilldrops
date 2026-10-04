@@ -11,11 +11,10 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/runtime/runtimetest"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox/daemon"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
-	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
 
-// Service templates declare image and ports in the catalogue; these tests
-// assert on what the runtime received, not on the helpers.
+// A create request can boot any image directly, catalogue template or not;
+// these tests assert on what the runtime received, not on the helpers.
 
 func serviceTemplateServer(t *testing.T) (*httptest.Server, *runtimetest.Fake, string) {
 	t.Helper()
@@ -57,29 +56,6 @@ func createWith(t *testing.T, srv *httptest.Server, key, body string) int {
 	return resp.StatusCode
 }
 
-func TestCreatingAServiceTemplateBootsItsImage(t *testing.T) {
-	srv, fake, key := serviceTemplateServer(t)
-	want, ok := templates.Resolve("postgres")
-	if !ok || want.Image == "" {
-		t.Fatal("postgres is not a catalogue service template")
-	}
-
-	if code := createWith(t, srv, key, `{"template":"postgres"}`); code >= 400 {
-		t.Fatalf("create postgres = %d", code)
-	}
-	spec, ok := fake.LastBootSpec()
-	if !ok {
-		t.Fatal("nothing was booted")
-	}
-	if spec.Template.Image != want.Image {
-		t.Errorf("booted image = %q, want the catalogue's %q — the sandbox would run the "+
-			"base rootfs with `sleep infinity` instead of a database", spec.Template.Image, want.Image)
-	}
-	if len(spec.Template.Ports) == 0 {
-		t.Error("booted with no published ports — nothing could connect to the service")
-	}
-}
-
 func TestRequestImageOverridesTheCatalogue(t *testing.T) {
 	srv, fake, key := serviceTemplateServer(t)
 
@@ -105,31 +81,5 @@ func TestOrdinaryTemplateBootsNoImage(t *testing.T) {
 	spec, _ := fake.LastBootSpec()
 	if spec.Template.Image != "" {
 		t.Errorf("base booted with image %q — it should use the platform rootfs", spec.Template.Image)
-	}
-}
-
-// A service template's catalogue resources must reach the boot spec, or mysql
-// is clamped to the 128 MiB floor and OOM-killed at init.
-func TestServiceTemplateCarriesItsResources(t *testing.T) {
-	srv, fake, key := serviceTemplateServer(t)
-	want, ok := templates.Resolve("mysql")
-	if !ok || want.MemoryMB == 0 {
-		t.Fatal("mysql declares no memory in the catalogue")
-	}
-
-	if code := createWith(t, srv, key, `{"template":"mysql"}`); code >= 400 {
-		t.Fatalf("create mysql = %d", code)
-	}
-	spec, ok := fake.LastBootSpec()
-	if !ok {
-		t.Fatal("nothing was booted")
-	}
-	if spec.MemMiB < want.MemoryMB {
-		t.Errorf("booted with %d MiB, want at least the catalogue's %d — a service clamped to "+
-			"the 128 MiB floor is OOM-killed at init (exit 137), which reads as a broken image",
-			spec.MemMiB, want.MemoryMB)
-	}
-	if spec.VCPU < want.CPU {
-		t.Errorf("booted with %d vCPU, want at least the catalogue's %d", spec.VCPU, want.CPU)
 	}
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/pilldrops-oss/pilldrops/internal/auth/orgassert"
+	"github.com/pilldrops-oss/pilldrops/internal/extras/functions"
 	"github.com/pilldrops-oss/pilldrops/internal/httpapi"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox/daemon"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
@@ -49,8 +51,8 @@ func NewNodeAPI(ctx context.Context, d *daemon.Daemon, st *store.Store, dataDir,
 	api.SetPreviewSecret([]byte(previewSecret))
 	// /v1/capabilities and the heartbeat must report the same local templates.
 	api.SetLocalTemplates(LocalTemplates(d.RuntimeName(), templates.PublishedIDs))
-	// No-op under -tags core.
-	startFeatures(api, d, st, dataDir)
+	api.SetFunctions(functions.NewRegistry(d, st, filepath.Join(dataDir, "functions")))
+	api.StartCronSweeper()
 	return api
 }
 

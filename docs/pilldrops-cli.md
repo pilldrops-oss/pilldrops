@@ -68,13 +68,11 @@ sandbox this org creates" cannot honour a scope.
 
 Changing a scope never touches the value.
 
-Three neighbouring things are *not* this:
+Two neighbouring things are *not* this:
 
 - `--public` at create governs the **preview URL** only: whether the app the
   sandbox serves is reachable without a preview token. It says nothing about
   who may reach the API.
-- The agent share link (`/agent/share`) is **external, read-only** sharing of
-  one agent session with someone who holds no key at all.
 - Billing is per org either way; visibility changes reachability, not who pays.
 
 ## Commands

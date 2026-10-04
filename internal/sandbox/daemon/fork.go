@@ -99,7 +99,7 @@ func (d *Daemon) Fork(ctx context.Context, parentID string, spec ForkSpec) (res 
 	ident, identHash := d.identityFor(id)
 	inst, info, err := forker.Fork(forkCtx, src, rt.BootSpec{
 		SandboxID: id,
-		Template:  rt.Template{Name: template, AgentID: agentTemplateID(template)},
+		Template:  rt.Template{Name: template},
 		VCPU:      vcpu, MemMiB: memMiB, StorageMB: storageMB,
 		Identity: ident,
 	})

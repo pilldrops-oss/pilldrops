@@ -49,6 +49,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/auth/previewtoken"
 	"github.com/pilldrops-oss/pilldrops/internal/auth/sbtoken"
 	"github.com/pilldrops-oss/pilldrops/internal/httpapi"
+	"github.com/pilldrops-oss/pilldrops/internal/httpx"
 	"github.com/pilldrops-oss/pilldrops/internal/mcp"
 
 	// Aliased to keep "store" free as a local name.
@@ -62,7 +63,7 @@ import (
 
 // fleetPaths are the API prefixes the portal forwards to the orchestrator.
 // A new top-level node resource must be added here or it 404s at the portal.
-var fleetPaths = []string{"/v1/sandboxes", "/v1/cron", "/v1/integrations"}
+var fleetPaths = []string{"/v1/sandboxes", "/v1/cron"}
 
 func isFleetPath(p string) bool {
 	for _, pre := range fleetPaths {
@@ -115,6 +116,28 @@ func closeQuietly(c io.Closer, what string) {
 // this hop carries the master key, and signs it on to the node; a client's own
 // X-Key-Id is never relayed, exactly as its X-Org-Override is not.
 const keyIDHeader = "X-Key-Id"
+
+// portalStreamClient has no overall timeout: http.Client.Timeout also bounds
+// reading the body, which would sever an open event stream. Redirects are
+// relayed, not followed, so a 303's Set-Cookie (the share-code claim) survives.
+var portalStreamClient = newPortalStreamClient()
+
+// portalBufferedClient serves proxyToOrchestrator's request/response exchanges;
+// unlike the stream client it carries an overall timeout.
+var portalBufferedClient = &http.Client{
+	Timeout:   60 * time.Second,
+	Transport: httpx.NewTransport(),
+}
+
+func newPortalStreamClient() *http.Client {
+	return &http.Client{
+		// A literal &http.Transport{} has no dial timeout and only 2 idle conns per host.
+		Transport: httpx.NewTransport(),
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
 
 // proxyToOrchestrator forwards the request to the orchestrator with the
 // server's API key and returns the buffered response. owner is the
@@ -1194,7 +1217,7 @@ func NewDevManager(envdBin string, log *zap.Logger) *DevManager {
 		maxActive:     50,
 		poolSize:      2,
 		maxConcurrent: 10,
-		templates:     []string{"base", "python-3.11", "node-20", "code-interpreter-v1", "claude", "desktop", "openclaw", "opencode", "codex", "amp", "go-1.22", "rust-1.77", "nextjs", "fastapi"},
+		templates:     []string{"base", "docker", "code-interpreter", "python-3.11", "browser", "desktop", "playwright", "node", "go", "rust"},
 		log:           log,
 	}
 	m.nextPort.Store(7000)
@@ -2280,13 +2303,6 @@ func main() {
 				streamToOrchestrator(w, r, orchURL, orchKey, ownerID(r))
 				return
 			}
-			// The agent API is streamed for every method: it has SSE endpoints,
-			// its claim flow's output is a Set-Cookie the buffered helper drops,
-			// and reconnecting streams need Last-Event-ID relayed.
-			if isAgentPath(r.URL.Path) {
-				serveAgentProxy(w, r, orchURL, orchKey, ownerID(r))
-				return
-			}
 			owner := ownerID(r)
 			r.Header.Set("X-Org-Override", owner)
 			rest := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/v1/sandboxes"), "/")
@@ -2294,18 +2310,15 @@ func main() {
 			if rest != "" {
 				id = strings.SplitN(rest, "/", 2)[0]
 			}
-			// On create, expand agent args and resolve secret_refs; remember
-			// the first port for a preview URL in the response.
+			// On create, resolve secret_refs; remember the first port for a
+			// preview URL in the response.
 			previewPort := 0
 			if r.Method == "POST" && id == "" {
 				if raw, err := io.ReadAll(r.Body); err == nil {
 					closeQuietly(r.Body, "sandboxes create")
-					// Agent args (task/access_mode) expand to the same
-					// files/setup/start the dashboard composes.
-					enriched := expandAgentCreate(raw)
 					// secret_refs resolve from the caller's vault and are
 					// stripped; nodes never see the vault.
-					resolved, rerr := resolveSecretRefs(enriched, vault, owner)
+					resolved, rerr := resolveSecretRefs(raw, vault, owner)
 					if rerr != nil {
 						http.Error(w, fmt.Sprintf(`{"error":%q}`, rerr.Error()), http.StatusBadRequest)
 						return
@@ -2392,7 +2405,6 @@ func main() {
 	r.Handle("/", uiMux)
 	r.Handle("/docs", uiMux)
 	r.Handle("/guides", uiMux)
-	r.Handle("/testing", uiMux)
 	for _, p := range webui.PublicPages {
 		r.Handle("/"+p, uiMux)
 	}
@@ -2804,8 +2816,6 @@ func main() {
 		}
 		for _, pat := range []string{
 			"/v1/cron", "/v1/cron/{id}", "/v1/cron/{id}/toggle", "/v1/cron/{id}/run",
-			"/v1/integrations",
-			"/v1/sandboxes/{id}/integrations", "/v1/sandboxes/{id}/chat",
 			// The node probes what the preview would actually serve.
 			"/v1/sandboxes/{id}/preview-status",
 			"/v1/sandboxes/{id}/fork", "/v1/sandboxes/{id}/visibility",
@@ -2818,10 +2828,6 @@ func main() {
 
 		// Deploying needs the fleet; the local GET stub below lists none.
 		r.Post("/v1/functions", fleetPassthrough)
-
-		// One subtree registration covering every method, including the PATCH
-		// budget cap. See agentroutes.go.
-		registerAgentRoutes(r, proxyMode)
 
 		// Long-lived server on an existing sandbox; explicit route so the proxy engages.
 		r.Post("/v1/sandboxes/{id}/start", func(w http.ResponseWriter, r *http.Request) {
@@ -3034,7 +3040,7 @@ func main() {
 		// falls through to the site router.
 		Handler: hostPreview(portalSandboxDomain, previewRP, r, storeSlugLookup(projectStore)),
 		// No WriteTimeout: it would cap every SSE stream (log feed, streaming
-		// exec, agent events). IdleTimeout and per-handler contexts bound the rest.
+		// exec). IdleTimeout and per-handler contexts bound the rest.
 		IdleTimeout: 60 * time.Second,
 		// Bounds slow-header clients before any auth runs.
 		ReadHeaderTimeout: 10 * time.Second,

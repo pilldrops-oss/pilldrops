@@ -339,7 +339,7 @@ func (d *Daemon) RestoreCheckpoint(ctx context.Context, id, name string) (took t
 	t0 := d.clock.Now()
 	newInst, err := engine.RestoreCheckpoint(restoreCtx, inst, rt.SnapshotRef{Path: dir, Name: name}, rt.BootSpec{
 		SandboxID: id,
-		Template:  rt.Template{Name: template, AgentID: agentTemplateID(template)},
+		Template:  rt.Template{Name: template},
 		VCPU:      vcpu, MemMiB: memMiB, StorageMB: storageMB,
 	})
 	if err != nil {

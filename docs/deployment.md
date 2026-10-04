@@ -541,7 +541,7 @@ PILLDROPS_IMAGE_REQUIRE_DIGEST=1
 
 | | applies to | does not apply to |
 |---|---|---|
-| allowlist / digest pin | `image` on the create body | catalogue template images, builtin service images (android), custom images built through `POST /v1/images/build` |
+| allowlist / digest pin | `image` on the create body | catalogue template images, builtin service images, custom images built through `POST /v1/images/build` |
 
 The exclusion is deliberate and not a gap: an allowlist is scoped to
 attacker-influenced input. Applying it to platform pulls would stop a cold node
@@ -589,47 +589,6 @@ That class is still under `--cap-drop=ALL` plus eight capabilities,
 sits exactly where *every* template sat before the privilege drop landed, not
 below it. If that is not acceptable for your deployment, the control is the
 allowlist: restrict which images can reach it.
-
----
-
-## `/dev/kvm` templates, and why they are not Firecracker
-
-Three templates (`android`, `android-headless`, `mobile-test`) get `/dev/kvm`
-mapped in, for the Android emulator's own hardware acceleration. **A tenant
-cannot request a device** — the create body has no field for it, and the
-resolver drops devices to nil whenever a request names its own image. These
-three are platform-defined.
-
-They run under the same confinement as everything else: `--cap-drop=ALL` + the
-eight in `sandboxCaps`, `no-new-privileges`, a non-root uid pinned by the
-platform (1300:1301, the identity the image itself declares), and membership of
-only the host group that owns the device.
-
-**The residual, stated plainly:** `/dev/kvm` is a host-kernel ioctl surface. No
-capability set and no uid bounds it. A container holding an open `/dev/kvm` is
-one kernel bug away from the host, and that is an accepted platform trust
-decision for three images we control — not a property of the sandbox boundary.
-
-**Routing these to Firecracker instead would be the real fix, and it is not
-available.** It needs nested virtualization — KVM inside the guest — and
-Firecracker does not expose the virtualization extensions to a guest at all.
-Measured on the reference KVM node, with the host as the control so the answer
-cannot be blamed on the hardware:
-
-```
-HOST (bare metal)   flags: vmx        /dev/kvm present   kvm_intel nested = Y
-GUEST (Firecracker) flags: (none)     /dev/kvm ABSENT    hypervisor flag = 1
-```
-
-The guest's `hypervisor` flag confirms the probe really ran inside the microVM;
-`vmx`/`svm` are simply not in its `/proc/cpuinfo`, so there is nothing for a
-nested KVM to build on. This is a Firecracker design position, not a
-configuration this repository is missing. An operator who cannot accept the
-residual above should decline to schedule the android templates rather than
-expect an isolated variant of them.
-
-If you run these, run them on nodes you are willing to treat as a weaker trust
-zone than the rest of the fleet.
 
 ---
 
@@ -974,10 +933,10 @@ anonymous and bound to localhost.
 `/` redirects to the dashboard. There is no storefront, pricing, terms or
 sitemap in this repository: a self-hosted install answers only for the
 software it runs. What is served besides the API and the dashboard documents
-the software: `/docs`, `/guides/*`, `/sdk`, `/testing`, `llms.txt` and the
-`/workstation` launcher. `PILLDROPS_PAGES_DIR` overrides any of those pages
-from disk, and `ANALYTICS_DOMAIN` (with `ANALYTICS_SRC`, default Plausible)
-injects an analytics tag into them; both are off unless set.
+the software: `/docs`, `/guides/*`, `/sdk` and `llms.txt`.
+`PILLDROPS_PAGES_DIR` overrides any of those pages from disk, and
+`ANALYTICS_DOMAIN` (with `ANALYTICS_SRC`, default Plausible) injects an
+analytics tag into them; both are off unless set.
 
 ## At-rest keys, and which tier gets which
 

@@ -187,26 +187,29 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
     <a href="/guides/ci-tests">CI for AI-written code</a>
     <a href="/guides/data-pipeline">Data jobs & ETL</a>
     <a href="/guides/custom-images">Custom images</a>
-    <a href="/guides/mobile-testing">Mobile E2E (Android)</a>
   </aside>
 
   <main class="doc">
     <section class="guide" id="guide-coding-agents">
-      <p class="gkick">Guide 02 · templates: claude, claude-terminal, codex, opencode, amp, grok</p>
+      <p class="gkick">Guide 02 · template: node · CLI installed via exec</p>
       <h1 class="disp">Run Claude Code &amp; autonomous coding agents safely</h1>
       <p class="gwhat">A coding agent wants a full shell, a repo checkout, and hours of uninterrupted time —
-        exactly what you don't want on your laptop or prod boxes. PillDrops ships ready templates
-        for the five major agent CLIs; the agent gets root in its own microVM, you get a wall.</p>
+        exactly what you don't want on your laptop or prod boxes. Create a plain <code>node</code>
+        sandbox, install the agent CLI through <code>exec</code>, and it gets root in its own
+        microVM; you get a wall.</p>
       <div class="step"><span class="n">1</span><div>
-        <h3>Boot an agent box with real resources</h3>
-        <pre class="code"><span class="g">$</span> pilldrops sandbox create --template claude-terminal \
-    --vcpu 4 --mem 8192 --storage 20480 --timeout 86400
-<span class="c">sb_a41f88   running   claude-terminal   4 vCPU · 8 GB</span></pre>
+        <h3>Boot a box with real resources, key included</h3>
+        <pre class="code"><span class="g">$</span> pilldrops sandbox create --template node \
+    --vcpu 4 --mem 8192 --storage 20480 --timeout 86400 \
+    --env ANTHROPIC_API_KEY=<span class="s">$ANTHROPIC_API_KEY</span>
+<span class="c">sb_a41f88   running   node   4 vCPU · 8 GB</span></pre>
+        <p>Or store the key once as a vault secret (<code>pilldrops env set ANTHROPIC_API_KEY sk-ant-…
+          --secret --auto</code>) and every sandbox you create picks it up without a flag.</p>
       </div></div>
       <div class="step"><span class="n">2</span><div>
-        <h3>Push the repo and credentials in</h3>
-        <pre class="code"><span class="g">$</span> pilldrops cp ./my-service sb_a41f88:/work
-<span class="g">$</span> pilldrops exec sb_a41f88 -- bash -c <span class="s">'echo "$ANTHROPIC_API_KEY" > /root/.anthropic'</span></pre>
+        <h3>Install the CLI and push the repo in</h3>
+        <pre class="code"><span class="g">$</span> pilldrops exec sb_a41f88 -- npm i -g @anthropic-ai/claude-code
+<span class="g">$</span> pilldrops cp ./my-service sb_a41f88:/work</pre>
       </div></div>
       <div class="step"><span class="n">3</span><div>
         <h3>Set the agent loose, watch it live</h3>
@@ -226,14 +229,14 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
         <a href="/docs#sec-sandboxes">sandbox API</a> · <a href="#guide-long-running">long-running guide</a></div>
     </section>
 <div class="related">
-    <a href="/dashboard#/deploy?template=claude"><b>Launch the claude template →</b></a>
+    <a href="/dashboard#/deploy?template=node"><b>Launch the node template →</b></a>
     <a class="ghost" href="/docs">API reference</a>
     <a class="ghost" href="/guides/code-interpreter">← AI code interpreter</a>
     <a class="ghost" href="/guides/browser-automation">Browser automation →</a>
 </div>
     <div style="margin-top:44px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
       <a class="btn" href="/dashboard">Start free — $5 credits</a>
-      <a href="/guides" style="color:var(--phos);font-size:14px">Browse all 15 guides →</a>
+      <a href="/guides" style="color:var(--phos);font-size:14px">Browse all 12 guides →</a>
     </div>
   </main>
 </div>

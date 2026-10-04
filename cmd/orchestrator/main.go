@@ -5,17 +5,13 @@
 // Env:
 //
 //	PORT                  listen port (default 9090)
-//	ORCHESTRATOR_ROLE     "edge" serves only sandbox traffic (previews, agent
-//	                      origin, customer domains) from the shared Redis; it
-//	                      runs no API, dashboard, reconciler or background job.
+//	ORCHESTRATOR_ROLE     "edge" serves only sandbox traffic (previews, customer
+//	                      domains) from the shared Redis; it runs no API,
+//	                      dashboard, reconciler or background job.
 //	                      Unset: the full control plane
 //	ORCHESTRATOR_API_KEY  bearer required on client /v1 requests + the admin SPA's
 //	                      session key (optional; unset = open)
 //	ORCHESTRATOR_TOKEN    shared secret nodes present when they heartbeat (optional)
-//	TELEGRAM_BOT_TOKEN    enables the mobile bridge (optional; unset = off)
-//	TELEGRAM_BOT_USERNAME bot handle, for one-tap t.me deep links (optional)
-//	BRIDGE_API_URL        where the bridge drives sandboxes (default: self)
-//	BRIDGE_API_KEY        bearer for that API (default: ORCHESTRATOR_API_KEY)
 //	ORCHESTRATOR_ARTIFACT_DIR  where published template artifacts are stored;
 //	                      unset means publishing is refused
 //	MAX_ARTIFACT_BYTES    publish body ceiling (default 8 GiB)
@@ -38,8 +34,6 @@ import (
 
 	"github.com/pilldrops-oss/pilldrops/internal/artifact"
 	"github.com/pilldrops-oss/pilldrops/internal/config"
-	"github.com/pilldrops-oss/pilldrops/internal/extras/bridge/discord"
-	"github.com/pilldrops-oss/pilldrops/internal/extras/bridge/telegram"
 	"github.com/pilldrops-oss/pilldrops/internal/orchestrator"
 	"github.com/pilldrops-oss/pilldrops/internal/retention"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
@@ -123,8 +117,6 @@ func run(ctx context.Context, stop func()) error {
 				// Retention also runs on nodes; both pruning is harmless, and the
 				// control plane is the one process always attached to this DB.
 				retention.Start(ctx, st)
-				startMobileBridge(ctx, st, port)
-				startDiscordBridge(ctx, st, port)
 			}
 		}()
 	}
@@ -247,127 +239,4 @@ func run(ctx context.Context, stop func()) error {
 		}
 	}
 	return exitErr
-}
-
-// startMobileBridge connects the Telegram bridge when TELEGRAM_BOT_TOKEN is
-// set. It drives sandboxes through this process's own /v1 API so chat requests
-// take the same auth, tenancy and placement paths as any client.
-func startMobileBridge(ctx context.Context, st *store.Store, port string) {
-	token := os.Getenv("TELEGRAM_BOT_TOKEN")
-	if token == "" {
-		return
-	}
-	client := telegram.NewClient(token)
-
-	// Verify before polling; a bad token otherwise fails silently every 30s.
-	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	username, err := client.GetMe(probeCtx)
-	cancel()
-	if err != nil {
-		slog.Error("TELEGRAM_BOT_TOKEN rejected by Telegram; the mobile bridge is disabled",
-			"component", "bridge", "err", err)
-		return
-	}
-
-	// The override lets a single-node dev box point straight at a sandboxd.
-	apiURL := config.Str("BRIDGE_API_URL", "http://127.0.0.1:"+port)
-	apiKey := config.Str("BRIDGE_API_KEY", os.Getenv("ORCHESTRATOR_API_KEY"))
-	boxes := telegram.NewAPIBoxes(apiURL, apiKey)
-	boxes.Source = "telegram"
-	b := telegram.New(client, st, &telegram.DaemonRunner{Boxes: boxes, Turns: boxes})
-	b.Logf = componentLogf("bridge")
-	// Voice notes are transcribed on the customer's workstation, so no provider
-	// credential reaches this process.
-	b.Voice = &telegram.Transcriber{Files: client, Writer: boxes, Boxes: boxes}
-
-	slog.Info("mobile bridge live", "component", "bridge", "as", "@"+username, "driving", apiURL)
-	go func() {
-		if err := b.Run(ctx); err != nil {
-			slog.Error("bridge stopped", "component", "bridge", "err", err)
-		}
-	}()
-
-	n := telegram.NewNotifier(st, client)
-	n.Logf = componentLogf("notify")
-	go func() {
-		if err := n.Run(ctx); err != nil {
-			slog.Error("notifier stopped", "component", "notify", "err", err)
-		}
-	}()
-}
-
-// startDiscordBridge connects the Discord bridge when DISCORD_BOT_TOKEN is set.
-// It shares the chat-link store and Runner with the Telegram bridge.
-func startDiscordBridge(ctx context.Context, st *store.Store, port string) {
-	token := os.Getenv("DISCORD_BOT_TOKEN")
-	if token == "" {
-		return
-	}
-	client := discord.NewClient(token)
-
-	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	selfID, username, err := client.GetMe(probeCtx)
-	cancel()
-	if err != nil {
-		slog.Error("DISCORD_BOT_TOKEN rejected by Discord; the bridge is disabled",
-			"component", "discord", "err", err)
-		return
-	}
-
-	apiURL := config.Str("BRIDGE_API_URL", "http://127.0.0.1:"+port)
-	apiKey := config.Str("BRIDGE_API_KEY", os.Getenv("ORCHESTRATOR_API_KEY"))
-	boxes := telegram.NewAPIBoxes(apiURL, apiKey)
-	boxes.Source = "discord"
-	b := discord.New(client, st, &telegram.DaemonRunner{Boxes: boxes, Turns: boxes})
-	b.Logf = componentLogf("discord")
-
-	msgs := make(chan discord.Message, discordQueue)
-
-	g := &discord.Gateway{
-		URL:    config.Str("DISCORD_GATEWAY_URL", discord.DefaultGatewayURL),
-		Token:  token,
-		SelfID: selfID,
-		OnMessage: func(m discord.Message) {
-			// A bounded pool keeps the gateway goroutine off long agent runs and
-			// stops a message flood from becoming unbounded paid agent runs.
-			select {
-			case msgs <- m:
-			default:
-				slog.Warn("queue full, dropping a message", "component", "discord", "channel", m.ChannelID)
-			}
-		},
-		Logf: componentLogf("discord"),
-	}
-	slog.Info("discord bridge live; messages may arrive empty if the app lacks the MESSAGE CONTENT intent",
-		"component", "discord", "as", username, "driving", apiURL)
-	for range discordWorkers {
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case m := <-msgs:
-					b.Handle(ctx, m)
-				}
-			}
-		}()
-	}
-	go func() {
-		if err := g.Run(ctx); err != nil {
-			slog.Error("discord bridge stopped", "component", "discord", "err", err)
-		}
-	}()
-}
-
-// Bounds on the Discord bridge's inbound fan-out; each message can drive a paid agent turn.
-const (
-	discordWorkers = 8
-	discordQueue   = 64
-)
-
-// componentLogf adapts a subsystem's printf-style Logf hook to the process logger.
-func componentLogf(component string) func(string, ...any) {
-	return func(format string, args ...any) {
-		slog.Info(fmt.Sprintf(format, args...), "component", component)
-	}
 }

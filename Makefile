@@ -60,7 +60,7 @@ dev: dev-build
 # ─── Production Build ────────────────────────────────────────
 # Cross-compiles for Linux. Requires Go installed locally.
 
-.PHONY: build sandboxd-linux sandboxd-core envd agentd agentd-local proto
+.PHONY: build sandboxd-linux envd proto
 
 proto:
 	protoc --go_out=. --go-grpc_out=. proto/envd.proto
@@ -74,14 +74,6 @@ envd:
 	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/envd ./cmd/envd/
 	@echo "── Built: bin/envd ($$(du -h bin/envd | cut -f1))"
 
-# agentd is the in-sandbox agent supervisor. Built for the GUEST (linux/amd64) and
-# baked into agent templates by scripts/build-template.sh; the docker runtime
-# bind-mounts the same binary. Non-agent templates never receive it.
-agentd:
-	@echo "── Building agentd (static, linux/amd64)..."
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/agentd ./cmd/agentd/
-	@echo "── Built: bin/agentd ($$(du -h bin/agentd | cut -f1))"
-
 # The customer CLI, built static for the GUEST from the sibling repo and baked
 # into every template (templatebuild, scripts/build-template.sh) or bind-mounted
 # by the docker runtime; the node reads it from PD_CLI_PATH
@@ -92,13 +84,6 @@ cli-linux:
 	@cd $(CLI_REPO) && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o $(CURDIR)/bin/pilldrops-linux ./cmd/pilldrops
 	@echo "── Built: bin/pilldrops-linux ($$(du -h bin/pilldrops-linux | cut -f1))"
 
-# Host build, for driving a local docker-runtime sandbox: point the runtime at it
-# with PD_AGENTD_PATH=bin/agentd-local.
-agentd-local:
-	@echo "── Building agentd (local host)..."
-	@go build -o bin/agentd-local ./cmd/agentd/
-	@echo "── Built: bin/agentd-local"
-
 # No -tags, and specifically not `dev`: an untagged build contains no runtime
 # that runs customer code without a boundary. See release.yml and
 # internal/nodeboot/releaseclosure_test.go, which asserts it against the closure.
@@ -108,27 +93,7 @@ sandboxd-linux: web
 	@GOOS=linux GOARCH=amd64 go build -o bin/pilldrops-join-linux ./cmd/pilldrops-join/
 	@echo "── Built: bin/sandboxd-linux ($$(du -h bin/sandboxd-linux | cut -f1)), bin/pilldrops-join-linux"
 
-# sandboxd-core is THE BOUNDARY, BUILT — not yet the deploy artifact.
-#
-# `-tags core` compiles out the agent surface, serverless functions, cron and
-# the MCP integrations, along with the chat routes that depend on them. What
-# comes out runs sandboxes and meters them, and answers 404 on every route
-# belonging to a feature it does not have.
-#
-# Do not ship this expecting the full node API. It is built so
-# scripts/tier-boundary-guard.sh has a tagged link closure to check: that is
-# what turns "the agent is optional" from a claim in a document into a property
-# of an artifact. Deliberately NOT wired into `build` or release.yml.
-#
-# Not to be confused with the pre-existing `test-core` target, which means the
-# central packages and has nothing to do with this build tag.
-sandboxd-core:
-	@echo "── Building sandboxd-fleet with -tags core (boundary check, not a deploy artifact)..."
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags core -o bin/sandboxd-fleet-core ./cmd/sandboxd-fleet/
-	@echo "── Built: bin/sandboxd-fleet-core ($$(du -h bin/sandboxd-fleet-core | cut -f1))"
-	@./scripts/tier-boundary-guard.sh
-
-build: envd agentd sandboxd-linux
+build: envd sandboxd-linux
 	@echo "── All binaries ready in bin/"
 
 # ─── Database ────────────────────────────────────────────────
@@ -249,21 +214,7 @@ template: template-python
 
 # ─── Tests ───────────────────────────────────────────────────
 
-.PHONY: check test test-api lint test-cover test-core build-all docs docs-check bench-latency security-suite security-scan security-scan-update
-
-# Regenerate the agent docs from the code that implements them (§14).
-#
-# The reference comes from openapi.json, the capability matrix from the launch manifest, and
-# the limits from the constants the server enforces — so none of them can drift without a test
-# failing. Run this after changing any of those and commit the result.
-docs:
-	@echo "── Generating agent docs..."
-	go run ./cmd/gendocs -out docs/agent
-
-# Fails if the checked-in docs are stale. Suitable for CI: the same check runs as a Go test,
-# but this gives a one-line answer without running the whole suite.
-docs-check:
-	@go run ./cmd/gendocs -out docs/agent -check
+.PHONY: check test test-api lint test-cover test-core build-all bench-latency security-suite security-scan security-scan-update
 
 # Everything CI would run, including the parts that only mean something on
 # Linux (they run in a container). A check that could not run reports SKIP and
@@ -427,7 +378,6 @@ help:
 	@echo "    make test             Go test suite"
 	@echo "    make test-cover       ...with a coverage report"
 	@echo "    make lint             golangci-lint"
-	@echo "    make docs-check       Verify docs/agent/ matches the code"
 	@echo ""
 	@echo "  Database:"
 	@echo "    make db-up            Start PostgreSQL (Docker)"
@@ -437,7 +387,7 @@ help:
 	@echo "    make db-shell         Open psql shell"
 	@echo ""
 	@echo "  Production build:"
-	@echo "    make build            Node agent + envd + agentd (linux/amd64)"
+	@echo "    make build            Node agent + envd (linux/amd64)"
 	@echo "    make envd             envd only"
 	@echo "    make proto            Regenerate protobuf stubs"
 	@echo "    make template         Bake a template rootfs"

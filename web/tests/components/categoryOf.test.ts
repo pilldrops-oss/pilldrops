@@ -27,10 +27,8 @@ describe('categoryOf', () => {
   })
 
   it('still classifies the existing catalog correctly', () => {
-    expect(categoryOf(tpl('claude', ['agent']))).toBe('Agents')
     expect(categoryOf(tpl('research', ['research', 'python', 'use-case']))).toBe('Use cases')
     expect(categoryOf(tpl('playwright', ['e2e', 'browser']))).toBe('Browser / E2E')
-    expect(categoryOf(tpl('android', ['android', 'emulator']))).toBe('Mobile')
     expect(categoryOf(tpl('nextjs', ['node', 'next']))).toBe('Node / Web')
     // Known misfiling, asserted so it stays visible: the `node` tag outranks the
     // `python` language. The fix is precedence, not a fixture change.

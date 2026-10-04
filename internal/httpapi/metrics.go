@@ -32,22 +32,6 @@ type metrics struct {
 	funcInvokes    map[string]int64 // function name -> invoke count
 	funcColdStarts map[string]int64 // function name -> cold-start count
 
-	// Agent counters are keyed by agent so one misbehaving agent is not averaged away.
-	agentTurns     map[string]int64 // "agent result" -> count
-	agentInterrupt map[string]int64 // agent -> interrupts
-	agentUnreach   map[string]int64 // agent -> supervisor unreachable
-	agentSpendStop map[string]int64 // agent -> turns refused by a spend cap
-	// agentApprovals is keyed "agent outcome"; agentApprovalTurns counts turns
-	// needing at least one approval, agentApprovalFriction those over the threshold.
-	agentApprovals        map[string]int64
-	agentApprovalTurns    map[string]int64
-	agentApprovalFriction map[string]int64
-	mirrorPruned          atomic.Int64
-	mirrorPruneErrors     atomic.Int64
-	spendPaused           atomic.Int64
-	spendDeferred         atomic.Int64
-	spendPauseErr         atomic.Int64
-
 	// Request-latency histogram (seconds). latCounts[i] is the cumulative count
 	// of observations <= latBuckets[i]; latCount is the total (the +Inf bucket).
 	latBuckets []float64
@@ -62,16 +46,8 @@ func newMetrics() *metrics {
 		requests:       make(map[string]int64),
 		funcInvokes:    make(map[string]int64),
 		funcColdStarts: make(map[string]int64),
-		agentTurns:     make(map[string]int64),
-		agentInterrupt: make(map[string]int64),
-		agentUnreach:   make(map[string]int64),
-		agentSpendStop: make(map[string]int64),
-
-		agentApprovals:        make(map[string]int64),
-		agentApprovalTurns:    make(map[string]int64),
-		agentApprovalFriction: make(map[string]int64),
-		latBuckets:            []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
-		latCounts:             make([]int64, 11),
+		latBuckets:     []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+		latCounts:      make([]int64, 11),
 	}
 }
 
@@ -111,68 +87,6 @@ func (m *metrics) incDestroy()     { m.destroys.Add(1) }
 func (m *metrics) incExec()        { m.execs.Add(1) }
 func (m *metrics) incExecError()   { m.execErrors.Add(1) }
 func (m *metrics) incAuthFailure() { m.authFailures.Add(1) }
-
-func (m *metrics) incAgentTurn(agent, result string) {
-	m.mu.Lock()
-	m.agentTurns[agent+" "+result]++
-	m.mu.Unlock()
-}
-
-func (m *metrics) incAgentInterrupt(agent string) {
-	m.mu.Lock()
-	m.agentInterrupt[agent]++
-	m.mu.Unlock()
-}
-
-// incAgentUnreachable counts a supervisor that did not answer, distinct from a failed turn.
-func (m *metrics) incAgentUnreachable(agent string) {
-	m.mu.Lock()
-	m.agentUnreach[agent]++
-	m.mu.Unlock()
-}
-
-func (m *metrics) incAgentApproval(agent, outcome string) {
-	m.mu.Lock()
-	m.agentApprovals[agent+" "+outcome]++
-	m.mu.Unlock()
-}
-
-// noteAgentApprovalsPerTurn records one turn's approval count.
-func (m *metrics) noteAgentApprovalsPerTurn(agent string, n int) {
-	if n <= 0 {
-		return
-	}
-	m.mu.Lock()
-	m.agentApprovalTurns[agent]++
-	if n > approvalFrictionThreshold {
-		m.agentApprovalFriction[agent]++
-	}
-	m.mu.Unlock()
-}
-
-func (m *metrics) addAgentMirrorPruned(n int64) { m.mirrorPruned.Add(n) }
-
-func (m *metrics) incAgentMirrorPruneError() { m.mirrorPruneErrors.Add(1) }
-
-// snapshotSpendPauses reads the auto-pause counter, for tests.
-func (m *metrics) snapshotSpendPauses() int64 { return m.spendPaused.Load() }
-
-func (m *metrics) incAgentSpendPause() { m.spendPaused.Add(1) }
-
-// incAgentSpendPauseDeferred counts a cap reached while a turn was still in flight.
-func (m *metrics) incAgentSpendPauseDeferred() { m.spendDeferred.Add(1) }
-
-func (m *metrics) incAgentSpendPauseError() { m.spendPauseErr.Add(1) }
-
-// approvalFrictionThreshold is the approvals-per-turn count above which the
-// policy is too narrow.
-const approvalFrictionThreshold = 5
-
-func (m *metrics) incAgentSpendStop(agent string) {
-	m.mu.Lock()
-	m.agentSpendStop[agent]++
-	m.mu.Unlock()
-}
 
 func (m *metrics) recordRequest(method string, status int) {
 	key := method + " " + strconv.Itoa(status)
@@ -223,7 +137,6 @@ func (m *metrics) writeFunctionCounters(b *strings.Builder) {
 	for _, k := range sortedKeys(inv) {
 		fmt.Fprintf(b, "sandboxd_function_invokes_total{name=%q} %d\n", k, inv[k])
 	}
-	m.writeAgentMetrics(b)
 	fmt.Fprintf(b, "# HELP sandboxd_function_cold_starts_total Function cold starts by name.\n# TYPE sandboxd_function_cold_starts_total counter\n")
 	for _, k := range sortedKeys(cold) {
 		fmt.Fprintf(b, "sandboxd_function_cold_starts_total{name=%q} %d\n", k, cold[k])
@@ -377,91 +290,6 @@ func gauge(b *strings.Builder, name, help string, v float64) {
 }
 
 func sortedKeys[V any](m map[string]V) []string { return slices.Sorted(maps.Keys(m)) }
-
-// writeAgentMetrics emits the agent-surface counters.
-func (m *metrics) writeAgentMetrics(b *strings.Builder) {
-	m.mu.Lock()
-	turns := maps.Clone(m.agentTurns)
-	interrupts := maps.Clone(m.agentInterrupt)
-	unreach := maps.Clone(m.agentUnreach)
-	stops := maps.Clone(m.agentSpendStop)
-	approvals := maps.Clone(m.agentApprovals)
-	apprTurns := maps.Clone(m.agentApprovalTurns)
-	friction := maps.Clone(m.agentApprovalFriction)
-	m.mu.Unlock()
-	pruned, pruneErrs := m.mirrorPruned.Load(), m.mirrorPruneErrors.Load()
-	spPaused, spDeferred, spErr := m.spendPaused.Load(), m.spendDeferred.Load(), m.spendPauseErr.Load()
-
-	fmt.Fprintf(b, "# HELP sandboxd_agent_turns_total Agent turns by agent and result.\n"+
-		"# TYPE sandboxd_agent_turns_total counter\n")
-	for _, k := range sortedKeys(turns) {
-		agent, result := splitAgentKey(k)
-		fmt.Fprintf(b, "sandboxd_agent_turns_total{agent=%q,result=%q} %d\n", agent, result, turns[k])
-	}
-
-	fmt.Fprintf(b, "# HELP sandboxd_agent_spend_autopause_total Workstations paused because their spend cap was reached.\n"+
-		"# TYPE sandboxd_agent_spend_autopause_total counter\n"+
-		"sandboxd_agent_spend_autopause_total %d\n", spPaused)
-	fmt.Fprintf(b, "# HELP sandboxd_agent_spend_autopause_deferred_total Caps reached while a turn was still in flight.\n"+
-		"# TYPE sandboxd_agent_spend_autopause_deferred_total counter\n"+
-		"sandboxd_agent_spend_autopause_deferred_total %d\n", spDeferred)
-	fmt.Fprintf(b, "# HELP sandboxd_agent_spend_autopause_errors_total Pause attempts that failed.\n"+
-		"# TYPE sandboxd_agent_spend_autopause_errors_total counter\n"+
-		"sandboxd_agent_spend_autopause_errors_total %d\n", spErr)
-
-	fmt.Fprintf(b, "# HELP sandboxd_agent_mirror_events_pruned_total Mirrored events deleted by retention.\n"+
-		"# TYPE sandboxd_agent_mirror_events_pruned_total counter\n"+
-		"sandboxd_agent_mirror_events_pruned_total %d\n", pruned)
-	fmt.Fprintf(b, "# HELP sandboxd_agent_mirror_prune_errors_total Retention passes that failed.\n"+
-		"# TYPE sandboxd_agent_mirror_prune_errors_total counter\n"+
-		"sandboxd_agent_mirror_prune_errors_total %d\n", pruneErrs)
-
-	fmt.Fprintf(b, "# HELP sandboxd_agent_approvals_total Approval decisions by agent and outcome.\n"+
-		"# TYPE sandboxd_agent_approvals_total counter\n")
-	for _, k := range sortedKeys(approvals) {
-		agent, outcome, _ := strings.Cut(k, " ")
-		fmt.Fprintf(b, "sandboxd_agent_approvals_total{agent=%q,outcome=%q} %d\n", agent, outcome, approvals[k])
-	}
-
-	fmt.Fprintf(b, "# HELP sandboxd_agent_approval_turns_total Turns that needed at least one human approval, by agent.\n"+
-		"# TYPE sandboxd_agent_approval_turns_total counter\n")
-	for _, k := range sortedKeys(apprTurns) {
-		fmt.Fprintf(b, "sandboxd_agent_approval_turns_total{agent=%q} %d\n", k, apprTurns[k])
-	}
-
-	fmt.Fprintf(b, "# HELP sandboxd_agent_approval_friction_total Turns needing more than %d approvals — treat as a policy bug, not engagement.\n"+
-		"# TYPE sandboxd_agent_approval_friction_total counter\n", approvalFrictionThreshold)
-	for _, k := range sortedKeys(friction) {
-		fmt.Fprintf(b, "sandboxd_agent_approval_friction_total{agent=%q} %d\n", k, friction[k])
-	}
-
-	fmt.Fprintf(b, "# HELP sandboxd_agent_interrupts_total Turns stopped on request, by agent.\n"+
-		"# TYPE sandboxd_agent_interrupts_total counter\n")
-	for _, k := range sortedKeys(interrupts) {
-		fmt.Fprintf(b, "sandboxd_agent_interrupts_total{agent=%q} %d\n", k, interrupts[k])
-	}
-
-	fmt.Fprintf(b, "# HELP sandboxd_agent_supervisor_unreachable_total Times the in-sandbox agent "+
-		"supervisor did not answer, by agent. Distinct from a failed turn: this one is ours to fix.\n"+
-		"# TYPE sandboxd_agent_supervisor_unreachable_total counter\n")
-	for _, k := range sortedKeys(unreach) {
-		fmt.Fprintf(b, "sandboxd_agent_supervisor_unreachable_total{agent=%q} %d\n", k, unreach[k])
-	}
-
-	fmt.Fprintf(b, "# HELP sandboxd_agent_spend_stops_total Turns refused because a spend cap was "+
-		"reached, by agent.\n# TYPE sandboxd_agent_spend_stops_total counter\n")
-	for _, k := range sortedKeys(stops) {
-		fmt.Fprintf(b, "sandboxd_agent_spend_stops_total{agent=%q} %d\n", k, stops[k])
-	}
-}
-
-// splitAgentKey undoes the "agent result" composite key.
-func splitAgentKey(k string) (agent, result string) {
-	if i := strings.LastIndex(k, " "); i > 0 {
-		return k[:i], k[i+1:]
-	}
-	return k, ""
-}
 
 // bodyCapExempt reports whether a route carries file bytes rather than JSON
 // and is bounded by its own limit instead of MAX_REQUEST_BYTES.

@@ -1,115 +1,37 @@
 import type { Template } from '../types'
-import { serverOrigin } from '../api'
 import { PILLDROPS_VERSION, type PilldropsConfig } from './pilldropsConfig'
-import { launchSecretRefs } from './providerSettings'
-import type { AgentConfig } from './launchAgents'
-import { type AccessMode, type ComposedBody, type CustomEnv, type Kind, shellQuote, startsServer, requiredRuntime, resolveLifetime } from './launchKinds'
+import { type ComposedBody, type CustomEnv, type Kind, shellQuote, startsServer, requiredRuntime, resolveLifetime } from './launchKinds'
 import { START_FILE, universalStartBody } from './launchStarters'
-
-// Verdict templates run their check on boot; the target arrives as $PD_TARGET_URL.
-const VERDICT_RUNNER: Record<string, string> = {
-  loadtest: 'pdload "$PD_TARGET_URL"',
-  security: 'pdscan --url "$PD_TARGET_URL"',
-}
 
 // composeCreateBody assembles the per-kind create-request slice from the form state.
 export function composeCreateBody(cfg: {
   tpl: Template
   kind: Kind
-  agent: AgentConfig | null
-  accessMode: AccessMode
-  apiKey: string
-  baseUrl?: string
-  model?: string
-  mcpJson: string
-  task: string
   testCmd: string
   serveReport: boolean
   start: string
   port: string
   envList: string[]
   previewPort: number
-  userSetup?: string[]
   /** Seconds; empty means keep-alive default. */
   timeoutInput?: string
   /** Seconds; empty means keep-alive default. */
   idleInput?: string
-  /** The manifest primary input's value (verdict URL/target). */
-  primaryValue?: string
-  /** Vault secret names; enables key-less agent launches. */
-  vaultNames?: string[]
-  agentMode?: 'supervised' | 'guided' | 'autonomous'
 }): ComposedBody {
   const {
     tpl,
     kind,
-    agent,
-    accessMode,
-    apiKey,
-    baseUrl,
-    model,
-    mcpJson,
-    task,
     testCmd,
     serveReport,
     start,
     port,
     envList,
     previewPort,
-    userSetup,
     timeoutInput = '',
     idleInput = '',
-    primaryValue = '',
-    vaultNames = [],
   } = cfg
   const portNum = port ? parseInt(port, 10) : undefined
   const life = resolveLifetime(startsServer(kind, start), timeoutInput, idleInput)
-
-  // Verdict templates run their check on boot. The target travels as an env var
-  // so user input is never shell-quoted; a blank target leaves the built-in server.
-  const verdictRunner =
-    tpl.kind === 'verdict' && primaryValue.trim() ? (VERDICT_RUNNER[tpl.id] ?? '') : ''
-  if (verdictRunner) {
-    return {
-      env: [...envList, `PD_TARGET_URL=${primaryValue.trim()}`],
-      start: `sh -c '${verdictRunner}; exec /usr/local/bin/start.sh'`,
-      port: portNum ?? previewPort,
-      ...resolveLifetime(true, timeoutInput, idleInput),
-    }
-  }
-
-  if (kind === 'agent' && agent) {
-    const key = apiKey.trim()
-    const base = (baseUrl ?? '').trim()
-    const mdl = (model ?? '').trim()
-    const env = [
-      ...(key ? [`${agent.keyEnv}=${key}`] : []),
-      ...(base && agent.baseUrlEnv ? [`${agent.baseUrlEnv}=${base}`] : []),
-      ...(mdl && agent.modelEnv ? [`${agent.modelEnv}=${mdl}`] : []),
-      ...envList,
-    ]
-    // Bootstrap is expanded server-side from `args`; the dashboard only
-    // contributes the MCP config file and the user's extra setup lines.
-    const files: Array<{ path: string; content: string }> = []
-    const mcp = mcpJson.trim()
-    if (mcp) files.push({ path: agent.mcpFile, content: mcpJson })
-    // Vault-held key, gateway URL and model, minus whatever the form overrode.
-    const refs = launchSecretRefs(agent, vaultNames, {
-      key: !!key,
-      baseUrl: !!base,
-      model: !!mdl,
-    })
-    return {
-      env: env.length ? env : undefined,
-      secret_refs: refs.length ? refs : undefined,
-      args: { task: task.trim() || undefined, access_mode: accessMode },
-      agent_mode: cfg.agentMode,
-      files: files.length ? files : undefined,
-      setup: userSetup?.length ? userSetup : undefined,
-      port: previewPort || 8000,
-      ...life,
-    }
-  }
 
   if (kind === 'service') {
     return { env: envList.length ? envList : undefined, start: undefined, port: portNum, ...life }
@@ -209,31 +131,9 @@ export function buildCliSnippet(cfg: {
   envList: string[]
   /** When present it drives the flags so the snippet reflects the real request. */
   composed?: ComposedBody
-  mcpFile?: string
 }): string {
-  const { tpl, start, port, envList, composed, mcpFile } = cfg
+  const { tpl, start, port, envList, composed } = cfg
   if (!tpl) return ''
-
-  // No CLI flag for agent args yet, so the agent snippet is the raw API call.
-  if (composed?.args) {
-    const body: Record<string, unknown> = {
-      template: tpl.id,
-      args: composed.args,
-    }
-    if (composed.secret_refs?.length) body.secret_refs = composed.secret_refs
-    const maskedEnv = (composed.env ?? []).map(kv => {
-      const [name, ...rest] = kv.split('=')
-      return /key|token|secret|password/i.test(name) && rest.join('=') ? `${name}=***` : kv
-    })
-    if (maskedEnv.length) body.env = maskedEnv
-    if (composed.timeout !== undefined) body.timeout = composed.timeout
-    if (composed.idle_timeout !== undefined) body.idle_timeout = composed.idle_timeout
-    let out = `curl -X POST ${serverOrigin()}/v1/sandboxes \\\n  -H "Authorization: Bearer $PILLDROPS_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(body)}'`
-    if (mcpFile && composed.files?.length) {
-      out += `\n  # plus a files[] entry writing your MCP config to ${mcpFile}`
-    }
-    return out
-  }
 
   const parts = ['pilldrops sandbox create', `--template ${tpl.id}`]
   const rt = requiredRuntime(tpl)

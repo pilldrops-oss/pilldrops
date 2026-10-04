@@ -10,7 +10,7 @@
 #
 # What it does (each step skipped when already done):
 #   1. host packages: docker (builds template rootfs), squashfs-tools, iptables
-#   2. Go toolchain -> /usr/local/go, so envd/agentd/sandboxd and `go test -c`
+#   2. Go toolchain -> /usr/local/go, so envd/sandboxd and `go test -c`
 #      build ON the node; without it every change costs a cross-compile dance
 #   3. firecracker + jailer -> /usr/bin
 #   4. guest kernel -> KERNEL_PATH (the 5.10 pin is load-bearing, see below)
@@ -116,7 +116,7 @@ mkdir -p "${SNAPSHOT_DIR}" "${OVERLAY_DIR}" /srv/jailer "$(dirname "${KERNEL_PAT
 # ── 2. Go toolchain ───────────────────────────────────────────────────────────
 # On the node, not on someone's laptop: internal/vm is //go:build linux and runs
 # zero tests on macOS, so live work means `go test -c` here, and the template
-# build needs `go build` for envd/agentd anyway.
+# build needs `go build` for envd anyway.
 if [ "$(/usr/local/go/bin/go version 2>/dev/null | awk '{print $3}')" != "go${GO_VERSION}" ]; then
   log "Installing Go ${GO_VERSION}"
   go_var="GO_SHA256_${ARCH}"; go_want="${!go_var:-}"
@@ -211,7 +211,7 @@ else
 fi
 
 # ── 6. template rootfs images ─────────────────────────────────────────────────
-# build-template.sh builds envd/agentd itself now that Go is here; the guest CLI
+# build-template.sh builds envd itself now that Go is here; the guest CLI
 # comes from the sibling CLI repo (same source as the Makefile's cli-linux).
 cd "${BUILD_DIR}"
 if [ ! -f bin/pilldrops-linux ]; then

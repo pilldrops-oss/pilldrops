@@ -49,7 +49,6 @@ node_modules/
 /sandboxd-fleet
 /pilldrops
 /orchestrator
-/agentd
 /gendocs
 /devserver
 /web/dist/

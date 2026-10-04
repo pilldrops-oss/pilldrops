@@ -18,7 +18,6 @@ func TestValidSlug(t *testing.T) {
 		{"a-", "ending in a hyphen"},
 		{"agent-x", "agent- prefix"},
 		{"www", "reserved"},
-		{"agent", "reserved"},
 		{"x" + strings.Repeat("y", 63), "longer than 63"},
 		{"MyApp", "start with a lowercase letter"},
 		{"myApp", "lowercase letters, digits and hyphens"},

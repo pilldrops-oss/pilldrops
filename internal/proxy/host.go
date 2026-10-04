@@ -46,50 +46,14 @@ func hostLabel(host, domain string) (string, bool) {
 }
 
 // ParseSlugHost extracts the slug from <slug>.<domain>. A slug starts with a
-// letter, so it never overlaps <port>-<id>; agent-* and the reserved labels
-// are refused (sandbox.ValidSlug). host must be NormalizeHost'd.
+// letter, so it never overlaps <port>-<id>; the reserved labels are refused
+// (sandbox.ValidSlug). host must be NormalizeHost'd.
 func ParseSlugHost(host, domain string) (slug string, ok bool) {
 	label, ok := hostLabel(host, domain)
 	if !ok || sandbox.ValidSlug(label) != nil {
 		return "", false
 	}
 	return label, true
-}
-
-// AgentLabel is the reserved label for a sandbox's agent surface, agent-<id>.<domain>.
-// A separate origin because share-link credentials live in a cookie and agent
-// output is untrusted content; the browser's security boundary is the origin.
-const AgentLabel = "agent"
-
-// AgentAPIPrefix is the path prefix on an agent origin, rewritten to the node's
-// /v1/sandboxes/<id>/agent/... route.
-const AgentAPIPrefix = "/v1/agent/"
-
-// ParseAgentHost extracts the sandbox id from agent-<id>.<domain>. host must
-// be NormalizeHost'd. Only the first hyphen splits the label from the id.
-func ParseAgentHost(host, domain string) (id string, ok bool) {
-	label, ok := hostLabel(host, domain)
-	if !ok {
-		return "", false
-	}
-	rest, found := strings.CutPrefix(label, AgentLabel+"-")
-	if !found || rest == "" {
-		return "", false
-	}
-	return rest, true
-}
-
-// AgentRequestPath rewrites /v1/agent/... to /v1/sandboxes/<id>/agent/... and
-// passes /agent/claim through; anything else is refused so a path can never
-// name a different sandbox than the hostname does.
-func AgentRequestPath(id, p string) (string, bool) {
-	if rest, found := strings.CutPrefix(p, AgentAPIPrefix); found {
-		return "/v1/sandboxes/" + id + "/agent/" + rest, true
-	}
-	if p == "/agent/claim" {
-		return p, true
-	}
-	return "", false
 }
 
 // ParseSandboxHost extracts the sandbox id and app port from <port>-<id>.<domain>.
@@ -127,9 +91,9 @@ func isDNSLabel(s string) bool {
 
 // HostRouter serves sandbox apps on <port>-<id>.<domain> (and, when the
 // resolver is a SlugResolver, on <slug>.<domain> at the sandbox's public
-// port) and agent origins on agent-<id>.<domain>, delegating everything else
-// to next. A slug no sandbox holds falls through to next. verifyPreview must
-// authorize ?ptok= and return the sandbox's owner org; nil fails closed.
+// port), delegating everything else to next. A slug no sandbox holds falls
+// through to next. verifyPreview must authorize ?ptok= and return the
+// sandbox's owner org; nil fails closed.
 func HostRouter(domain string, r Resolver, next http.Handler, verifyPreview func(id string, port int, token string) (org string, ok bool)) http.Handler {
 	if domain == "" {
 		return next
@@ -139,22 +103,6 @@ func HostRouter(domain string, r Resolver, next http.Handler, verifyPreview func
 		host := NormalizeHost(req.Host)
 		if !strings.HasSuffix(host, suffix) {
 			next.ServeHTTP(w, req)
-			return
-		}
-		// Agent hosts must be checked before the port parse; "agent-sb1" would
-		// otherwise fail Atoi and be rejected.
-		if id, ok := ParseAgentHost(host, domain); ok {
-			target, ok := AgentRequestPath(id, req.URL.Path)
-			if !ok {
-				// 404 rather than fall through, so the agent origin cannot reach
-				// the rest of the node API with a share-link credential.
-				http.Error(w, "not an agent endpoint", http.StatusNotFound)
-				return
-			}
-			r2 := req.Clone(req.Context())
-			r2.URL.Path = target
-			r2.URL.RawPath = ""
-			next.ServeHTTP(w, r2)
 			return
 		}
 		id, port, ok := ParseSandboxHost(host, domain)

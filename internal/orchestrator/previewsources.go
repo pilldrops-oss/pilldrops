@@ -94,8 +94,8 @@ func (s *Server) peerAllowed(r *http.Request, org string) bool {
 // peerIPAllowed is the gate itself, taking an address rather than a request so
 // every way into a sandbox can ask it. The HTTP preview was its only caller for
 // a while, which left a restricted org reachable from any network on a raw
-// forwarded port and on its agent origin — the restriction covered the one door
-// with a lock on it and none of the others.
+// forwarded port — the restriction covered the one door with a lock on it and
+// none of the others.
 //
 // Read per call, not cached: a restriction an operator sets must apply to the
 // next connection, not to the one after a TTL. The UDP forward is the single

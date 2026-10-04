@@ -187,12 +187,11 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
     <a href="/guides/ci-tests">CI for AI-written code</a>
     <a href="/guides/data-pipeline">Data jobs & ETL</a>
     <a href="/guides/custom-images">Custom images</a>
-    <a href="/guides/mobile-testing">Mobile E2E (Android)</a>
   </aside>
 
   <main class="doc">
     <section class="guide" id="guide-browser-automation">
-      <p class="gkick">Guide 03 · templates: playwright, playwright-headed</p>
+      <p class="gkick">Guide 03 · template: playwright</p>
       <h1 class="disp">Browser automation &amp; web scraping for AI agents</h1>
       <p class="gwhat">Agents that browse need Chromium, and Chromium needs a machine. The
         <code>playwright</code> template boots with the browser and drivers installed — write the
@@ -220,8 +219,8 @@ sb.files.<span class="fn">write</span>(<span class="s">"/work/scrape.py"</span>,
 sb.<span class="fn">download</span>(<span class="s">"/out"</span>, <span class="s">"./scraped"</span>)
 sb.<span class="fn">kill</span>()</pre>
       </div></div>
-      <div class="callout"><b>Headed mode:</b> use <code>playwright-headed</code> when a site needs a visible
-        browser, and watch it through the sandbox preview URL — useful for debugging agent browsing behavior.</div>
+      <div class="callout"><b>Headed mode:</b> add <code>PD_DESKTOP=1</code> at create for a visible
+        browser over the sandbox's desktop viewer — useful for debugging agent browsing behavior.</div>
       <div class="gfoot"><span class="cost">≈ $0.13/h (2 vCPU · 2 GB)</span> ·
         <a href="/docs#sec-files">files API</a></div>
     </section>
@@ -233,7 +232,7 @@ sb.<span class="fn">kill</span>()</pre>
 </div>
     <div style="margin-top:44px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
       <a class="btn" href="/dashboard">Start free — $5 credits</a>
-      <a href="/guides" style="color:var(--phos);font-size:14px">Browse all 15 guides →</a>
+      <a href="/guides" style="color:var(--phos);font-size:14px">Browse all 12 guides →</a>
     </div>
   </main>
 </div>

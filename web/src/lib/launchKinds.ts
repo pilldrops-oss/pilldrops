@@ -1,47 +1,20 @@
 import type { Template, TemplateEnv } from '../types'
 
-import { AGENT_CONFIG, type AgentConfig } from './launchAgents'
 import { sandboxHost } from '../api'
 
 // Kind is a template's purpose; it drives the config body, summary and CTA.
-export type Kind = 'agent' | 'web' | 'service' | 'gui' | 'test' | 'shell'
+export type Kind = 'web' | 'service' | 'gui' | 'test' | 'shell'
 
-// SERVER_KIND_MAP folds the manifest's eight kinds onto the six UI bodies;
+// SERVER_KIND_MAP folds the manifest's seven kinds onto the five UI bodies;
 // code/app/verdict render as 'web' until they get their own surfaces.
 const SERVER_KIND_MAP: Record<string, Kind> = {
   shell: 'shell',
   code: 'web',
   app: 'web',
-  agent: 'agent',
   screen: 'gui',
   test: 'test',
   verdict: 'web',
   service: 'service',
-}
-
-// agentFor returns the template's agent metadata, preferring the server manifest over AGENT_CONFIG.
-export function agentFor(t: Template): AgentConfig | null {
-  const a = t.agent
-  if (a) {
-    return {
-      keyEnv: a.key_env ?? '',
-      keyLabel: a.key_label ?? 'API key',
-      keyNote: a.key_note,
-      runCmd: a.run_cmd ?? '',
-      taskPlaceholder: a.task_placeholder ?? '',
-      baseUrlEnv: a.base_url_env ?? '',
-      modelEnv: a.model_env ?? '',
-      mcpFile: a.config_file ?? '',
-      configLabel: a.config_label ?? 'Config',
-      configFormat: a.config_format === 'toml' ? 'toml' : 'json',
-      configExample: a.config_example ?? '',
-      installCmd: a.install_cmd ?? '',
-      cliBin: a.cli_bin ?? '',
-      runFlags: a.run_flags ?? '',
-      docsUrl: t.docs_url ?? AGENT_CONFIG[t.id]?.docsUrl ?? '',
-    }
-  }
-  return AGENT_CONFIG[t.id] ?? null
 }
 
 // kindOf returns the manifest kind, falling back to field heuristics for manifest-less templates.
@@ -49,15 +22,8 @@ export function kindOf(t: Template): Kind {
   if (t.kind && SERVER_KIND_MAP[t.kind]) return SERVER_KIND_MAP[t.kind]
   const tags = (t.tags ?? []).map(x => x.toLowerCase())
   const has = (...needles: string[]) => needles.some(n => tags.includes(n))
-  const lang = (t.language ?? '').toLowerCase()
 
-  // Not the generic `agent` tag: OpenClaw is a base for building agents, not a coding CLI.
-  if (AGENT_CONFIG[t.id] || has('coding-cli')) return 'agent'
-
-  if (
-    t.has_server &&
-    (lang === 'android' || t.id === 'desktop' || has('vnc', 'emulator', 'computer-use'))
-  ) {
+  if (t.has_server && (t.id === 'desktop' || has('vnc', 'emulator', 'computer-use'))) {
     return 'gui'
   }
 
@@ -70,37 +36,6 @@ export function kindOf(t: Template): Kind {
   return 'web'
 }
 
-// AccessMode is how you reach the running agent, which decides what the preview URL serves.
-export type AccessMode = 'terminal' | 'task'
-
-export interface AccessModeMeta {
-  label: string
-  help: string
-  access: string
-  previewLabel: string
-  cta: string
-  showTask: boolean
-}
-
-export const ACCESS_MODES: Record<AccessMode, AccessModeMeta> = {
-  terminal: {
-    label: 'Web terminal',
-    help: 'The preview URL opens a live terminal (ttyd) running the agent — drive it from the browser. Works for any CLI agent.',
-    access: 'Web terminal',
-    previewLabel: 'Terminal URL',
-    cta: '▶ Run agent',
-    showTask: true,
-  },
-  task: {
-    label: 'Run task & serve result',
-    help: 'Runs the task once, then serves the agent workspace on the preview URL so you get one finished link to see what it built.',
-    access: 'Run & serve',
-    previewLabel: 'Preview when done',
-    cta: '▶ Run agent',
-    showTask: true,
-  },
-}
-
 // b64utf8 base64-encodes UTF-8 text; btoa alone throws on non-Latin1 code points.
 export function b64utf8(s: string): string {
   const bytes = encodeURIComponent(s).replace(/%([0-9A-F]{2})/g, (_, h) =>
@@ -111,10 +46,8 @@ export function b64utf8(s: string): string {
   return (globalThis as any).Buffer.from(bytes, 'binary').toString('base64')
 }
 
-export function ctaLabel(kind: Kind, mode: AccessMode): string {
+export function ctaLabel(kind: Kind): string {
   switch (kind) {
-    case 'agent':
-      return ACCESS_MODES[mode].cta
     case 'web':
       return '↑ Deploy sandbox'
     case 'service':
@@ -128,21 +61,12 @@ export function ctaLabel(kind: Kind, mode: AccessMode): string {
   }
 }
 
-export function previewLabel(kind: Kind, mode: AccessMode): string {
-  if (kind === 'agent') return ACCESS_MODES[mode].previewLabel
-  return 'Preview URL'
-}
-
 // ComposedBody is the kind-specific slice of a CreateSandboxReq; the caller
 // merges it with the shared fields and any page-specific files.
 export interface ComposedBody {
   env?: string[]
   /** Vault secret names the server resolves to env vars at create. */
   secret_refs?: string[]
-  /** Agent launch args; the portal expands them from the template manifest so dashboard, CLI and SDK share one path. */
-  args?: { task?: string; access_mode?: string }
-  /** Autonomy posture. A request field, not an env row, so the server can refuse a value it cannot honour. */
-  agent_mode?: 'supervised' | 'guided' | 'autonomous'
   files?: Array<{ path: string; content: string }>
   start?: string
   port?: number
@@ -160,7 +84,6 @@ export const KEEPALIVE_TIMEOUT = 3600
 // startsServer reports whether a deploy of this kind serves something on the preview URL.
 export function startsServer(kind: Kind, start: string): boolean {
   switch (kind) {
-    case 'agent':
     case 'gui':
     case 'service':
     case 'test':
@@ -189,14 +112,12 @@ export function resolveLifetime(
 }
 
 export const CATEGORY_ORDER = [
-  'Agents',
   'Use cases',
   'Databases',
   'Python',
   'Node / Web',
   'Systems',
   'Browser / E2E',
-  'Mobile',
   'Other',
 ] as const
 
@@ -211,12 +132,10 @@ export function categoryOf(t: Template): Category {
     return needles.some(n => words.includes(n))
   }
 
-  // Order matters: use cases and agents would otherwise match their stack.
+  // Order matters: use cases would otherwise match their stack.
   if (has('use-case')) return 'Use cases'
-  if (has('claude', 'codex', 'grok', 'opencode', 'amp', 'agent')) return 'Agents'
   if (hasWord('database', 'queue', 'postgres', 'postgresql', 'redis', 'mysql', 'mongodb', 'mongo', 'kafka', 'sql', 'nosql'))
     return 'Databases'
-  if (has('android', 'mobile', 'appium', 'ios', 'emulator')) return 'Mobile'
   if (has('playwright', 'puppeteer', 'selenium', 'browser', 'e2e', 'openclaw', 'desktop', 'vnc'))
     return 'Browser / E2E'
   if (hasWord('go', 'golang', 'rust', 'cargo', 'c++', 'cpp', 'systems')) return 'Systems'
@@ -242,14 +161,6 @@ export function shellQuote(v: string): string {
 
 // The UI never offers a runtime picker; only container-required templates pin docker.
 
-function isAndroidTemplate(t: Template): boolean {
-  if ((t.language ?? '').toLowerCase() === 'android') return true
-  if (t.id.startsWith('android')) return true
-  if (t.id === 'mobile-test') return true
-  const tags = (t.tags ?? []).map(x => x.toLowerCase())
-  return tags.some(x => x === 'emulator' || x === 'appium' || x === 'android')
-}
-
 function isImageBackedService(t: Template): boolean {
   if (t.image) return true
   const cat = (t.category ?? '').toLowerCase()
@@ -258,13 +169,12 @@ function isImageBackedService(t: Template): boolean {
 
 // requiredRuntime returns the runtime to pin on create, or undefined for auto.
 export function requiredRuntime(t: Template): string | undefined {
-  if (isAndroidTemplate(t) || isImageBackedService(t)) return 'docker'
+  if (isImageBackedService(t)) return 'docker'
   return undefined
 }
 
 // runsOnLabel is the read-only "Runs on" text.
 export function runsOnLabel(t: Template): string {
-  if (isAndroidTemplate(t)) return 'Docker · KVM'
   if (isImageBackedService(t)) return 'Docker'
   return 'Auto'
 }
@@ -280,42 +190,18 @@ export interface ServiceConn {
   url?: string
 }
 
-// serviceUrlFor returns undefined when the scheme needs a credential that is missing.
-function serviceUrlFor(
-  t: Template,
-  host: string,
-  port: number,
-  env: Record<string, string>,
-): string | undefined {
-  switch (t.id) {
-    case 'postgres': {
-      const pass = env['POSTGRES_PASSWORD'] ?? ''
-      const db = env['POSTGRES_DB'] || 'app'
-      return pass ? `postgres://postgres:${pass}@${host}:${port}/${db}` : undefined
-    }
-    case 'mysql': {
-      const pass = env['MYSQL_ROOT_PASSWORD'] ?? ''
-      return pass ? `mysql://root:${pass}@${host}:${port}/` : undefined
-    }
-    case 'redis':
-      return `redis://${host}:${port}`
-    case 'mongodb':
-      return `mongodb://${host}:${port}`
-    default:
-      return undefined
-  }
-}
-
 function serviceHostForId(id?: string): string {
   return sandboxHost(id ?? '<id>')
 }
 
-// serviceConn derives the Connection block info for a service template.
-export function serviceConn(t: Template, id?: string, env?: Record<string, string>): ServiceConn {
+// serviceConn derives the Connection block info for a service template. No
+// catalogue template declares a connection scheme, so url is always
+// undefined until one does.
+export function serviceConn(t: Template, id?: string): ServiceConn {
   const port = t.default_port ?? t.port ?? t.ports?.[0] ?? 5432
   const credEnvNames = (t.env ?? []).map(e => e.name)
   const host = serviceHostForId(id)
-  return { host, port, credEnvNames, url: serviceUrlFor(t, host, port, env ?? {}) }
+  return { host, port, credEnvNames }
 }
 
 export interface CustomEnv {
