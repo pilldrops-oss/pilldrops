@@ -297,3 +297,9 @@ gosec|G304|internal/vm/lazymem.go
 gosec|G402|internal/egressproxy/sniff.go
 # G404: heartbeat interval jitter, so nodes do not beat in lockstep.
 gosec|G404|internal/nodeboot/heartbeat.go
+# G304: two reads of fixed or operator-set paths, never tenant input. envd reads
+#   its own /run/envd.token-hash constant. The docker runtime reads the dockerd
+#   pidfile (SANDBOXD_DOCKERD_PIDFILE or the default) and /proc/<pid>/stat, where
+#   procStarted refuses any pid that is not a positive integer.
+gosec|G304|cmd/envd/credential.go
+gosec|G304|internal/runtime/docker/dockerdstart_linux.go

@@ -37,6 +37,10 @@ func dockerdStart() (time.Time, string) {
 // procStarted reads a process's start time from /proc: its starttime in clock
 // ticks since boot (USER_HZ, 100 on every Linux this runs on) plus btime.
 func procStarted(pid string) time.Time {
+	// The pid comes from a pidfile: only digits may reach the /proc path.
+	if n, err := strconv.Atoi(pid); err != nil || n <= 0 {
+		return time.Time{}
+	}
 	stat, err := os.ReadFile("/proc/" + pid + "/stat")
 	if err != nil {
 		return time.Time{}
