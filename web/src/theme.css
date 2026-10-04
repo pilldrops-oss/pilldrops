@@ -1514,10 +1514,6 @@ body.dark .term-stderr {
 .savemsg.ok { color: var(--green); }
 .savemsg.err { color: #dc2626; }
 
-/* ── Functions list row (6-col grid) ────────────────────────────────── */
-.rowh.fn, .row.fn { grid-template-columns: 1.6fr 0.9fr 0.7fr 0.9fr 0.6fr 70px; }
-.fn-url { font-family: var(--mono); font-size: 11.5px; color: var(--sub); }
-
 /* ── Sandbox list with a Node column (operator callers only) ─────────── */
 .rowh.has-node, .row.has-node { grid-template-columns: 1.5fr 0.85fr 0.8fr 0.6fr 0.7fr 0.55fr 66px; }
 
@@ -1531,30 +1527,11 @@ body.dark .term-stderr {
 .btn.ghost:hover { border-color: var(--slate); color: var(--ink); background: var(--bg2); }
 .deploy-panel .ph .iconbtn { margin-left: auto; }
 
-/* ── Function detail panes ───────────────────────────────────────────── */
 .tabpane { flex: 1; display: grid; gap: 18px; align-content: start; }
-.metrics.six { grid-template-columns: repeat(3, 1fr); }
-.urlbar { border: 1px solid var(--line2); border-radius: var(--r); padding: 14px 16px; background: var(--surface); }
-.urlbar-row { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
-.urlbar-code { flex: 1; font-family: var(--mono); font-size: 12.5px; color: var(--ink); word-break: break-all; }
-.codearea { min-height: 130px; resize: vertical; line-height: 1.5; }
-.resp { padding: 14px 16px; }
-.resp-meta { display: flex; gap: 14px; align-items: center; font-size: 12.5px; color: var(--sub); margin-bottom: 10px; }
-.resp-meta b.ok { color: var(--green); }
-.resp-meta b.bad { color: #dc2626; }
-.resp-body { margin: 0; white-space: pre-wrap; font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
 
-.logpane { display: flex; flex-direction: column; gap: 10px; }
 .logbar { display: flex; align-items: center; gap: 14px; }
 .logbar .chk { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--sub); cursor: pointer; }
-.logpane .log-feed { flex: 1; min-height: 340px; max-height: 60vh; overflow-y: auto; background: var(--bg2);
-  border: 1px solid var(--line); border-radius: var(--r); padding: 14px; font-family: var(--mono); font-size: 12.5px; }
 .logrow { white-space: pre-wrap; line-height: 1.55; color: var(--ink); }
-
-.filetabs { display: flex; gap: 8px; }
-.filetab { font-family: var(--mono); font-size: 12px; padding: 6px 12px; border: 1px solid var(--line2);
-  background: var(--surface); border-radius: 8px; color: var(--sub); cursor: pointer; }
-.filetab.on { background: var(--primbg); border-color: var(--primbg); color: var(--primfg); }
 
 .settings { max-width: 680px; }
 .danger { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 12px;

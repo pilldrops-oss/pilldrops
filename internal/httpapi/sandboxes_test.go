@@ -243,7 +243,7 @@ func TestCreateImageBackedRespectsExplicitMemory(t *testing.T) {
 	}
 }
 
-// Same ruling as cron's TestCronRefusesAgentMode: this server runs no agents.
+// This server runs no agents.
 func TestCreateRefusesAgentMode(t *testing.T) {
 	srv, key := newTestServer(t)
 	for _, mode := range []string{"supervised", "guided", "autonomous"} {

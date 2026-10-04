@@ -11,10 +11,8 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
-// The half of the backup schedule that needs the scheduler. A core build has
-// no sweeper to fire a job, so it links none of this and refuses a schedule
-// outright rather than storing one nothing would ever run — see
-// backupschedulenocron.go.
+// The half of the backup schedule that needs the scheduler: it stores the
+// schedule as a backup-kind cron row, which internal/cron's sweeper fires.
 
 // scheduleGapError measures the actual gap between two consecutive fires and
 // refuses one under the floor. Measured, not parsed: "*/5 * * * *" and a

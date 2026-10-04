@@ -36,7 +36,6 @@ func serviceTemplateServer(t *testing.T) (*httptest.Server, *runtimetest.Fake, s
 		IdleTimeout: time.Hour, HardTTL: time.Hour,
 	})
 	s := New(d, st)
-	attachTestFunctions(s, d, st, dir)
 	s.SetOrgOverrideSecret([]byte(testOrgOverrideSecret))
 	srv := httptest.NewServer(s.Routes())
 	t.Cleanup(srv.Close)

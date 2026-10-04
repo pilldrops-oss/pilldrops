@@ -12,15 +12,7 @@ import type {
   FilesystemListResp,
   SandboxDetail,
   SandboxLogsResp,
-  CronJob,
   PreviewStatus,
-  FunctionInfo,
-  RegisterFunctionReq,
-  UpdateFunctionReq,
-  InvokeResult,
-  FunctionMetrics,
-  FunctionCode,
-  InvokeOptions,
   LimitsInfo,
   VaultSecret,
   CustomDomain,
@@ -391,55 +383,6 @@ export const getLaunchStats = (templates: string[]) =>
 export const postLaunchSample = (template: string, ms: number) =>
   request<void>('POST', '/v1/launch-stats', { template, ms })
 
-export const listFunctions = () =>
-  request<{ functions: FunctionInfo[] }>('GET', '/v1/functions', undefined)
-
-export const getFunction = (name: string) =>
-  request<FunctionInfo>('GET', `/v1/functions/${name}`, undefined)
-
-export const registerFunction = (body: RegisterFunctionReq) =>
-  request<FunctionInfo>('POST', '/v1/functions', body)
-
-export const deleteFunction = (name: string) =>
-  request<void>('DELETE', `/v1/functions/${name}`, undefined)
-
-export const getFunctionLogs = (name: string) =>
-  request<SandboxLogsResp>('GET', `/v1/functions/${name}/logs`, undefined)
-
-export const updateFunction = (name: string, body: UpdateFunctionReq) =>
-  request<StatusResp>('PUT', `/v1/functions/${name}`, body)
-
-export const getFunctionCode = (name: string) =>
-  request<FunctionCode>('GET', `/v1/functions/${name}/code`, undefined)
-
-export const getFunctionMetrics = (name: string) =>
-  request<FunctionMetrics>('GET', `/v1/functions/${name}/metrics`, undefined)
-
-export async function invokeFunction(name: string, opts: InvokeOptions = {}): Promise<InvokeResult> {
-  const method = opts.method ?? 'POST'
-  let path = opts.path ?? ''
-  if (path && !path.startsWith('/')) path = `/${path}`
-  const headers: Record<string, string> = {
-    ...bearerHeader(await bearerToken()),
-    ...(opts.headers ?? {}),
-  }
-  const res = await fetch(`/v1/functions/${name}/invoke${path}`, {
-    method,
-    headers,
-    body: method === 'GET' || method === 'HEAD' ? undefined : (opts.body ?? ''),
-  })
-  const text = await res.text()
-  const respHeaders: Record<string, string> = {}
-  res.headers.forEach((v, k) => { respHeaders[k] = v })
-  return {
-    status: res.status,
-    body: text,
-    cold_start: res.headers.get('X-Sandboxd-Cold-Start') === 'true',
-    duration_ms: Number(res.headers.get('X-Sandboxd-Duration-Ms') ?? 0),
-    headers: respHeaders,
-  }
-}
-
 export const listSecrets = () => request<VaultSecret[]>('GET', '/v1/secrets', undefined)
 // auto_inject is omitted to keep the current setting on a rotation; the server
 // only resets it to false for a brand-new secret, or when this is passed explicitly.
@@ -586,29 +529,3 @@ export const recordRun = (id: string, body: { plan_snapshot?: string; services?:
 
 export const endRun = (projectID: string, runID: string) =>
   request<void>('PATCH', `/v1/projects/${encodeURIComponent(projectID)}/runs/${encodeURIComponent(runID)}`)
-
-export async function listCronJobs(): Promise<{ jobs: CronJob[] }> {
-  return request('GET', '/v1/cron')
-}
-
-export async function createCronJob(job: {
-  sandbox_id: string
-  schedule: string
-  command: string
-  name?: string
-  timezone?: string
-}): Promise<CronJob> {
-  return request('POST', '/v1/cron', job)
-}
-
-export async function runCronJobNow(id: string): Promise<{ status: string; exit_code: number; output: string }> {
-  return request('POST', `/v1/cron/${encodeURIComponent(id)}/run`)
-}
-
-export async function toggleCronJob(id: string, enabled: boolean): Promise<unknown> {
-  return request('POST', `/v1/cron/${encodeURIComponent(id)}/toggle`, { enabled })
-}
-
-export async function deleteCronJob(id: string): Promise<unknown> {
-  return request('DELETE', `/v1/cron/${encodeURIComponent(id)}`)
-}

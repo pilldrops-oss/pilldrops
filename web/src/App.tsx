@@ -13,8 +13,6 @@ const TemplateDetail = lazy(() => import('./pages/TemplateDetail'))
 const Usage = lazy(() => import('./pages/Usage'))
 const ApiKeys = lazy(() => import('./pages/ApiKeys'))
 const Docs = lazy(() => import('./pages/Docs'))
-const Functions = lazy(() => import('./pages/Functions'))
-const FunctionDetail = lazy(() => import('./pages/FunctionDetail'))
 const Templates = lazy(() => import('./pages/Templates'))
 const Vault = lazy(() => import('./pages/Vault'))
 const Domains = lazy(() => import('./pages/Domains'))
@@ -66,8 +64,6 @@ export default function App() {
           <Route path="logs" element={<Navigate to="/sandboxes" replace />} />
           <Route path="keys" element={<ApiKeys />} />
           <Route path="docs" element={<Docs />} />
-          <Route path="functions" element={<Functions />} />
-          <Route path="fn/:name" element={<FunctionDetail />} />
 
           {/* Admin routes. The nav hides them for customers; the server enforces access. */}
           <Route path="fleet" element={<Fleet />} />

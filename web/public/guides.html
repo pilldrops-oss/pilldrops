@@ -171,7 +171,6 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
     <a href="/guides/evals">Evals & RL at scale</a>
     <h4>Apps & infra</h4>
     <a href="/guides/app-preview">Full-stack app previews</a>
-    <a href="/guides/functions">Agent tools as functions</a>
     <a href="/guides/untrusted-code">Untrusted user code</a>
     <a href="/guides/ci-tests">CI for AI-written code</a>
     <a href="/guides/data-pipeline">Data jobs & ETL</a>
@@ -260,19 +259,9 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
       <p style="margin:0"><a href="/guides/app-preview" style="color:var(--phos);font-weight:600">Read the full guide →</a></p>
     </section>
 
-    <!-- ═══════════════ 8. FUNCTIONS ═══════════════ -->
-    <section class="guide" id="guide-functions">
-      <p class="gkick">Guide 08 · $0.0000002 per invocation</p>
-      <h2 class="disp"><a href="/guides/functions">Turn agent tools into HTTP functions</a></h2>
-      <p class="gwhat">A tool your agents call thousands of times shouldn't boot a sandbox each time.
-        Register the handler once as a function; PillDrops keeps it warm behind an HTTP endpoint and
-        meters per call.</p>
-      <p style="margin:0"><a href="/guides/functions" style="color:var(--phos);font-weight:600">Read the full guide →</a></p>
-    </section>
-
-    <!-- ═══════════════ 9. UNTRUSTED CODE ═══════════════ -->
+    <!-- ═══════════════ 8. UNTRUSTED CODE ═══════════════ -->
     <section class="guide" id="guide-untrusted-code">
-      <p class="gkick">Guide 09 · multi-tenant isolation</p>
+      <p class="gkick">Guide 08 · multi-tenant isolation</p>
       <h2 class="disp"><a href="/guides/untrusted-code">Run untrusted user code in your product</a></h2>
       <p class="gwhat">Plugin systems, coding-education platforms, user-defined webhooks — anywhere
         strangers' code runs, it must not run on your infrastructure. Give each execution a microVM
@@ -280,9 +269,9 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
       <p style="margin:0"><a href="/guides/untrusted-code" style="color:var(--phos);font-weight:600">Read the full guide →</a></p>
     </section>
 
-    <!-- ═══════════════ 10. CI TESTS ═══════════════ -->
+    <!-- ═══════════════ 9. CI TESTS ═══════════════ -->
     <section class="guide" id="guide-ci-tests">
-      <p class="gkick">Guide 10 · exit codes preserved</p>
+      <p class="gkick">Guide 09 · exit codes preserved</p>
       <h2 class="disp"><a href="/guides/ci-tests">CI for AI-written code — test before you trust</a></h2>
       <p class="gwhat">Your agent opened a PR at 3 a.m. Run its code through the tests in a disposable
         sandbox from CI — <code>pilldrops exec</code> exits with the remote command's exit code, so
@@ -290,9 +279,9 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
       <p style="margin:0"><a href="/guides/ci-tests" style="color:var(--phos);font-weight:600">Read the full guide →</a></p>
     </section>
 
-    <!-- ═══════════════ 11. DATA PIPELINE ═══════════════ -->
+    <!-- ═══════════════ 10. DATA PIPELINE ═══════════════ -->
     <section class="guide" id="guide-data-pipeline">
-      <p class="gkick">Guide 11 · disposable compute</p>
+      <p class="gkick">Guide 10 · disposable compute</p>
       <h2 class="disp"><a href="/guides/data-pipeline">Data jobs & ETL without a job cluster</a></h2>
       <p class="gwhat">Nightly transforms, one-off backfills, agent-triggered data pulls: boot a
         sandbox sized for the job, run it, download the output, destroy it. No queue, no cluster,
@@ -300,9 +289,9 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
       <p style="margin:0"><a href="/guides/data-pipeline" style="color:var(--phos);font-weight:600">Read the full guide →</a></p>
     </section>
 
-    <!-- ═══════════════ 12. CUSTOM IMAGES ═══════════════ -->
+    <!-- ═══════════════ 11. CUSTOM IMAGES ═══════════════ -->
     <section class="guide" id="guide-custom-images">
-      <p class="gkick">Guide 12 · any Dockerfile</p>
+      <p class="gkick">Guide 11 · any Dockerfile</p>
       <h2 class="disp"><a href="/guides/custom-images">Ship your own toolchain with custom images</a></h2>
       <p class="gwhat">When the 10 templates aren't enough — private deps, system packages, pinned
         toolchains — build a custom image from any Dockerfile and launch sandboxes from it like any
@@ -330,11 +319,10 @@ pre.code .s{color:#8be9a8}pre.code .k{color:#c792ea}pre.code .fn{color:#7dc4ff}
     {"@type": "ListItem", "position": 5, "name": "Long-running background agents that don't burn money", "url": "https://pilldrops.com/guides/long-running"},
     {"@type": "ListItem", "position": 6, "name": "Run evals and RL rollouts at scale", "url": "https://pilldrops.com/guides/evals"},
     {"@type": "ListItem", "position": 7, "name": "Instant full-stack previews of AI-generated apps", "url": "https://pilldrops.com/guides/app-preview"},
-    {"@type": "ListItem", "position": 8, "name": "Turn agent tools into HTTP functions", "url": "https://pilldrops.com/guides/functions"},
-    {"@type": "ListItem", "position": 9, "name": "Run untrusted user code in your product", "url": "https://pilldrops.com/guides/untrusted-code"},
-    {"@type": "ListItem", "position": 10, "name": "CI for AI-written code — test before you trust", "url": "https://pilldrops.com/guides/ci-tests"},
-    {"@type": "ListItem", "position": 11, "name": "Data jobs & ETL without a job cluster", "url": "https://pilldrops.com/guides/data-pipeline"},
-    {"@type": "ListItem", "position": 12, "name": "Ship your own toolchain with custom images", "url": "https://pilldrops.com/guides/custom-images"}
+    {"@type": "ListItem", "position": 8, "name": "Run untrusted user code in your product", "url": "https://pilldrops.com/guides/untrusted-code"},
+    {"@type": "ListItem", "position": 9, "name": "CI for AI-written code — test before you trust", "url": "https://pilldrops.com/guides/ci-tests"},
+    {"@type": "ListItem", "position": 10, "name": "Data jobs & ETL without a job cluster", "url": "https://pilldrops.com/guides/data-pipeline"},
+    {"@type": "ListItem", "position": 11, "name": "Ship your own toolchain with custom images", "url": "https://pilldrops.com/guides/custom-images"}
   ]
 }
 </script>

@@ -127,13 +127,14 @@ func (s *Store) CronJobByID(ctx context.Context, orgID, id string) (CronJob, boo
 	return j, true
 }
 
-// DueCronJobs returns enabled jobs whose next run has arrived, on sandboxes
+// DueCronJobs returns enabled backup jobs whose next run has arrived, on sandboxes
 // nodeID owns or no node has stamped yet. Every node of a fleet sweeps this one
-// table and only the owner can exec into a sandbox: a sibling that won the claim
+// table and only the owner can capture a sandbox: a sibling that won the claim
 // recorded "sandbox not found" instead. Jobs whose sandbox has no live owner
 // (its node was reaped, so the row is lost, or the row is gone) are due on
 // every node, so one of them records the miss instead of the job going silent.
-// An empty nodeID (unclustered) sees every job.
+// An empty nodeID (unclustered) sees every job. Backups are the only kind the
+// engine runs; a row of any other kind is never selected, so never claimed.
 func (s *Store) DueCronJobs(ctx context.Context, nodeID string, now int64, limit int) ([]CronJob, error) {
 	if limit <= 0 {
 		limit = 100
@@ -141,17 +142,17 @@ func (s *Store) DueCronJobs(ctx context.Context, nodeID string, now int64, limit
 	if nodeID == "" {
 		return collectRows(ctx, s,
 			`SELECT `+cronCols+` FROM cron_jobs
-			 WHERE enabled AND next_run_at > 0 AND next_run_at <= ?
+			 WHERE enabled AND kind = ? AND next_run_at > 0 AND next_run_at <= ?
 			 ORDER BY next_run_at LIMIT ?`,
-			[]any{now, limit}, scanInto(scanCron))
+			[]any{CronKindBackup, now, limit}, scanInto(scanCron))
 	}
 	return collectRows(ctx, s,
 		`SELECT `+cronCols+` FROM cron_jobs
-		 WHERE enabled AND next_run_at > 0 AND next_run_at <= ?
+		 WHERE enabled AND kind = ? AND next_run_at > 0 AND next_run_at <= ?
 		   AND (sandbox_id IN (SELECT id FROM sandboxes WHERE node_id = ? OR node_id = '' OR state = ?)
 		        OR sandbox_id NOT IN (SELECT id FROM sandboxes))
 		 ORDER BY next_run_at LIMIT ?`,
-		[]any{now, nodeID, StateLost, limit}, scanInto(scanCron))
+		[]any{CronKindBackup, now, nodeID, StateLost, limit}, scanInto(scanCron))
 }
 
 // ClaimCronJob moves a job's next_run_at forward and reports whether this

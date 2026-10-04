@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PillDrops API Reference — Live, Runnable Docs for the AI Sandbox API</title>
-<meta name="description" content="Every PillDrops API endpoint, documented and runnable in the browser: paste an API key, create microVM sandboxes, exec code, move files, invoke functions — live.">
+<meta name="description" content="Every PillDrops API endpoint, documented and runnable in the browser: paste an API key, create microVM sandboxes, exec code, move files — live.">
 <link rel="canonical" href="https://pilldrops.com/docs">
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta property="og:url" content="https://pilldrops.com/docs">
@@ -424,36 +424,11 @@ var SECTIONS = [
   { m:'GET', p:'/v1/sandboxes/{id}/history', sum:'This sandbox’s billing record',
     desc:'Runtime, vCPU-seconds, GB-seconds, and dollars charged for this specific sandbox.' },
 ]},
-{ id:'functions', num:'06', title:'Functions', desc:'Sandbox-backed HTTP endpoints: register a handler once, invoke it forever at $0.0000002/call. The register body ships handler code inline.', eps:[
-  { m:'GET', p:'/v1/functions', sum:'List functions',
-    desc:'Every registered function in your org with its template and status.' },
-  { m:'POST', p:'/v1/functions', sum:'Register a function',
-    desc:'Creates (or errors with 409 on duplicate) a named function. <code>files</code> carries the handler source; <code>start</code> boots the server; <code>port</code> is where it listens.',
-    body:{ name:'hello', template:'python-3.11', start:'python3 /app/handler.py', port:8000,
-      files:[{ path:'/app/handler.py', content:"from http.server import *\nclass H(BaseHTTPRequestHandler):\n    def do_GET(self):\n        self.send_response(200); self.end_headers()\n        self.wfile.write(b'hello from pilldrops')\nHTTPServer(('0.0.0.0', 8000), H).serve_forever()" }] } },
-  { m:'GET', p:'/v1/functions/{name}', sum:'Inspect a function', name:true,
-    desc:'The function’s registration record and current state.' },
-  { m:'POST', p:'/v1/functions/{name}/invoke', sum:'Invoke it', name:true,
-    desc:'Calls the function over HTTP and returns its response. Sub-paths pass through: <code>/invoke/anything?x=1</code> → your handler sees <code>/anything?x=1</code>.',
-    body:'' },
-  { m:'GET', p:'/v1/functions/{name}/logs', sum:'Function logs', name:true,
-    desc:'Recent output of the function’s handler process.' },
-  { m:'GET', p:'/v1/functions/{name}/metrics', sum:'Invocation metrics', name:true,
-    desc:'Call counts, latencies, and errors for this function.' },
-  { m:'GET', p:'/v1/functions/{name}/code', sum:'Fetch the deployed code', name:true,
-    desc:'The files the function was registered with — what’s actually running.' },
-  { m:'PUT', p:'/v1/functions/{name}', sum:'Update in place', name:true,
-    desc:'Replaces the function’s code/config; same body as register.',
-    body:{ template:'python-3.11', start:'python3 /app/handler.py', port:8000,
-      files:[{ path:'/app/handler.py', content:"# … new handler code …" }] } },
-  { m:'DELETE', p:'/v1/functions/{name}', sum:'Delete a function', name:true, danger:true,
-    desc:'Unregisters the function and tears down its backing sandbox.' },
-]},
-{ id:'images', num:'07', title:'Custom images', desc:'Bring any Dockerfile. Build with the CLI — the API lists what you’ve built.', eps:[
+{ id:'images', num:'06', title:'Custom images', desc:'Bring any Dockerfile. Build with the CLI — the API lists what you’ve built.', eps:[
   { m:'GET', p:'/v1/images', sum:'List your images',
     desc:'Custom images built with <code>pilldrops image build &lt;dir&gt; -t name</code>. Launch one with <code>"image":"name"</code> on create.' },
 ]},
-{ id:'account', num:'08', title:'Keys, usage & billing', desc:'Programmatic account management: mint keys, watch spend, audit every past sandbox.', eps:[
+{ id:'account', num:'07', title:'Keys, usage & billing', desc:'Programmatic account management: mint keys, watch spend, audit every past sandbox.', eps:[
   { m:'GET', p:'/v1/keys', sum:'List API keys',
     desc:'Your keys with masked values and last-used timestamps.' },
   { m:'POST', p:'/v1/keys', sum:'Create a key',

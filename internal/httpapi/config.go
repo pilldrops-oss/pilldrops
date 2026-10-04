@@ -131,7 +131,7 @@ func configView(c store.SandboxConfig) map[string]any {
 }
 
 // configEnvFor returns the stored config as exec environment. Every exec path
-// (terminal, chat, cron) goes through this.
+// (terminal, chat) goes through this.
 func (s *Server) configEnvFor(ctx context.Context, id string) map[string]string {
 	return s.st.SandboxConfigFor(ctx, id).Env
 }

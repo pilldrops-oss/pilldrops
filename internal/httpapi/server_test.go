@@ -62,7 +62,6 @@ func newTestServerWithStore(t *testing.T, opts ...func(*daemon.Config, *store.St
 	}
 	d := daemon.New(cfg)
 	s := New(d, st)
-	attachTestFunctions(s, d, st, dir)
 	s.SetOrgOverrideSecret([]byte(testOrgOverrideSecret))
 	s.SetNodeID(testNodeID)
 	srv := httptest.NewServer(s.Routes())

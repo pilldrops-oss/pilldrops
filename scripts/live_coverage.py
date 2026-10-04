@@ -2,7 +2,7 @@
 """Exercise ~100 use cases against a running sandboxd and report per-category coverage; never stops on failure.
 Usage: PILLDROPS_API_URL=http://localhost:8080 PILLDROPS_API_KEY=sf_live_... python3 scripts/live_coverage.py [--keep-apps] [--loop N] [--workers N]
 """
-import argparse, base64, codecs, hashlib, json, math, os, re, sys, threading, time, uuid
+import argparse, os, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -115,25 +115,6 @@ def curl_app(url, want=None, want_status=200, tries=25):
     raise RuntimeError(f"app not ready/incorrect: {getattr(last,'status_code',last)} body={getattr(last,'text','')[:120]!r}")
 
 
-def func_register(name, files, start, port=8000, env=None, template="python-3.11"):
-    body = {"name": name, "template": template, "files": files, "start": start, "port": port}
-    if env: body["env"] = env
-    r = _http("post", f"{BASE}/v1/functions", json=body, headers=H(), timeout=30)
-    if r.status_code == 409:
-        r = _http("put", f"{BASE}/v1/functions/{name}", json=body, headers=H(), timeout=30)
-    if not r.ok:
-        raise RuntimeError(f"register {name} -> {r.status_code} {r.text[:160]}")
-
-
-def func_invoke(name, payload, timeout=60):
-    r = _http("post", f"{BASE}/v1/functions/{name}/invoke",
-              data=json.dumps(payload).encode(),
-              headers=H({"Content-Type": "application/json"}), timeout=timeout)
-    if not r.ok:
-        raise RuntimeError(f"invoke {name} -> {r.status_code} {r.text[:160]}")
-    return r.json()
-
-
 CASES = []  # each: {"cat": str, "name": str, "run": callable() -> str}
 
 
@@ -152,7 +133,7 @@ def _read_api(path, key=None):
     return run
 
 for _p, _k in [("/v1/templates", None), ("/v1/keys", None), ("/v1/usage", None),
-               ("/v1/billing", None), ("/v1/builds", None), ("/v1/functions", "functions"),
+               ("/v1/billing", None), ("/v1/builds", None),
                ("/v1/sandboxes", "sandboxes")]:
     CASES.append({"cat": "read-api", "name": _p, "run": _read_api(_p, _k)})
 
@@ -514,100 +495,6 @@ for _n, _expr, _want in WEB_CASES:
     CASES.append({"cat": "web-deploy", "name": _n, "run": _mkweb()})
 
 
-_FN_HELPERS = (
-    "def _fib(n):\n a,b=0,1\n for _ in range(n): a,b=b,a+b\n return a\n"
-    "def _isprime(n):\n return n>1 and all(n%i for i in range(2,int(n**0.5)+1))\n"
-)
-
-def _eval_expr(expr, inp):
-    scope = {"inp": inp, "math": math, "hashlib": hashlib, "base64": base64,
-             "uuid": uuid, "codecs": codecs, "re": re, "time": time}
-    scope["_fib"] = lambda n: (lambda a=0, b=1: [(a := b, b := a + b) for _ in range(n)] and a)()
-    def _fib(n):
-        a, b = 0, 1
-        for _ in range(n): a, b = b, a + b
-        return a
-    def _isprime(n): return n > 1 and all(n % i for i in range(2, int(n ** 0.5) + 1))
-    scope["_fib"], scope["_isprime"] = _fib, _isprime
-    return eval(expr, scope)
-
-# (name, expr over `inp`, sample input, deterministic?)
-FN_OPS = [
-    ("add10",     "inp.get('x',0)+10",                               {"x": 5},        True),
-    ("square",    "inp.get('x',0)**2",                               {"x": 6},        True),
-    ("double",    "inp.get('x',0)*2",                                {"x": 21},       True),
-    ("negate",    "-inp.get('x',0)",                                 {"x": 8},        True),
-    ("factorial", "math.factorial(int(inp.get('x',0)))",             {"x": 6},        True),
-    ("fib",       "_fib(int(inp.get('x',0)))",                       {"x": 10},       True),
-    ("isprime",   "_isprime(int(inp.get('x',0)))",                   {"x": 17},       True),
-    ("reverse",   "str(inp.get('s',''))[::-1]",                      {"s": "abc"},    True),
-    ("upper",     "str(inp.get('s','')).upper()",                    {"s": "hey"},    True),
-    ("lower",     "str(inp.get('s','')).lower()",                    {"s": "HEY"},    True),
-    ("strlen",    "len(str(inp.get('s','')))",                       {"s": "hello"},  True),
-    ("sha256",    "hashlib.sha256(str(inp.get('s','')).encode()).hexdigest()", {"s": "abc"}, True),
-    ("md5",       "hashlib.md5(str(inp.get('s','')).encode()).hexdigest()",    {"s": "abc"}, True),
-    ("base64enc", "base64.b64encode(str(inp.get('s','')).encode()).decode()",  {"s": "hi"},  True),
-    ("rot13",     "codecs.encode(str(inp.get('s','')),'rot_13')",    {"s": "hello"},  True),
-    ("sumlist",   "sum(inp.get('xs',[]))",                           {"xs": [1,2,3]}, True),
-    ("maxlist",   "max(inp.get('xs',[0]))",                          {"xs": [4,9,2]}, True),
-    ("sortlist",  "sorted(inp.get('xs',[]))",                        {"xs": [3,1,2]}, True),
-    ("wordcount", "len(str(inp.get('s','')).split())",               {"s": "a b c"},  True),
-    ("titlecase", "str(inp.get('s','')).title()",                    {"s": "foo bar"},True),
-    ("c2f",       "inp.get('c',0)*9/5+32",                           {"c": 100},      True),
-    ("palindrome","(lambda s: s==s[::-1])(str(inp.get('s','')))",    {"s": "racecar"},True),
-    ("gcd",       "math.gcd(int(inp.get('a',0)),int(inp.get('b',0)))", {"a": 12,"b": 18}, True),
-    ("hexop",     "hex(int(inp.get('x',0)))",                        {"x": 255},      True),
-    ("binop",     "bin(int(inp.get('x',0)))",                        {"x": 5},        True),
-    ("vowels",    "sum(c in 'aeiouAEIOU' for c in str(inp.get('s','')))", {"s": "education"}, True),
-    ("slugify",   "re.sub(r'[^a-z0-9]+','-',str(inp.get('s','')).lower()).strip('-')", {"s": "Hello World!"}, True),
-    ("uuid",      "uuid.uuid4().hex",                                {},              False),
-    ("timenow",   "time.time()",                                     {},              False),
-    ("randint",   "__import__('random').randint(1,100)",             {},              False),
-]
-
-def _fn_handler(name, expr):
-    return (
-        "import json,os,math,hashlib,base64,uuid,codecs,re,time,random\n"
-        "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
-        + _FN_HELPERS +
-        "def compute(inp):\n"
-        f"  return {expr}\n"
-        "class Hh(BaseHTTPRequestHandler):\n"
-        "  def _r(self):\n"
-        "    n=int(self.headers.get('Content-Length',0) or 0)\n"
-        "    raw=self.rfile.read(n).decode() if n else ''\n"
-        "    inp=json.loads(raw) if raw else {}\n"
-        f"    out=json.dumps({{'result':compute(inp),'fn':'{name}'}}).encode()\n"
-        "    self.send_response(200); self.send_header('Content-Type','application/json')\n"
-        "    self.send_header('Content-Length',str(len(out))); self.end_headers(); self.wfile.write(out)\n"
-        "  do_GET=do_POST=_r\n"
-        "  def log_message(self,*a): pass\n"
-        "HTTPServer(('0.0.0.0',int(os.environ.get('PORT',8000))),Hh).serve_forever()\n"
-    )
-
-def _register_fn_pods():
-    for name, expr, _inp, _det in FN_OPS:
-        func_register(f"fn-{name}", [{"path": "handler.py", "content": _fn_handler(name, expr)}],
-                      start="python3 handler.py", port=8000)
-
-for _n, _expr, _inp, _det in FN_OPS:
-    def _mkfn(name=_n, expr=_expr, inp=_inp, det=_det):
-        def run():
-            r = func_invoke(f"fn-{name}", inp)
-            got = r.get("result")
-            if det:
-                exp = _eval_expr(expr, inp)
-                ok = (got == exp) or (isinstance(got, (int, float)) and isinstance(exp, (int, float)) and abs(got - exp) < 1e-6)
-                if not ok:
-                    raise RuntimeError(f"{name}({inp})={got!r} expected {exp!r}")
-                return f"{name} → {got}"
-            if got is None:
-                raise RuntimeError("null result")
-            return f"{name} → {str(got)[:24]}"
-        return run
-    CASES.append({"cat": "function", "name": _n, "run": _mkfn()})
-
-
 def run_case(c):
     t0 = time.time()
     try:
@@ -646,8 +533,6 @@ def main():
     _template_cases()  # dynamic, depends on live templates
 
     print(f"\n{B}live coverage{N} → {BASE}   ({len(CASES)} unique use cases, {args.workers} workers)\n")
-    print(f"{M}registering {len(FN_OPS)} function pods…{N}")
-    _register_fn_pods()
 
     all_results = []
     for it in range(args.loop):
@@ -662,8 +547,7 @@ def main():
         all_results.append(results)
         _summary(results)
 
-    print(f"\n{B}pods left running (scale-to-zero):{N} {len(FN_OPS)} functions "
-          f"→ pilldrops function list   |   dashboard: {BASE}/dashboard")
+    print(f"\ndashboard: {BASE}/dashboard")
 
 
 def _summary(results):

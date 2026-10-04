@@ -6,8 +6,6 @@ import { labelFor } from '../lib/navLabels'
 import { IS_LOCAL_RUNTIME, checkAdminAccess } from '../api'
 import { clearThread } from '../lib/threadStore'
 
-const FUNCTIONS_ENABLED = false
-
 const MODE = window.__SANDBOXD__?.mode ?? 'user'
 const IS_ADMIN = MODE === 'admin'
 
@@ -104,17 +102,6 @@ function UserNav() {
           </svg>
           Sandboxes
         </NavLink>
-        {FUNCTIONS_ENABLED && (
-        <NavLink to="/functions" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 24 24">
-            <path d="M4 7h16M4 12h16M4 17h16" />
-            <circle cx="8" cy="7" r="1.4" />
-            <circle cx="8" cy="12" r="1.4" />
-            <circle cx="8" cy="17" r="1.4" />
-          </svg>
-          Functions
-        </NavLink>
-        )}
         <NavLink to="/vault" className={({ isActive }) => isActive ? 'on' : ''}>
           <svg viewBox="0 0 24 24">
             <rect x="4" y="10" width="16" height="10" rx="2" />

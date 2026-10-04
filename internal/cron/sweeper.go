@@ -17,20 +17,8 @@ type Store interface {
 	RecordCronRun(ctx context.Context, id, status, output string, ranAt int64) error
 }
 
-// Runner executes a command inside a customer's workstation.
-type Runner interface {
-	RunInSandbox(ctx context.Context, orgID, sandboxID, cmd string) (stdout string, exitCode int, err error)
-}
-
-// AgentRunner submits a scheduled prompt as an agent turn. A separate interface
-// so a runner without it refuses agent jobs instead of falling back to exec.
-type AgentRunner interface {
-	RunAgentTurn(ctx context.Context, orgID, sandboxID, prompt, mode string) (output string, err error)
-}
-
-// BackupRunner captures a scheduled backup. Separate for the same reason as
-// AgentRunner: a runner without it refuses backup jobs rather than handing
-// j.Command — which is the word "backup" — to a shell.
+// BackupRunner captures a scheduled backup. Backups are the only jobs the
+// engine schedules; the store hands the sweeper no other kind.
 type BackupRunner interface {
 	RunBackup(ctx context.Context, orgID, sandboxID string) (backupID string, err error)
 }
@@ -42,19 +30,19 @@ const SweepInterval = time.Minute
 const maxPerSweep = 100
 
 // sweepConcurrency bounds how many due jobs one sweep executes at once. Jobs
-// run in parallel so a minutes-long agent turn cannot stall the schedule; the
-// claim is already an atomic compare-and-swap, so no further coordination is needed.
+// run in parallel so one slow capture cannot stall the schedule; the claim is
+// already an atomic compare-and-swap, so no further coordination is needed.
 const sweepConcurrency = 8
 
-// Sweeper fires scheduled jobs.
+// Sweeper fires scheduled backups.
 type Sweeper struct {
 	st  Store
-	run Runner
+	run BackupRunner
 	// onClaim is a test seam: it observes the next_run_at written for a job.
 	onClaim func(id string, next int64)
 }
 
-func NewSweeper(st Store, run Runner, onClaim func(id string, next int64)) *Sweeper {
+func NewSweeper(st Store, run BackupRunner, onClaim func(id string, next int64)) *Sweeper {
 	return &Sweeper{st: st, run: run, onClaim: onClaim}
 }
 
@@ -113,6 +101,11 @@ func (s *Sweeper) SweepOnce(ctx context.Context, now time.Time) {
 }
 
 func (s *Sweeper) runJob(ctx context.Context, j store.CronJob, now time.Time) {
+	// The store query already selects backups only; a legacy shell or agent row
+	// that slips past it is left untouched rather than captured as a backup.
+	if j.Kind != store.CronKindBackup {
+		return
+	}
 	sched, err := Parse(j.Schedule)
 	if err != nil {
 		// Park it; leaving next_run_at in the past would re-select it every tick.
@@ -143,52 +136,14 @@ func (s *Sweeper) runJob(ctx context.Context, j store.CronJob, now time.Time) {
 		s.onClaim(j.ID, nextUnix)
 	}
 
-	// Kind is checked before AgentMode: a backup job's Command is the word
-	// "backup", not something to run anywhere.
-	if j.Kind == store.CronKindBackup {
-		s.runBackupJob(ctx, j, now)
-		return
-	}
-	if j.AgentMode != "" {
-		s.runAgentJob(ctx, j, now)
-		return
-	}
-
-	out, code, err := s.run.RunInSandbox(ctx, j.OrgID, j.SandboxID, j.Command)
-	switch {
-	case err != nil:
-		// Could not reach the machine, distinct from the command failing.
-		if rErr := s.st.RecordCronRun(ctx, j.ID, "error", err.Error(), now.Unix()); rErr != nil {
-			slog.ErrorContext(ctx, "could not record the cron run outcome",
-				"component", "cron", "job", j.ID, "outcome", "error", "err", rErr)
-		}
-	case code != 0:
-		if rErr := s.st.RecordCronRun(ctx, j.ID, "failed", out, now.Unix()); rErr != nil {
-			slog.ErrorContext(ctx, "could not record the cron run outcome",
-				"component", "cron", "job", j.ID, "outcome", "failed", "err", rErr)
-		}
-	default:
-		if rErr := s.st.RecordCronRun(ctx, j.ID, "ok", out, now.Unix()); rErr != nil {
-			slog.ErrorContext(ctx, "could not record the cron run outcome",
-				"component", "cron", "job", j.ID, "outcome", "ok", "err", rErr)
-		}
-	}
+	s.runBackupJob(ctx, j, now)
 }
 
 // runBackupJob captures the sandbox. The row it creates is the record of what
 // happened; the job's last_output carries the backup id so an operator reading
 // the schedule can find it.
 func (s *Sweeper) runBackupJob(ctx context.Context, j store.CronJob, now time.Time) {
-	br, ok := s.run.(BackupRunner)
-	if !ok {
-		if rErr := s.st.RecordCronRun(ctx, j.ID, "error",
-			"this deployment cannot take scheduled backups", now.Unix()); rErr != nil {
-			slog.ErrorContext(ctx, "could not record the cron run outcome",
-				"component", "cron", "job", j.ID, "outcome", "error", "err", rErr)
-		}
-		return
-	}
-	id, err := br.RunBackup(ctx, j.OrgID, j.SandboxID)
+	id, err := s.run.RunBackup(ctx, j.OrgID, j.SandboxID)
 	status, out := "ok", "backup "+id+" started"
 	if err != nil {
 		status, out = "error", err.Error()
@@ -196,33 +151,6 @@ func (s *Sweeper) runBackupJob(ctx context.Context, j store.CronJob, now time.Ti
 	if rErr := s.st.RecordCronRun(ctx, j.ID, status, out, now.Unix()); rErr != nil {
 		slog.ErrorContext(ctx, "could not record the cron run outcome",
 			"component", "cron", "job", j.ID, "outcome", status, "err", rErr)
-	}
-}
-
-// runAgentJob submits the job's prompt as a turn.
-func (s *Sweeper) runAgentJob(ctx context.Context, j store.CronJob, now time.Time) {
-	ar, ok := s.run.(AgentRunner)
-	if !ok {
-		// Not run on the shell path: j.Command is an English prompt.
-		if rErr := s.st.RecordCronRun(ctx, j.ID, "error",
-			"this scheduler cannot run agent jobs, so the prompt was not executed", now.Unix()); rErr != nil {
-			slog.ErrorContext(ctx, "could not record the cron run outcome",
-				"component", "cron", "job", j.ID, "outcome", "error", "err", rErr)
-		}
-		return
-	}
-	out, err := ar.RunAgentTurn(ctx, j.OrgID, j.SandboxID, j.Command, j.AgentMode)
-	if err != nil {
-		if rErr := s.st.RecordCronRun(ctx, j.ID, "error", err.Error(), now.Unix()); rErr != nil {
-			slog.ErrorContext(ctx, "could not record the cron run outcome",
-				"component", "cron", "job", j.ID, "outcome", "error", "err", rErr)
-		}
-		return
-	}
-	// A turn has no exit code; it either answered or failed above.
-	if rErr := s.st.RecordCronRun(ctx, j.ID, "ok", out, now.Unix()); rErr != nil {
-		slog.ErrorContext(ctx, "could not record the cron run outcome",
-			"component", "cron", "job", j.ID, "outcome", "ok", "err", rErr)
 	}
 }
 

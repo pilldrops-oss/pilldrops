@@ -157,22 +157,6 @@ printf '{"plan":"scale"}' > /tmp/e2e-all/pl.json
   && ok "legacy scale still contact-sales" || bad "scale became self-serve"
 [ "$(code $B/v1/billing -H "$H")" = 200 ] && ok "billing summary" || bad "billing summary"
 
-sec "F. Scheduled runs"
-J=$(curl -s -X POST $B/v1/cron -H "$H" -H 'Content-Type: application/json' \
-  -d "{\"sandbox_id\":\"$SB\",\"schedule\":\"0 9 * * *\",\"command\":\"echo cron-fired\",\"timezone\":\"Europe/London\"}" \
-  | jq_ "print(d.get('id',''))")
-[ -n "$J" ] && ok "create job" || bad "create job"
-nr=$(curl -s $B/v1/cron -H "$H" | jq_ "print(d['jobs'][0]['next_run_at'] if d.get('jobs') else 0)")
-[ "$nr" -gt 0 ] && ok "next run computed ($nr)" || bad "no next run"
-st=$(curl -s -X POST $B/v1/cron/$J/run -H "$H" | jq_ "print(d.get('status','')+'|'+d.get('output','').strip())")
-case "$st" in ok\|cron-fired) ok "run-now executes in the container";; *) bad "run-now: $st";; esac
-printf '{"sandbox_id":"%s","schedule":"nonsense","command":"x"}' "$SB" > /tmp/e2e-all/bad.json
-[ "$(code -X POST $B/v1/cron -H "$H" -H 'Content-Type: application/json' --data-binary @/tmp/e2e-all/bad.json)" = 400 ] \
-  && ok "bad schedule refused at write time" || bad "bad schedule accepted"
-[ "$(code -X POST $B/v1/cron/$J/toggle -H "$H" -H 'Content-Type: application/json' -d '{"enabled":false}')" = 200 ] \
-  && ok "toggle" || bad "toggle"
-[ "$(code -X DELETE $B/v1/cron/$J -H "$H")" = 200 ] && ok "delete" || bad "delete"
-
 sec "I. Security"
 [ "$(code $B/v1/sandboxes)" = 401 ] && ok "unauthenticated rejected" || bad "auth not enforced"
 [ "$(code $B/v1/sandboxes/sb_does_not_exist -H "$H")" = 404 ] && ok "unknown id 404s" || bad "unknown id"
@@ -187,11 +171,7 @@ pid=$(echo "$PSB" | jq_ "print(d.get('id',''))")
 [ -n "$pid" ] && ok "workstation id returned" || bad "no workstation id"
 
 sec "K. Cleanup on destroy"
-J2=$(curl -s -X POST $B/v1/cron -H "$H" -H 'Content-Type: application/json' \
-  -d "{\"sandbox_id\":\"$SB\",\"schedule\":\"* * * * *\",\"command\":\"echo x\"}" | jq_ "print(d.get('id',''))")
 curl -s -X DELETE $B/v1/sandboxes/$SB -H "$H" >/dev/null
-left=$(curl -s $B/v1/cron -H "$H" | jq_ "print(len([j for j in d.get('jobs',[]) if j['sandbox_id']=='$SB']))")
-[ "$left" = "0" ] && ok "destroying a sandbox removes its jobs" || bad "$left orphan job(s)"
 hist=$(curl -s $B/v1/history -H "$H" | jq_ "print(1 if '$SB' in json.dumps(d) else 0)")
 [ "$hist" = "1" ] && ok "destroyed sandbox recorded in history" || skp "history not yet written"
 

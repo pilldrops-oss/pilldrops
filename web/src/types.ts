@@ -439,74 +439,6 @@ export interface SandboxDetail {
   public_preview?: boolean
 }
 
-export interface FunctionInfo {
-  name: string
-  template: string
-  start: string
-  port: number
-  vcpu: number
-  memory_mb: number
-  max_replicas: number
-  replicas: number
-  sandbox_id: string
-  invokes: number
-  cold_starts: number
-  last_invoked_at: number
-  env: Record<string, string>
-  created_at: number
-  updated_at: number
-}
-
-export interface RegisterFunctionReq {
-  name: string
-  template: string
-  start: string
-  port: number
-  vcpu?: number
-  memory_mb?: number
-  max_replicas?: number
-  env?: Record<string, string>
-  files: { path: string; content: string }[]
-}
-
-export interface UpdateFunctionReq {
-  template: string
-  start: string
-  port: number
-  env?: Record<string, string>
-  files?: { path: string; content: string }[]
-}
-
-export interface InvokeResult {
-  status: number
-  body: string
-  cold_start: boolean
-  duration_ms: number
-  headers: Record<string, string>
-}
-
-export interface FunctionMetrics {
-  invokes: number
-  cold_starts: number
-  last_invoked_at: number
-  state: string
-  vcpu_seconds: number
-  ram_gb_seconds: number
-  uptime_seconds: number
-}
-
-export interface FunctionCode {
-  files: { path: string; content: string }[]
-}
-
-export interface InvokeOptions {
-  method?: string
-  path?: string
-  headers?: Record<string, string>
-  body?: string
-}
-
-
 export interface Plan {
   id: string
   name: string
@@ -538,7 +470,6 @@ export interface AdminUser {
   login_count: number
   active_sandboxes: number
   total_created: number
-  functions: number
   plan: string
 }
 
@@ -557,7 +488,6 @@ export interface AdminSandbox {
   expires_at: number
 }
 export interface AdminHistory { id: string; template: string; exit_state: string; created_at: number; destroyed_at: number }
-export interface AdminFunction { Name: string; Template: string; Invokes: number; ColdStarts: number; LastInvokedAt: number }
 export interface AdminUsage { VCPUSeconds: number; RAMGBSeconds: number }
 export interface AdminEvent { sandbox_id: string; event: string; template?: string; at: number }
 export interface AdminAudit { key_id: string; action: string; target: string; at: number }
@@ -566,7 +496,6 @@ export interface AdminUserDetail {
   user: AdminUser
   active: AdminSandbox[]
   history: AdminHistory[]
-  functions: AdminFunction[]
   usage: AdminUsage
   events: AdminEvent[]
   audit: AdminAudit[]
@@ -586,7 +515,6 @@ export interface AdminOverview {
   logins: number
   active_sandboxes: number
   total_created: number
-  total_functions: number
   crashed_count: number
   templates: NameCount[]
   exit_states: NameCount[]
@@ -669,21 +597,6 @@ export interface HistoryRecord {
   vcpu_seconds?: number
   ram_gb_seconds?: number
   logs?: string
-}
-
-export interface CronJob {
-  id: string
-  sandbox_id: string
-  name: string
-  schedule: string
-  timezone: string
-  command: string
-  enabled: boolean
-  next_run_at: number
-  last_run_at: number
-  /** "ok" | "failed" (non-zero exit) | "error" (machine unreachable). */
-  last_status: string
-  last_output: string
 }
 
 /**

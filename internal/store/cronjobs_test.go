@@ -16,7 +16,7 @@ func TestDueCronJobsIsScopedToTheOwningNode(t *testing.T) {
 			}
 		}
 		if _, err := s.CreateCronJob(ctx, CronJob{
-			OrgID: "org", SandboxID: id, Schedule: "* * * * *", Command: "true",
+			OrgID: "org", SandboxID: id, Schedule: "* * * * *", Kind: CronKindBackup,
 		}, time.Now().Unix()-1); err != nil {
 			t.Fatalf("create job: %v", err)
 		}
@@ -44,5 +44,34 @@ func TestDueCronJobsIsScopedToTheOwningNode(t *testing.T) {
 	}
 	if all := got(""); len(all) != 5 {
 		t.Errorf("unclustered sees %v, want every job", all)
+	}
+}
+
+// The engine runs backup schedules only. A shell row left from before the
+// /v1/cron API moved out must never be due, or a sweeper would claim it.
+func TestDueCronJobsSelectsBackupsOnly(t *testing.T) {
+	s := openTemp(t)
+	ctx := t.Context()
+	past := time.Now().Unix() - 1
+	shell, err := s.CreateCronJob(ctx, CronJob{
+		OrgID: "org", SandboxID: "sb-1", Schedule: "* * * * *", Command: "rm -rf /data",
+	}, past)
+	if err != nil {
+		t.Fatalf("create shell job: %v", err)
+	}
+	backup, err := s.CreateCronJob(ctx, CronJob{
+		OrgID: "org", SandboxID: "sb-1", Schedule: "* * * * *", Kind: CronKindBackup,
+	}, past)
+	if err != nil {
+		t.Fatalf("create backup job: %v", err)
+	}
+	for _, node := range []string{"", "node-a"} {
+		due, err := s.DueCronJobs(ctx, node, time.Now().Unix(), 10)
+		if err != nil {
+			t.Fatalf("due for %q: %v", node, err)
+		}
+		if len(due) != 1 || due[0].ID != backup.ID {
+			t.Errorf("node %q: due = %v, want only the backup job (not shell job %s)", node, due, shell.ID)
+		}
 	}
 }

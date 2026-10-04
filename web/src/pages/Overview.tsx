@@ -55,7 +55,6 @@ export default function Overview() {
             <Kpi label="Logins" value={d.logins} />
             <Kpi label="Active sandboxes" value={d.active_sandboxes} />
             <Kpi label="Total created" value={d.total_created} />
-            <Kpi label="Functions" value={d.total_functions} />
             <Kpi label="Crashed" value={d.crashed_count} danger={d.crashed_count > 0} />
             <Kpi label="Templates" value={d.templates.length} />
           </div>

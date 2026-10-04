@@ -67,8 +67,6 @@ type Server struct {
 	// filesMaxBytes is the per-file cap on /files uploads, which are exempt
 	// from maxBodyBytes so a large file is bounded by a limit that names itself.
 	filesMaxBytes int64 // PD_FILES_MAX_BYTES, default 1 GiB
-	// functionFeature carries real state, unlike the empty agentFeature.
-	functionFeature
 	// imageAllowlist restricts body.Image to these registry prefixes when
 	// non-empty (PILLDROPS_IMAGE_ALLOWLIST). Empty allows any registry.
 	imageAllowlist []string
@@ -287,8 +285,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.registerBackupRoutes(route)
 	s.registerSnapshotExportRoutes(route)
 	s.registerOpsRoutes(route)
-	s.registerFunctionRoutes(route, raw)
-	s.registerCronRoutes(route)
 	s.registerIntegrationRoutes(route)
 	s.registerChatRoutes(route)
 	s.registerForwardRoutes(raw)

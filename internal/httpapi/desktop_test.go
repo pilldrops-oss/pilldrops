@@ -49,7 +49,6 @@ func newDesktopServer(t *testing.T, desktop bool) (*httptest.Server, *Server, st
 		IdleTimeout: time.Hour, HardTTL: time.Hour,
 	})
 	s := New(d, st)
-	attachTestFunctions(s, d, st, dir)
 	srv := httptest.NewServer(s.Routes())
 	t.Cleanup(srv.Close)
 	return srv, s, key

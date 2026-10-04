@@ -9,7 +9,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
-// blockingRunner holds every job inside RunInSandbox until release is closed,
+// blockingRunner holds every job inside RunBackup until release is closed,
 // recording the peak number in flight at once.
 type blockingRunner struct {
 	mu      sync.Mutex
@@ -23,7 +23,7 @@ func newBlockingRunner(n int) *blockingRunner {
 	return &blockingRunner{entered: make(chan struct{}, n), release: make(chan struct{})}
 }
 
-func (b *blockingRunner) RunInSandbox(ctx context.Context, orgID, sandboxID, cmd string) (string, int, error) {
+func (b *blockingRunner) RunBackup(ctx context.Context, orgID, sandboxID string) (string, error) {
 	b.mu.Lock()
 	b.inFler++
 	if b.inFler > b.peak {
@@ -37,7 +37,7 @@ func (b *blockingRunner) RunInSandbox(ctx context.Context, orgID, sandboxID, cmd
 	b.mu.Lock()
 	b.inFler--
 	b.mu.Unlock()
-	return "", 0, nil
+	return "bkp", nil
 }
 
 func (b *blockingRunner) peakInFlight() int {
@@ -51,7 +51,7 @@ func TestSlowJobDoesNotBlockTheJobsBehindIt(t *testing.T) {
 	const n = 3
 	due := make([]store.CronJob, 0, n)
 	for _, id := range []string{"cron_a", "cron_b", "cron_c"} {
-		due = append(due, job(id, "* * * * *", "sleep", 100))
+		due = append(due, job(id, "* * * * *", 100))
 	}
 	st := &fakeStore{due: due}
 	rn := newBlockingRunner(n)
@@ -87,7 +87,7 @@ func TestSweepConcurrencyIsBounded(t *testing.T) {
 	total := sweepConcurrency + 4
 	due := make([]store.CronJob, 0, total)
 	for i := 0; i < total; i++ {
-		due = append(due, job("cron_"+string(rune('a'+i)), "* * * * *", "sleep", 100))
+		due = append(due, job("cron_"+string(rune('a'+i)), "* * * * *", 100))
 	}
 	st := &fakeStore{due: due}
 	rn := newBlockingRunner(total)
