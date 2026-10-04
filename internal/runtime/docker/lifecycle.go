@@ -58,6 +58,11 @@ func (r *Runtime) Adopt(ctx context.Context, sandboxID string) (rt.Instance, err
 		primary: primary,
 		ports:   map[int]string{primary: host},
 	}
+	// ps reads a view dockerd updates after a state change, so just after a stop
+	// it can still say running; inspect is current, and a paused one is Running.
+	if st, err := inst.state(); err == nil {
+		live = st.Running
+	}
 	inst.casualty.Store(!live)
 	return inst, nil
 }

@@ -16,8 +16,11 @@ import (
 //
 //	ps-<sandbox id>  `ps -a` lines for that sandbox ("<cid> <state>"); a
 //	                 status=running filter keeps the running ones
+//	                 and inspect's State.Running follows them, or a docker
+//	                 start since (unknown = running)
 //	all              every sandboxd container id, for the sweep
 //	psfail           present = every ps fails, as before dockerd is up
+//	state-<cid>      inspect's state when ps lags behind it
 //	label-<cid>      the container's sandboxd.id; absent = inspect fails
 //	port-<cid>       the container's sandboxd.port label
 //	pub-<cid>-<port> the host address docker published that port on
@@ -39,10 +42,16 @@ inspect)
 	*sandboxd.id*) [ -f "$d/label-$last" ] || { echo "Error: No such object: $last" >&2; exit 1; }; cat "$d/label-$last" ;;
 	*sandboxd.runuser*) echo 1000 ;;
 	*sandboxd.port*) cat "$d/port-$last" 2>/dev/null || echo "<no value>" ;;
-	*State.Running*) echo "true false 0001-01-01T00:00:00Z" ;;
+	*State.Running*)
+		st=$(cat "$d"/ps-* 2>/dev/null | grep "^$last " | cut -d' ' -f2)
+		[ -f "$d/state-$last" ] && st=$(cat "$d/state-$last")
+		[ -f "$d/started-$last" ] && st=running
+		case "${st:-running}" in running|paused) r=true ;; *) r=false ;; esac
+		echo "$r false 0001-01-01T00:00:00Z" ;;
 	*) echo "sh -c sleep infinity" ;;
 	esac ;;
 port) cat "$d/pub-$2-${3%/tcp}" 2>/dev/null || exit 1 ;;
+start) : > "$d/started-$last" ;;
 esac
 exit 0
 `
@@ -101,6 +110,20 @@ func TestAdoptFindsAStoppedContainer(t *testing.T) {
 	}
 	if _, err := r.Adopt(t.Context(), "sb-none"); !errors.Is(err, rt.ErrNotFound) {
 		t.Errorf("a sandbox with no container: err = %v, want rt.ErrNotFound", err)
+	}
+}
+
+// Just after a docker stop, ps can still list the container as running: it reads
+// a view dockerd updates later. Adopt read that as live, so a stopped sandbox was
+// never revived. Seen in CI as "a stopped container adopted as live".
+func TestAdoptTrustsInspectOverALaggingPs(t *testing.T) {
+	fakeDockerCLI(t, map[string]string{"ps-sb-lag": "c1 running\n", "state-c1": "exited\n"})
+	inst, err := (&Runtime{}).Adopt(t.Context(), "sb-lag")
+	if err != nil {
+		t.Fatalf("not adopted: %v", err)
+	}
+	if !inst.(*dockerInstance).Casualty() {
+		t.Error("a container inspect reports stopped was adopted as live")
 	}
 }
 
