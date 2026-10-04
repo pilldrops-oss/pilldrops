@@ -35,6 +35,11 @@ func (d *Daemon) ensureRunning(ctx context.Context, id string) error {
 	default:
 		return fmt.Errorf("sandbox is %s", state)
 	}
+	// A caller already gone starts no restore; checked first because select
+	// picks at random when a fast resume and a dead ctx are both ready.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// The restore itself must finish even if the caller gives up, or the
 	// sandbox is left half-resumed; only the wait is bounded.
 	done := make(chan error, 1)
