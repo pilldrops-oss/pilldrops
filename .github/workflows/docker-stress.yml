@@ -1,0 +1,53 @@
+# Repeats the real-docker runtime tests on a hosted Linux runner, the only place
+# a docker flake shows: they skip without a daemon, and a laptop's Docker VM has
+# other timings. Run it by hand to chase a flake; it also runs once on a PR that
+# edits this file, so a change to it is seen working.
+#
+# The single-test pass hammers one test; the package pass repeats every docker
+# test in order, with -cover, the way CI's coverage step ran when
+# TestLiveAdoptRestartsAStoppedContainerWithItsData failed (2026-10-04).
+name: docker-stress
+
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: test name regex for the single-test pass
+        default: '^TestLiveAdoptRestartsAStoppedContainerWithItsData$'
+      count:
+        description: repetitions of the single-test pass
+        default: '100'
+      package_count:
+        description: repetitions of the whole docker package
+        default: '5'
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/docker-stress.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    name: Docker stress (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      # Separate runners, so a flake tied to one machine's dockerd shows as one shard.
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      RUN: ${{ inputs.run || '^TestLiveAdoptRestartsAStoppedContainerWithItsData$' }}
+      COUNT: ${{ inputs.count || '100' }}
+      PACKAGE_COUNT: ${{ inputs.package_count || '5' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.25'
+      - name: Single test, repeated
+        run: go test ./internal/runtime/docker/ -run "$RUN" -count="$COUNT" -timeout 40m
+      - name: Whole package, repeated, with coverage
+        if: ${{ !cancelled() }}
+        run: go test ./internal/runtime/docker/ -cover -count="$PACKAGE_COUNT" -timeout 40m

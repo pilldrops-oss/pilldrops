@@ -116,6 +116,7 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 	// The token stays on the node; only its hash enters the container.
 	var envdToken string
 	var cmd []string
+	var handoverDone string
 	if !service {
 		// PID 1 is otherwise `sleep infinity`, which never reaps: a killed
 		// background process stayed a zombie and still listed as running.
@@ -126,6 +127,11 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 		// start.sh is deliberately not dropped: it is the template's own baked
 		// boot script (desktop binds an X server), not tenant input.
 		handover := privilegeHandover(runUser)
+		if handover != "" {
+			// Named per boot, so one carried in a snapshot image is not mistaken for this one.
+			handoverDone = "/.pd-handover-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+			handover += ": > " + handoverDone + "; "
+		}
 
 		if cp := cliHostPath(); fileExists(cp) {
 			base = append(base, "-v", cp+":/usr/local/bin/pilldrops:ro")
@@ -176,6 +182,12 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 		return nil, dockerErr("docker run "+img, err, code, se)
 	}
 	cid := strings.TrimSpace(out)
+	if handoverDone != "" {
+		if err := waitForHandover(ctx, cid, runUser, handoverDone); err != nil {
+			_, _, _, _ = dockerOut(ctx, "rm", "-f", cid)
+			return nil, fmt.Errorf("sandbox %s: %w", spec.SandboxID, err)
+		}
+	}
 
 	// Before the container is handed out: a sandbox is never returned without
 	// the identity its row promises. Zero on a resume, which delivers nothing.
@@ -208,4 +220,30 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 func hostHasIPv6() bool {
 	_, err := os.Stat("/proc/net/if_inet6")
 	return err == nil
+}
+
+// handoverTimeout bounds the wait for PID 1's chown of the workspace, which
+// walks the whole tree on a large template; a var so tests can shrink it.
+var handoverTimeout = time.Minute
+
+// waitForHandover waits until PID 1 has handed the workspace to the run user.
+// docker run returns once the command starts, and a file written as the run
+// user before the chown lands fails with EACCES.
+func waitForHandover(ctx context.Context, cid, runUser, done string) error {
+	ctx, cancel := context.WithTimeout(ctx, handoverTimeout)
+	defer cancel()
+	for {
+		_, se, code, err := dockerOut(ctx, "exec", "--user", runUser, cid, "sh", "-c", "[ -e "+done+" ]")
+		if err == nil && code == 0 {
+			return nil
+		}
+		if strings.Contains(se, "is not running") {
+			return fmt.Errorf("container exited before handing over its workspace: %s", strings.TrimSpace(se))
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("workspace handover did not finish: %w", ctx.Err())
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
 }
