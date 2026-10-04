@@ -149,7 +149,11 @@ func TestLiveAdoptRestartsAStoppedContainerWithItsData(t *testing.T) {
 	}
 	rv := adopted.(rt.Reviver)
 	if !rv.Casualty() {
-		t.Fatal("a stopped container adopted as live")
+		// Show what docker held for this sandbox, so a failure says which container was live.
+		ps, _, _, _ := dockerOut(ctx, "ps", "-a", "--no-trunc", "--filter", "label=sandboxd.id="+id,
+			"--format", "{{.ID}} {{.State}} {{.Status}} {{.CreatedAt}}")
+		t.Fatalf("a stopped container adopted as live: stopped %s, adopted %s, docker ps:\n%s",
+			inst.(*dockerInstance).cid, adopted.(*dockerInstance).cid, ps)
 	}
 	revived, err := rv.Revive(ctx)
 	if err != nil {
