@@ -269,6 +269,7 @@ func (m *Manager) restoreFork(childID string, src ForkSource, vcpu, memMB int) (
 		NetNSPath: ns.NetNSPath, NetNSName: ns.Name,
 		Token: token, BootType: "fork",
 		MemSource: src.MemSource, LazyMem: src.MemSource != nil,
+		Egress: src.Egress,
 	}
 	machine, err := m.bootSnapshot(p)
 	if err != nil {
