@@ -31,6 +31,7 @@ func mintToken(t *testing.T, srv *httptest.Server, key string) map[string]any {
 }
 
 func TestMintJoinTokenRequiresAdminAndReturnsCommand(t *testing.T) {
+	t.Setenv("NODE_BOOTSTRAP_SECRET", "sekret")
 	s := NewServer("adminkey", "nodetoken")
 	srv := httptest.NewServer(s.Routes())
 	defer srv.Close()
@@ -183,6 +184,7 @@ func TestNodeBinaryServed(t *testing.T) {
 }
 
 func TestJoinRejectsBadTokenAndPlaintext(t *testing.T) {
+	t.Setenv("NODE_BOOTSTRAP_SECRET", "sekret")
 	s := NewServer("adminkey", "nodetoken")
 	srv := httptest.NewServer(s.Routes())
 	defer srv.Close()
@@ -200,5 +202,30 @@ func TestJoinRejectsBadTokenAndPlaintext(t *testing.T) {
 	resp2, _ := http.DefaultClient.Do(req2)
 	if resp2.StatusCode != 400 {
 		t.Fatalf("plaintext join = %d, want 400", resp2.StatusCode)
+	}
+}
+
+// A node that joins with no secret key stores every sandbox's env unsealed in
+// the shared database, so a clustered control plane refuses to mint.
+func TestMintJoinTokenRefusesWithoutBootstrapSecret(t *testing.T) {
+	t.Setenv("NODE_BOOTSTRAP_SECRET", "")
+	t.Setenv("SANDBOXD_SECRET_KEY", "")
+	s := NewServer("adminkey", "nodetoken")
+	srv := httptest.NewServer(s.Routes())
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/join-tokens", nil)
+	req.Header.Set("Authorization", "Bearer adminkey")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 503 {
+		t.Fatalf("mint with no node secret key = %d, want 503", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "NODE_BOOTSTRAP_SECRET") {
+		t.Fatalf("error does not name NODE_BOOTSTRAP_SECRET: %s", body)
 	}
 }

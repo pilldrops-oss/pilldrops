@@ -44,6 +44,14 @@ func (s *Server) handleMintJoinToken(w http.ResponseWriter, r *http.Request) {
 	if !s.requireFleetOperator(w, r) {
 		return
 	}
+	// A node handed no key seals nothing: every sandbox's env would sit in
+	// plaintext in a database every node can read.
+	if s.nodeToken != "" && s.bootstrapSecret == "" {
+		writeErr(w, 503, "orchestrator not configured: neither NODE_BOOTSTRAP_SECRET nor SANDBOXD_SECRET_KEY "+
+			"is set (refusing to mint a join token — a node joined now would store sandbox env "+
+			"unencrypted. Set SANDBOXD_SECRET_KEY, or NODE_BOOTSTRAP_SECRET to the same value)")
+		return
+	}
 	now := s.now()
 	tok := s.join.Mint(now, cluster.JoinTokenTTL)
 	orchURL := externalURL(r)

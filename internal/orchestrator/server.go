@@ -4,6 +4,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"crypto/subtle"
@@ -199,7 +200,7 @@ func NewServer(apiKey, nodeToken string) *Server {
 		fb:              newFeedbackStore(1000),
 		join:            join,
 		bootstrapDSN:    os.Getenv("NODE_BOOTSTRAP_DSN"),
-		bootstrapSecret: os.Getenv("NODE_BOOTSTRAP_SECRET"),
+		bootstrapSecret: cmp.Or(os.Getenv("NODE_BOOTSTRAP_SECRET"), os.Getenv("SANDBOXD_SECRET_KEY")), // both tiers share one key
 		sandboxDomain:   os.Getenv("PORTAL_SANDBOX_DOMAIN"),
 
 		// Buffered JSON bodies only; the node's own MAX_REQUEST_BYTES governs the streamed routes.

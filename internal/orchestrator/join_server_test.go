@@ -21,3 +21,17 @@ func TestServerHasJoinStoreAndBootstrap(t *testing.T) {
 		t.Fatalf("bootstrap config not read: dsn=%q secret=%q", s.bootstrapDSN, s.bootstrapSecret)
 	}
 }
+
+// The control plane seals with SANDBOXD_SECRET_KEY when NODE_BOOTSTRAP_SECRET
+// is unset; its nodes must get the same key, or they seal nothing at all.
+func TestJoinSecretDefaultsToTheControlPlaneKey(t *testing.T) {
+	t.Setenv("NODE_BOOTSTRAP_SECRET", "")
+	t.Setenv("SANDBOXD_SECRET_KEY", "cp-key")
+	if s := NewServer("apikey", "nodetoken"); s.bootstrapSecret != "cp-key" {
+		t.Fatalf("join secret = %q, want the control plane's SANDBOXD_SECRET_KEY", s.bootstrapSecret)
+	}
+	t.Setenv("NODE_BOOTSTRAP_SECRET", "node-key")
+	if s := NewServer("apikey", "nodetoken"); s.bootstrapSecret != "node-key" {
+		t.Fatalf("join secret = %q, want NODE_BOOTSTRAP_SECRET when it is set", s.bootstrapSecret)
+	}
+}
