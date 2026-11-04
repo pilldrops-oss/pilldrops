@@ -12,6 +12,7 @@ const testNodeKeySecret = "control-plane-only-test-secret"
 func fleetServer(apiKey, nodeToken string) *Server {
 	s := NewServer(apiKey, nodeToken)
 	s.nodeKeySecret = testNodeKeySecret
+	s.bootstrapSecret = "test-node-secret"
 	return s
 }
 
