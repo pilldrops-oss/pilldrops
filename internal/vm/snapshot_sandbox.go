@@ -253,7 +253,7 @@ func (m *Manager) RestoreSandbox(ctx context.Context, sandboxID, srcDir string, 
 		VCPU: vcpu, MemMB: memMB,
 		NetNSPath: nsPath, NetNSName: nsName,
 		Token: meta.Token, BootType: "snapshot",
-		LazyMem: lazyMemEnabled(),
+		LazyMem: lazyMemEnabled(), Egress: meta.Egress,
 	}
 	t0 := time.Now()
 	machine, err := m.bootSnapshot(p)
@@ -339,6 +339,7 @@ type restoreParams struct {
 	NodeAddr    string
 	Token       string // "" only when envd auth is off
 	BootType    string
+	Egress      *egress.Rules
 }
 
 // bootSnapshot starts the VMM on the image p names. The caller owns the network
@@ -389,6 +390,7 @@ func (m *Manager) attachRestored(p restoreParams, machine FirecrackerMachine, bo
 		BootMs:      time.Since(bootStart).Milliseconds(),
 		CreatedAt:   time.Now(),
 		Token:       p.Token,
+		Egress:      p.Egress,
 		stopTimer:   cancel, // the daemon owns TTL
 	}
 	// Take our own link to the image straight away. p.MemPath is inside a
