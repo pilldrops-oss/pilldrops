@@ -51,14 +51,10 @@ func TestBootFailsWhenTheContainerDiesBeforeTheHandover(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "dead"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	defer func(d time.Duration) { handoverTimeout = d }(handoverTimeout)
-	handoverTimeout = 5 * time.Second
-	start := time.Now()
+	// Judged by the error, not a clock: waiting out the timeout reports "did not
+	// finish", and the first run of a just-written script can take seconds.
 	err := waitForHandover(t.Context(), "c1", "1000:1000", "/.pd-handover-x")
 	if err == nil || !strings.Contains(err.Error(), "exited before handing over") {
 		t.Fatalf("err = %v, want the container's exit reported", err)
-	}
-	if time.Since(start) > time.Second {
-		t.Error("waited out the timeout for a container that had already exited")
 	}
 }
