@@ -93,6 +93,8 @@ type Server struct {
 	bootstrapDSN    string            // Postgres DSN handed to nodes on join
 	bootstrapSecret string            // SANDBOXD_SECRET_KEY handed to nodes on join
 
+	// portalOrigin is PORTAL_ORIGIN: a portal off the sandbox domain that embeds previews.
+	portalOrigin string
 	// sandboxDomain is PORTAL_SANDBOX_DOMAIN; empty means previews share the
 	// dashboard's origin. See frameAncestorsPolicy.
 	sandboxDomain string
@@ -205,6 +207,7 @@ func NewServer(apiKey, nodeToken string) *Server {
 		storeConfigured: os.Getenv("SANDBOXD_DATABASE_URL") != "",
 		bootstrapSecret: cmp.Or(os.Getenv("NODE_BOOTSTRAP_SECRET"), os.Getenv("SANDBOXD_SECRET_KEY")), // both tiers share one key
 		sandboxDomain:   os.Getenv("PORTAL_SANDBOX_DOMAIN"),
+		portalOrigin:    os.Getenv("PORTAL_ORIGIN"),
 
 		// Buffered JSON bodies only; the node's own MAX_REQUEST_BYTES governs the streamed routes.
 		maxBodyBytes:         int64(config.Int("MAX_REQUEST_BYTES", 10<<20)),

@@ -134,8 +134,37 @@ func TestFrameAncestorsPolicy(t *testing.T) {
 		{"pilldrops.com", "frame-ancestors 'self' https://pilldrops.com https://*.pilldrops.com"},
 	}
 	for _, c := range cases {
-		if got := frameAncestorsPolicy(c.domain); got != c.want {
+		if got := frameAncestorsPolicy(c.domain, ""); got != c.want {
 			t.Errorf("frameAncestorsPolicy(%q) = %q, want %q", c.domain, got, c.want)
+		}
+	}
+}
+
+// A deployment's portal may live on its own domain, and its Preview tab must
+// still embed previews. A customer hostname is never embedded by anyone.
+func TestFramePolicyAllowsTheDeploymentsPortal(t *testing.T) {
+	got := frameAncestorsPolicy("sandboxes.example.com", "https://app.example.com")
+	want := "frame-ancestors 'self' https://sandboxes.example.com https://*.sandboxes.example.com https://app.example.com"
+	if got != want {
+		t.Errorf("policy = %q, want %q", got, want)
+	}
+	if got := frameAncestorsPolicy("sandboxes.example.com", ""); strings.Contains(got, "  ") || strings.HasSuffix(got, " ") {
+		t.Errorf("no portal origin left a gap in the policy: %q", got)
+	}
+	if got := frameAncestorsPolicy("", "https://app.example.com"); got != "frame-ancestors 'none'" {
+		t.Errorf("customer host policy = %q, want framing denied", got)
+	}
+}
+
+func TestPortalOriginGuard(t *testing.T) {
+	for _, ok := range []string{"", "https://app.example.com", "https://app.example.com:8443", "http://localhost:3000"} {
+		if err := PortalOriginGuardError(ok); err != nil {
+			t.Errorf("%q refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"app.example.com", "https://", "https://app.example.com/path", "https://a.com https://evil.com", "https://a.com; script-src *", "*", "ftp://a.com", "http://app.example.com"} {
+		if err := PortalOriginGuardError(bad); err == nil {
+			t.Errorf("%q accepted", bad)
 		}
 	}
 }

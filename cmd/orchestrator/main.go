@@ -66,6 +66,9 @@ func run(ctx context.Context, stop func()) error {
 	if err := orchestrator.OrgAssertKeyGuardError(clustered, devInsecure, os.Getenv("ORG_ASSERT_KEY")); err != nil {
 		return err
 	}
+	if err := orchestrator.PortalOriginGuardError(os.Getenv("PORTAL_ORIGIN")); err != nil {
+		return err
+	}
 	if err := orchestrator.VaultKeyGuardError(clustered, devInsecure,
 		os.Getenv("ALLOW_PLAINTEXT_VAULT") == "1", os.Getenv("VAULT_SECRET_KEY")); err != nil {
 		return err
