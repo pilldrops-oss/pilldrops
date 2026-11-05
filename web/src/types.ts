@@ -1,6 +1,6 @@
 declare global {
   interface Window {
-    __SANDBOXD__: { key: string; runtime?: string; clustered?: boolean; mode?: 'user' | 'admin'; sandboxDomain?: string; posthogKey?: string }
+    __SANDBOXD__: { key: string; runtime?: string; clustered?: boolean; mode?: 'user' | 'admin'; sandboxDomain?: string; posthogKey?: string; posthogHost?: string }
   }
 }
 
