@@ -208,3 +208,32 @@ func (s *Store) ArtifactObjects(ctx context.Context, buildID string) ([]Artifact
 	}
 	return out, rows.Err()
 }
+
+// CustomTemplate is one custom image an org built: a template with a ready build.
+type CustomTemplate struct {
+	TemplateID string
+	TotalSize  int64
+	ReadyAt    int64
+}
+
+// CustomTemplatesForOrg lists org's built images, whose sf- ids customImageTag
+// makes. Snapshot captures share the table and are not listed.
+func (s *Store) CustomTemplatesForOrg(ctx context.Context, org string) ([]CustomTemplate, error) {
+	rows, err := s.query(ctx, `SELECT template_id, MAX(total_size), MAX(ready_at)
+	        FROM template_builds
+	       WHERE org_id = ? AND status = 'ready' AND template_id LIKE 'sf-%'
+	       GROUP BY template_id ORDER BY template_id`, org)
+	if err != nil {
+		return nil, fmt.Errorf("store: list custom templates: %w", err)
+	}
+	defer rows.Close()
+	var out []CustomTemplate
+	for rows.Next() {
+		var t CustomTemplate
+		if err := rows.Scan(&t.TemplateID, &t.TotalSize, &t.ReadyAt); err != nil {
+			return nil, fmt.Errorf("store: scan custom template: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}

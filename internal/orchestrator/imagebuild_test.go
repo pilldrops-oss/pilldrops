@@ -321,8 +321,11 @@ func TestAnUnpublishableBuildOnAMultiNodeFleetIsNotReportedOK(t *testing.T) {
 	f.s.artifacts.Store(nil)
 
 	code, out := f.build(t, "mytool", []byte("FROM alpine\n"))
-	if code != 200 {
+	if code != http.StatusUnprocessableEntity {
 		t.Fatalf("build returned %d: %v", code, out)
+	}
+	if msg, _ := out["error"].(string); msg == "" {
+		t.Errorf("a failed build names no error: %v", out)
 	}
 	if ok, _ := out["ok"].(bool); ok {
 		t.Fatalf("a build that could not be published on a 3-node fleet reported ok=true: %v\n"+
@@ -360,7 +363,7 @@ func TestAFailedExportDoesNotBlessAnUnfetchableBuild(t *testing.T) {
 	}
 
 	code, out := f.build(t, "mytool", []byte("FROM alpine\n"))
-	if code != 200 {
+	if code != http.StatusUnprocessableEntity {
 		t.Fatalf("build returned %d: %v", code, out)
 	}
 	if ok, _ := out["ok"].(bool); ok {

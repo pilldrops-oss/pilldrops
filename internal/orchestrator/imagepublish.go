@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -20,6 +21,8 @@ type imageBuildResponse struct {
 	OK  bool   `json:"ok"`
 	Tag string `json:"tag"`
 	Log string `json:"log,omitempty"`
+	// Error is why OK is false, for a client that reads only the error contract.
+	Error string `json:"error,omitempty"`
 
 	Build   imageBuildStep   `json:"build"`
 	Publish imagePublishStep `json:"publish"`
@@ -75,7 +78,13 @@ func (s *Server) writeImageBuild(w http.ResponseWriter, resp imageBuildResponse,
 				"a sandbox scheduled anywhere else could not run it",
 			resp.Build.Node, healthyNodes)
 	}
-	writeJSON(w, 200, resp)
+	// A 200 here read as success to anything checking only the status: curl -f, CI.
+	status := http.StatusOK
+	if !resp.OK {
+		status = http.StatusUnprocessableEntity
+		resp.Error = cmp.Or(resp.Build.Err, resp.Publish.Err, "the image build failed")
+	}
+	writeJSON(w, status, resp)
 }
 
 // publishBuiltImage pulls the built image off the node and publishes it to the
