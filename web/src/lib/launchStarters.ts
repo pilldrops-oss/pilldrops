@@ -1,36 +1,5 @@
 import type { Template } from '../types'
 
-// START_FILE is where a plain sandbox's terminal start script is written.
-export const START_FILE = '_pd_start.sh'
-
-// universalTerminalScript serves a browser terminal (ttyd) on $PORT from any
-// template. Tool availability differs per image, so it tries curl, wget and
-// node for the download and falls back to a node or python HTTP page so $PORT
-// is always bound.
-export function universalTerminalScript(): string {
-  return `#!/bin/sh
-P="\${PORT:-8000}"
-U="https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64"
-have() { command -v "$1" >/dev/null 2>&1; }
-if ! have curl && ! have wget && ! have node; then
-  (have apt-get && apt-get update -qq && apt-get install -y -qq curl) >/dev/null 2>&1
-  (have apk && apk add --no-cache curl) >/dev/null 2>&1
-fi
-if [ ! -x /usr/local/bin/ttyd ] && ! have ttyd; then
-  if have curl; then curl -fsSL "$U" -o /usr/local/bin/ttyd 2>/dev/null
-  elif have wget; then wget -qO /usr/local/bin/ttyd "$U" 2>/dev/null
-  elif have node; then node -e 'const h=require("https"),f=require("fs");(function d(u){h.get(u,{headers:{"User-Agent":"pd"}},r=>{if(r.statusCode>299&&r.headers.location)return d(r.headers.location);const w=f.createWriteStream("/usr/local/bin/ttyd");r.pipe(w);w.on("finish",()=>process.exit(0))}).on("error",()=>process.exit(1))})("https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64")' 2>/dev/null
-  fi
-  chmod +x /usr/local/bin/ttyd 2>/dev/null
-fi
-T="$(command -v ttyd || echo /usr/local/bin/ttyd)"
-[ -x "$T" ] && exec "$T" -W -p "$P" bash
-if have node; then exec node -e 'require("http").createServer((q,s)=>{s.writeHead(200,{"Content-Type":"text/html"});s.end("<h2>Sandbox is running</h2><p>Open a terminal via exec, or use the CLI.</p>")}).listen(process.env.PORT||8000)'; fi
-if have python3; then exec python3 -m http.server "$P"; fi
-if have python; then exec python -m SimpleHTTPServer "$P"; fi
-`
-}
-
 // Starter files bind $PORT so a fresh deploy always shows something.
 
 const SALES_CSV = `month,region,units,revenue
@@ -199,17 +168,4 @@ export function starterStart(tpl: Template): string | undefined {
     return 'python3 analysis.py'
   }
   return undefined
-}
-
-// universalStartBody writes the terminal script to START_FILE and runs it.
-export function universalStartBody(previewPort: number): {
-  files: Array<{ path: string; content: string }>
-  start: string
-  port: number
-} {
-  return {
-    files: [{ path: START_FILE, content: universalTerminalScript() }],
-    start: `sh ${START_FILE}`,
-    port: previewPort || 8000,
-  }
 }
