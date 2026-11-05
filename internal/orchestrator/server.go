@@ -44,6 +44,8 @@ type Server struct {
 	reg       *cluster.Registry
 	apiKey    string // bearer for client /v1 + /preview requests
 	nodeToken string // shared secret nodes present when they heartbeat
+	// storeConfigured says a store is coming, so a nil st means not open yet.
+	storeConfigured bool
 	// orgAssertKey signs X-Org-Override so a node can verify but not mint one. nil means HMAC on nodeToken.
 	orgAssertKey ed25519.PrivateKey
 	// nodeKeySecret derives per-node API keys; empty falls back to nodeToken.
@@ -200,6 +202,7 @@ func NewServer(apiKey, nodeToken string) *Server {
 		fb:              newFeedbackStore(1000),
 		join:            join,
 		bootstrapDSN:    os.Getenv("NODE_BOOTSTRAP_DSN"),
+		storeConfigured: os.Getenv("SANDBOXD_DATABASE_URL") != "",
 		bootstrapSecret: cmp.Or(os.Getenv("NODE_BOOTSTRAP_SECRET"), os.Getenv("SANDBOXD_SECRET_KEY")), // both tiers share one key
 		sandboxDomain:   os.Getenv("PORTAL_SANDBOX_DOMAIN"),
 
@@ -432,6 +435,10 @@ func (s *Server) handleLive(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	st := s.st.Load()
 	if st == nil {
+		if s.storeConfigured {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unready", "check": "database"})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "store": "not-configured"})
 		return
 	}
