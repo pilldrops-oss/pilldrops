@@ -35,4 +35,11 @@ describe('statusPill', () => {
     expect(statusPill('pending').label).toBe('Starting')
     expect(statusPill('resuming').label).toBe('Waking')
   })
+
+  it('tints its background from its text colour, so it reads on both themes', () => {
+    for (const s of ['running', 'paused', 'standby', 'failed', 'stopped', 'pending']) {
+      const p = statusPill(s)
+      expect(p.bg).toBe(`color-mix(in srgb, ${p.fg} 14%, transparent)`)
+    }
+  })
 })

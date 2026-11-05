@@ -795,7 +795,7 @@ body.dark .callout.error { border-color: rgba(220,38,38,0.3); background: rgba(2
   gap: 8px;
   flex-wrap: wrap;
 }
-.detail-access { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--sub); }
+.detail-access { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--sub); white-space: nowrap; }
 
 /* ── Metrics strip ───────────────────────────────────────────────────────── */
 .metrics-strip {
@@ -1538,7 +1538,7 @@ body.dark .term-stderr {
   padding: 16px 18px; border: 1px solid #f3d4d4; border-radius: var(--r); background: #fdf6f6; }
 .danger b { font-size: 14px; }
 .danger p { margin: 4px 0 0; }
-.btn.danger { color: #dc2626; border-color: #eab4b4; background: var(--surface); }
+.btn.danger { color: #dc2626; border-color: #eab4b4; background: var(--surface); margin: 0; padding: 8px 14px; gap: 7px; justify-content: center; }
 .btn.danger:hover { background: #dc2626; border-color: #dc2626; color: #fff; }
 
 /* Disabled buttons should read as disabled everywhere. */
@@ -3699,7 +3699,7 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
 .vault-sec-h { margin-bottom: 10px; }
 .vault-sec-note { color: var(--faint); font-weight: 400; font-size: 12px; }
 .vault-loading { padding: 14px 0; color: var(--faint); font-size: 13px; }
-.vault-empty { color: var(--faint); font-size: 13px; margin: 2px 0 14px; }
+.vault-empty { color: var(--sub); font-size: 13px; margin: 2px 0 14px; }
 
 .vault-row { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .vault-row:last-child { border-bottom: none; padding-bottom: 0; }
@@ -4518,6 +4518,7 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
 }
 
 .term-toolbar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -4573,6 +4574,13 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
 .tplcard { display: flex; flex-direction: column; }
 .tplcard-body { padding: 16px; flex: 1; }
 .tplcard-head { display: flex; align-items: center; gap: 10px; }
+.tplcard-ic { width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0; }
+.detail-actions .btn, .volume-form .btn { min-height: 38px; }
+.usage-chart { position: relative; }
+.usage-chart-scale { position: absolute; inset: 0 auto 0 0; display: flex; flex-direction: column; justify-content: space-between; padding: 2px 0; font: 11px var(--mono); color: var(--sub); font-variant-numeric: tabular-nums; pointer-events: none; }
+.volume-form { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; align-items: center; }
+.volume-form .inp:first-child { flex: 1 1 200px; min-width: 0; }
+.volume-form .btn { white-space: nowrap; }
 .tplcard-id { min-width: 0; flex: 1; }
 .tplcard-name { display: flex; align-items: baseline; gap: 8px; }
 .tplcard-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }

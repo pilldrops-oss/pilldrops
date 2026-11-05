@@ -885,7 +885,7 @@ export default function SandboxDetail() {
             disabled={busy}
             title="Copy this sandbox, memory and running processes included"
             onClick={() => doAction(
-              () => forkSandbox(id).then((f) => { navigate(`/sandbox/${f.id}`); return f }),
+              () => forkSandbox(id, sb.name ? `${sb.name}-fork` : undefined).then((f) => { navigate(`/sandbox/${f.id}`); return f }),
               undefined,
               'Forked',
             )}
@@ -957,10 +957,12 @@ export default function SandboxDetail() {
 
       <MetricsStrip id={id} status={sb.status} />
 
-      <div className="tab-bar">
+      <div className="tab-bar" role="tablist">
         {tabs.map(t => (
           <button
             key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
             className={`tab-item${tab === t.id ? ' active' : ''}`}
             onClick={() => setTab(t.id)}
           >
