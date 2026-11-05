@@ -2139,9 +2139,41 @@ func syncLog(l *zap.Logger) {
 	}
 }
 
+// startLocalEnvd starts the envd the in-process runtime talks to. A portal in
+// front of a fleet has no use for one, and envd listens on every interface with
+// a web terminal, so it starts nothing. Checked before anything else starts:
+// log.Fatal skips deferred cleanup.
+func startLocalEnvd(log *zap.Logger, bin string, proxyMode bool) (*exec.Cmd, string) {
+	if proxyMode {
+		return nil, ""
+	}
+	if _, err := os.Stat(bin); err != nil {
+		log.Fatal("envd binary not found",
+			zap.String("path", bin),
+			zap.String("fix", "go build -o "+bin+" ./cmd/envd/"),
+			zap.String("override", "set ENVD_BIN=<path> to use a different location"),
+			zap.Error(err),
+		)
+	}
+	log.Info("starting_envd", zap.String("bin", bin))
+	// Not CommandContext: envd's lifetime is managed at shutdown, not by a context.
+	cmd := exec.Command(bin) //nolint:noctx // see above
+	token, hash := sbtoken.Mint()
+	cmd.Env = append(os.Environ(), "ENVD_TOKEN_HASH="+hash)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		log.Fatal("failed to start envd", zap.Error(err))
+	}
+	return cmd, token
+}
+
 // stopEnvd kills and reaps the shared envd child. Early-exit paths call it
 // directly because log.Fatal skips defers.
 func stopEnvd(log *zap.Logger, envdCmd *exec.Cmd) {
+	if envdCmd == nil {
+		return
+	}
 	if err := envdCmd.Process.Kill(); err != nil {
 		log.Warn("envd_kill_failed", zap.Error(err))
 	}
@@ -2178,26 +2210,15 @@ func main() {
 		}
 	}
 
-	envdBin := config.Str("ENVD_BIN", "./bin/envd-local")
-	if _, err := os.Stat(envdBin); err != nil {
-		log.Fatal("envd binary not found",
-			zap.String("path", envdBin),
-			zap.String("fix", "go build -o "+envdBin+" ./cmd/envd/"),
-			zap.String("override", "set ENVD_BIN=<path> to use a different location"),
-			zap.Error(err),
-		)
-	}
+	orchURL := os.Getenv("PORTAL_ORCHESTRATOR_URL")
+	orchKey := os.Getenv("PORTAL_ORCHESTRATOR_KEY")
+	// The in-process runtime shells out on this host, so it must be opted
+	// into explicitly; see execmode.go.
+	execWhere := sandboxExecMode(orchURL, orchKey, os.Getenv(PortalLocalRuntimeEnv))
+	proxyMode := execWhere == execProxy
 
-	log.Info("starting_envd", zap.String("bin", envdBin))
-	// Not CommandContext: envd's lifetime is managed at shutdown, not by a context.
-	envdCmd := exec.Command(envdBin) //nolint:noctx // see above
-	envdToken, envdHash := sbtoken.Mint()
-	envdCmd.Env = append(os.Environ(), "ENVD_TOKEN_HASH="+envdHash)
-	envdCmd.Stdout = os.Stdout
-	envdCmd.Stderr = os.Stderr
-	if err := envdCmd.Start(); err != nil {
-		log.Fatal("failed to start envd", zap.Error(err))
-	}
+	envdBin := config.Str("ENVD_BIN", "./bin/envd-local")
+	envdCmd, envdToken := startLocalEnvd(log, envdBin, proxyMode)
 	// Nothing above this point may defer: log.Fatal skips defers.
 	defer syncLog(log)
 	defer stopEnvd(log, envdCmd)
@@ -2205,9 +2226,11 @@ func main() {
 	bootCtx, stopBoot := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopBoot()
 
-	// Give envd a moment to come up.
-	time.Sleep(1 * time.Second)
-	log.Info("envd_started", zap.Int("pid", envdCmd.Process.Pid))
+	if envdCmd != nil {
+		// Give envd a moment to come up.
+		time.Sleep(1 * time.Second)
+		log.Info("envd_started", zap.Int("pid", envdCmd.Process.Pid))
+	}
 
 	mgr := NewDevManager(envdBin, log)
 	mgr.envdToken = envdToken
@@ -2238,8 +2261,6 @@ func main() {
 
 	// With an orchestrator configured, fleet paths are proxied to it; the
 	// portal enforces tenancy over the single orchestrator org.
-	orchURL := os.Getenv("PORTAL_ORCHESTRATOR_URL")
-	orchKey := os.Getenv("PORTAL_ORCHESTRATOR_KEY")
 	// Preview tokens are HMAC'd with PREVIEW_SECRET, falling back to the
 	// orchestrator key. Empty means preview gating is off.
 	if s := os.Getenv("PREVIEW_SECRET"); s != "" {
@@ -2247,11 +2268,6 @@ func main() {
 	} else if orchKey != "" {
 		previewSecret = previewtoken.BrowserKey(orchKey)
 	}
-	// The in-process runtime shells out on this host, so it must be opted
-	// into explicitly; see execmode.go.
-	execWhere := sandboxExecMode(orchURL, orchKey, os.Getenv(PortalLocalRuntimeEnv))
-	proxyMode := execWhere == execProxy
-
 	// Secrets vault: PORTAL_VAULT_KEY, else the orchestrator key, else the dev
 	// key. Rotating the material makes stored ciphertexts undecryptable.
 	vaultPath := os.Getenv("PORTAL_VAULT_FILE")
