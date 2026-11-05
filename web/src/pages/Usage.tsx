@@ -32,7 +32,9 @@ function TimeChart({ points }: { points: UsagePoint[] }) {
   const poly = `${coords.join(' ')} ${W},${H} 0,${H}`
 
   return (
-    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+    <div className="usage-chart">
+    <div className="usage-chart-scale" aria-label={`Scale from 0 to ${max} sandboxes`}><span>{max}</span><span>0</span></div>
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={`Concurrent sandboxes, peak ${max}`}>
       <defs>
         <linearGradient id="ug" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="var(--chartink)" stopOpacity=".10" />
@@ -53,6 +55,7 @@ function TimeChart({ points }: { points: UsagePoint[] }) {
         />
       )}
     </svg>
+    </div>
   )
 }
 

@@ -560,30 +560,33 @@ function EmptyState({ onLaunch }: { onLaunch: (templateId?: string) => void }) {
   )
 }
 
+// A fixed pastel stays bright on the dark theme; a tint of the text colour reads on both.
+const tint = (fg: string) => `color-mix(in srgb, ${fg} 14%, transparent)`
+
 export function statusPill(status: string): { label: string; bg: string; fg: string } {
   switch (status) {
     case 'crashed':
     case 'failed':
-      return { label: 'Crashed', bg: '#FEE2E2', fg: '#DC2626' }
+      return { label: 'Crashed', bg: tint('#DC2626'), fg: '#DC2626' }
     case 'exited':
     case 'stopped':
-      return { label: status === 'stopped' ? 'Stopped' : 'Exited', bg: '#F3F4F6', fg: '#6B7280' }
+      return { label: status === 'stopped' ? 'Stopped' : 'Exited', bg: tint('#6B7280'), fg: '#6B7280' }
     case 'paused':
-      return { label: 'Paused', bg: '#FEF3C7', fg: '#D97706' }
+      return { label: 'Paused', bg: tint('#D97706'), fg: '#D97706' }
     // Standby is frozen in RAM, not written to disk: it wakes in milliseconds
     // and its own colour says it is nearer running than paused.
     case 'standby':
-      return { label: 'Standby', bg: '#DBEAFE', fg: '#2563EB' }
+      return { label: 'Standby', bg: tint('#2563EB'), fg: '#2563EB' }
     case 'pending':
-      return { label: 'Starting', bg: '#FEF3C7', fg: '#D97706' }
+      return { label: 'Starting', bg: tint('#D97706'), fg: '#D97706' }
     case 'pausing':
-      return { label: 'Pausing', bg: '#FEF3C7', fg: '#D97706' }
+      return { label: 'Pausing', bg: tint('#D97706'), fg: '#D97706' }
     case 'resuming':
-      return { label: 'Waking', bg: '#FEF3C7', fg: '#D97706' }
+      return { label: 'Waking', bg: tint('#D97706'), fg: '#D97706' }
     case 'running':
-      return { label: 'Running', bg: '#DCFCE7', fg: '#16A34A' }
+      return { label: 'Running', bg: tint('#16A34A'), fg: '#16A34A' }
     default:
-      return { label: status || 'Unknown', bg: '#F3F4F6', fg: '#6B7280' }
+      return { label: status || 'Unknown', bg: tint('#6B7280'), fg: '#6B7280' }
   }
 }
 

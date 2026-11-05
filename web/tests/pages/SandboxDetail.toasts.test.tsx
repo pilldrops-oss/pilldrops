@@ -70,7 +70,7 @@ describe('sandbox detail success toasts (B22 toasts item)', () => {
   it('shows a success toast after saving the slug', async () => {
     vi.mocked(api.setSandboxSlug).mockResolvedValue({ ...sb, slug: 'myapp' })
     renderPage()
-    await userEvent.click(await screen.findByRole('button', { name: 'Info' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Info' }))
     const input = await screen.findByLabelText('Sandbox slug')
     await userEvent.type(input, 'myapp')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))

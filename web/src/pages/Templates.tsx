@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { TemplateIcon } from '../components/templateIcons'
 import { useNavigate, Link } from 'react-router-dom'
 import { listTemplates } from '../api'
 import type { Template } from '../types'
@@ -20,7 +21,7 @@ function TemplateCard({ tpl }: { tpl: Template }) {
     <div className="panel tplcard">
       <div className="tplcard-body">
         <div className="tplcard-head">
-          <span style={{ fontSize: 22, lineHeight: 1 }}>{tpl.icon || '📦'}</span>
+          <div className="ic tplcard-ic"><TemplateIcon t={tpl} /></div>
           <div className="tplcard-id">
             <div className="tplcard-name">
               <h2 style={{ margin: 0, fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tpl.name}</h2>
@@ -87,8 +88,7 @@ export default function Templates() {
           <h1 className="h1">Templates</h1>
           <p>
             Every environment you can launch.{' '}
-            <Link to="/deploy">Open the catalog →</Link> to search, filter by
-            category and see hourly cost.
+            <Link to="/deploy">Open the catalog →</Link> to search and filter by category.
           </p>
         </div>
       </div>

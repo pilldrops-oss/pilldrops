@@ -76,7 +76,7 @@ describe('sandbox detail (U4)', () => {
     vi.mocked(api.getSandbox).mockResolvedValue({ ...sb, boot_type: '', boot_ms: 0 })
     renderPage({ sandbox: { ...sb, boot_type: 'cold', boot_ms: 999 } })
     await waitFor(() => expect(api.getSandbox).toHaveBeenCalled())
-    await userEvent.click(screen.getByRole('button', { name: 'Info' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'Info' }))
     const bootType = await screen.findByText('Boot type')
     expect(bootType.closest('.info-row')?.textContent).toContain('—')
     expect(screen.getByText('Boot time').closest('.info-row')?.textContent).toContain('—')
@@ -85,8 +85,8 @@ describe('sandbox detail (U4)', () => {
   it('keeps the same terminal across a tab switch', async () => {
     renderPage()
     const pty = await screen.findByTestId('pty')
-    await userEvent.click(screen.getByRole('button', { name: 'Files' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Terminal' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'Files' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'Terminal' }))
     expect(screen.getByTestId('pty')).toBe(pty)
   })
 

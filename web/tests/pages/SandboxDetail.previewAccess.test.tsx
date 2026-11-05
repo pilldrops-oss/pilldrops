@@ -90,3 +90,22 @@ describe('sandbox detail preview access', () => {
     expect(screen.queryByRole('combobox', { name: 'Preview' })).toBeNull()
   })
 })
+
+describe('SandboxDetail tabs and fork', () => {
+  it('exposes its sections as tabs and marks the open one', async () => {
+    renderPage()
+    const tabs = await screen.findAllByRole('tab')
+    expect(tabs.map(t => t.textContent)).toContain('Files')
+    expect(tabs.filter(t => t.getAttribute('aria-selected') === 'true')).toHaveLength(1)
+    expect(screen.getByRole('tablist')).toBeTruthy()
+    await userEvent.click(screen.getByRole('tab', { name: 'Files' }))
+    expect(screen.getByRole('tab', { name: 'Files' }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('names a fork after the sandbox it came from', async () => {
+    const fork = vi.spyOn(api, 'forkSandbox').mockResolvedValue({ id: 'sb2' } as never)
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Fork' }))
+    await waitFor(() => expect(fork).toHaveBeenCalledWith('sb1', 'my-app-fork'))
+  })
+})
