@@ -89,7 +89,11 @@ func (s *Server) requirePreviewToken(next http.Handler) http.Handler {
 				return
 			}
 			// The verified org is what makes daemon.PreviewTarget fail closed.
-			next.ServeHTTP(w, r.WithContext(proxy.WithPreviewOrg(r.Context(), org)))
+			ctx := proxy.WithPreviewOrg(r.Context(), org)
+			if s.previewVerifiesAsym() {
+				ctx = proxy.WithControlPlaneHop(ctx)
+			}
+			next.ServeHTTP(w, r.WithContext(ctx))
 		case previewAuthUnconfigured:
 			writeErr(w, http.StatusServiceUnavailable, "preview gating unavailable: no preview secret configured")
 		case previewAuthNotFound:

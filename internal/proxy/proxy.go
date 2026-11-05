@@ -4,6 +4,7 @@ package proxy
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -170,6 +171,10 @@ func Forward(w http.ResponseWriter, req *http.Request, target, targetPath, errBo
 // so node-held credentials never appear on req.
 func ForwardWithHeader(w http.ResponseWriter, req *http.Request, target, targetPath, errBody string, extra http.Header) {
 	origHost, origProto := req.Host, forwardedProto(req)
+	if req.Context().Value(controlPlaneHopKey{}) != nil {
+		origHost = cmp.Or(req.Header.Get("X-Forwarded-Host"), origHost)
+		origProto = cmp.Or(req.Header.Get("X-Forwarded-Proto"), origProto)
+	}
 	upstreamQuery := withoutPreviewCredentials(req.URL.RawQuery)
 	rp := &httputil.ReverseProxy{
 		Transport: transport,
