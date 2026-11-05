@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"go.uber.org/zap"
+)
 
 // A half-configured fleet (URL set, key empty) must refuse rather than fall
 // through to host execution, which runs with the portal's own secrets.
@@ -42,4 +46,12 @@ func TestRefuseModeIsNotSuccess(t *testing.T) {
 	if unset != execRefuse {
 		t.Errorf("zero value of execMode = %v, want execRefuse — unset must fail closed", unset)
 	}
+}
+
+func TestAPortalInFrontOfAFleetStartsNoEnvd(t *testing.T) {
+	cmd, token := startLocalEnvd(zap.NewNop(), "/nonexistent/envd", true)
+	if cmd != nil || token != "" {
+		t.Fatalf("proxy mode started envd: %v %q", cmd, token)
+	}
+	stopEnvd(zap.NewNop(), nil)
 }
