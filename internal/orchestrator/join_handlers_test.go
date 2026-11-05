@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -143,6 +146,63 @@ func TestInstallScriptServed(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("install.sh missing %q", want)
 		}
+	}
+}
+
+// `enable --now` leaves a running service alone, so re-running the installer wrote
+// a new identity and kept serving as the old, possibly revoked, one.
+func TestInstallScriptRestartsARunningNode(t *testing.T) {
+	if strings.Contains(string(installScript), "enable --now sandboxd") ||
+		!strings.Contains(string(installScript), "sudo systemctl restart sandboxd\n") {
+		t.Error("install.sh must restart sandboxd so a re-run takes the new identity")
+	}
+}
+
+// Restart=always with systemd's default 100ms delay burns the start limit in a
+// second, so a brief database outage at boot leaves the node failed for good.
+func TestInstallScriptUnitRestartsLikePackaging(t *testing.T) {
+	packaged, err := os.ReadFile("../../packaging/sandboxd.service")
+	if err != nil {
+		t.Fatalf("reading packaging/sandboxd.service: %v", err)
+	}
+	directive := regexp.MustCompile(`(?m)^Restart(Sec)?=\S+$`)
+	want := directive.FindAllString(string(packaged), -1)
+	got := directive.FindAllString(string(installScript), -1)
+	if len(want) == 0 || !slices.Equal(got, want) {
+		t.Errorf("install.sh restarts with %v, packaging/sandboxd.service with %v", got, want)
+	}
+}
+
+// `systemctl restart` returns once the unit is queued, so a node that refuses to
+// start still looked installed. Runs the script's last step against a
+// stubbed curl: the node answering or not is the only thing that differs.
+func TestInstallScriptReportsANodeThatDidNotStart(t *testing.T) {
+	_, tail, found := strings.Cut(string(installScript), "sudo systemctl restart sandboxd\n")
+	if !found {
+		t.Fatal("install.sh no longer restarts sandboxd")
+	}
+	run := func(curlExit string) (string, error) {
+		dir := t.TempDir()
+		for name, body := range map[string]string{"curl": "exit " + curlExit, "sleep": "exit 0", "sudo": "exit 0"} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cmd := exec.Command("sh", "-c", "set -eu\n"+tail)
+		cmd.Env = []string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH")}
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	if out, err := run("0"); err != nil || !strings.Contains(out, "node started") {
+		t.Errorf("a node that answers: err=%v, output %q", err, out)
+	}
+	out, err := run("7")
+	if err == nil {
+		t.Errorf("a node that never answers exited 0: %q", out)
+	}
+	if strings.Contains(out, "node started") {
+		t.Errorf("a node that never answers was reported started: %q", out)
 	}
 }
 

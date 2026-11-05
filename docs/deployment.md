@@ -975,8 +975,9 @@ A node is handed a Postgres DSN at join and shares the control plane's database.
 Do not hand it the owner role:
 
 ```bash
-psql "$SUPERUSER_DSN" -v node_password="'…'" -f scripts/postgres-node-role.sql
-# then hand nodes: postgres://pilldrops_node:…@host/db
+psql "$SUPERUSER_DSN" -v node_password="$NODE_PASSWORD" -f scripts/postgres-node-role.sql
+# then hand nodes: postgres://pilldrops_node:$NODE_PASSWORD@host/db
+# Pass the password raw: the script quotes it, so quotes here become part of it.
 ```
 
 That revokes the tables node code never touches — `vault_secrets`,

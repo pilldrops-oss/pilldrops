@@ -116,7 +116,8 @@ Requires=sandbox-egress-restore.service
 [Service]
 EnvironmentFile=/etc/sandboxd.env
 ExecStart=${BIN_DIR}/sandboxd-linux
-Restart=always
+Restart=on-failure
+RestartSec=3
 # Turns the fail-closed guards ON: ProductionDBError, IsolationGuardError,
 # StorageCapGuardError, SnapshotGuardError. Without it every one is inert.
 Environment=SANDBOXD_PRODUCTION=1
@@ -127,5 +128,19 @@ NoNewPrivileges=yes
 WantedBy=multi-user.target
 UNIT
 sudo systemctl daemon-reload
-sudo systemctl enable --now sandboxd
+sudo systemctl enable sandboxd
+# restart, not enable --now: a re-run must replace a running node's identity.
+sudo systemctl restart sandboxd
+
+# systemctl returns once the unit is queued, so ask the node itself.
+tries=0
+until curl -fsS --max-time 2 -o /dev/null http://127.0.0.1:18080/health; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 60 ]; then
+    echo "sandforge: the node did not come up. Its log:" >&2
+    sudo journalctl -u sandboxd -n 20 --no-pager >&2 || true
+    exit 1
+  fi
+  sleep 2
+done
 echo "sandforge: node started — check the fleet in the orchestrator console."
