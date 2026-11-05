@@ -1,7 +1,9 @@
 package nodeboot
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"reflect"
 	"regexp"
@@ -177,5 +179,34 @@ func TestTheHeartbeatSendsTheCapabilityKeysTheControlPlaneReads(t *testing.T) {
 			t.Errorf(`the payload no longer sends "%s": %s — the control plane reads that exact `+
 				`key, so the fleet would report this capability false on every node`, key, caps)
 		}
+	}
+}
+
+// A node whose heartbeat is refused is never scheduled, and the control plane
+// logs nothing either, so the node has to say so. Once per change, not per beat.
+func TestHeartbeatFailuresAreLoggedOncePerChange(t *testing.T) {
+	var logged bytes.Buffer
+	defer func(prev *slog.Logger) { slog.SetDefault(prev) }(slog.Default())
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+
+	var failure heartbeatFailure
+	beats := []struct {
+		reason string
+		want   int
+	}{
+		{"status 401", 1},
+		{"status 401", 1},
+		{"status 503", 2},
+		{"", 2},
+		{"status 401", 3},
+	}
+	for i, beat := range beats {
+		failure.note(beat.reason, "e2e-node")
+		if got := strings.Count(logged.String(), "\n"); got != beat.want {
+			t.Fatalf("after beat %d (%q): %d log lines, want %d:\n%s", i, beat.reason, got, beat.want, logged.String())
+		}
+	}
+	if !strings.Contains(logged.String(), "status 401") {
+		t.Errorf("the log does not name the reason:\n%s", logged.String())
 	}
 }

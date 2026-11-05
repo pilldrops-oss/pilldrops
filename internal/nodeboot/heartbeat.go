@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"net"
@@ -93,6 +94,18 @@ func parseLabels(s string) map[string]string {
 	return out
 }
 
+// heartbeatFailure logs a failing heartbeat when the reason changes, not on every
+// beat. An empty reason means the beat succeeded.
+type heartbeatFailure struct{ last string }
+
+func (f *heartbeatFailure) note(reason, nodeID string) {
+	if reason != "" && reason != f.last {
+		slog.Error("heartbeat failing: the orchestrator will not schedule this node",
+			"component", "node", "node_id", nodeID, "reason", reason)
+	}
+	f.last = reason
+}
+
 // StartHeartbeat posts this node's capacity to ORCHESTRATOR_URL every 5s; no-op
 // when unset. bootable is re-evaluated per beat so a newly published image is
 // advertised without a restart.
@@ -136,6 +149,7 @@ func StartHeartbeat(ctx context.Context, d *daemon.Daemon, dataDir, selfURL, run
 	// caught up. Only an accepted beat counts, so a refused one from a clock
 	// that ran too far ahead is not carried forward once the clock is fixed.
 	var accepted int64 // send runs on one goroutine
+	var failure heartbeatFailure
 	send := func() {
 		ctx, cancel := context.WithTimeout(ctx, heartbeatTimeout)
 		defer cancel()
@@ -214,12 +228,16 @@ func StartHeartbeat(ctx context.Context, d *daemon.Daemon, dataDir, selfURL, run
 		}
 		resp, err := client.Do(req)
 		if err != nil {
+			failure.note("orchestrator unreachable", nodeID)
 			return // try again next tick
 		}
 		resp.Body.Close()
-		if resp.StatusCode/100 == 2 {
-			accepted = ts
+		if resp.StatusCode/100 != 2 {
+			failure.note(fmt.Sprintf("status %d", resp.StatusCode), nodeID)
+			return
 		}
+		accepted = ts
+		failure.note("", nodeID)
 	}
 
 	slog.Info("clustering on; heartbeating to the orchestrator",
