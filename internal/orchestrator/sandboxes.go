@@ -541,7 +541,7 @@ func (s *Server) handleSandboxGet(w http.ResponseWriter, r *http.Request) {
 		// on it restores it elsewhere. A read does not start that download.
 		if rec, orphaned := s.orphanedPaused(r, id); orphaned {
 			writeJSON(w, http.StatusOK, map[string]any{
-				"id": rec.ID, "name": rec.Name, "template": rec.Template, "state": "paused",
+				"id": rec.ID, "name": rec.Name, "template": rec.Template, "status": "paused",
 				"vcpu": rec.VCPU, "memory_mb": rec.MemMiB, "created_at": rec.CreatedAt,
 				"note": "its node is gone; resuming restores it on another node from its archived snapshot",
 			})
