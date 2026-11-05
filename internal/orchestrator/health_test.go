@@ -55,6 +55,30 @@ func TestReadinessFollowsTheStore(t *testing.T) {
 	}
 }
 
+// The store opens in the background, and until it does store-backed routes answer
+// 503. A replica must not enter rotation during that, or if the open failed.
+func TestReadinessWaitsForAConfiguredStore(t *testing.T) {
+	t.Setenv("SANDBOXD_DATABASE_URL", "postgres://example.invalid/db")
+	st, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+	s := NewServer("apikey", "nodetoken")
+	srv := httptest.NewServer(s.Routes())
+	defer srv.Close()
+
+	if code, body := probe(t, srv, "/readyz"); code != http.StatusServiceUnavailable {
+		t.Errorf("GET /readyz before a configured store opens = %d (%s), want 503", code, body)
+	}
+
+	s.SetStore(st)
+
+	if code, body := probe(t, srv, "/readyz"); code != http.StatusOK {
+		t.Errorf("GET /readyz after the store opened = %d (%s), want 200", code, body)
+	}
+}
+
 // A dependency-checking liveness probe restarts a healthy process during a store outage.
 func TestLivenessIgnoresTheStore(t *testing.T) {
 	st, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "state.db"))
