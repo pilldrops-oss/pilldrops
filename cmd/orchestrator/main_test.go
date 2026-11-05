@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
 // These tests assert that run reaches each boot guard; the guards themselves
@@ -114,5 +119,35 @@ func TestRunRefusesAnEdgeWithNoRedis(t *testing.T) {
 	err := run(t.Context(), func() {})
 	if err == nil || !strings.Contains(err.Error(), "REDIS_URL") {
 		t.Fatalf("an edge with no shared route table started (err=%v); it would 404 every sandbox", err)
+	}
+}
+
+// A database that is down when the control plane boots must not leave it
+// unready until someone restarts it: the process is alive, so systemd will not.
+func TestOpenStoreRetriesUntilTheDatabaseIsUp(t *testing.T) {
+	want, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = want.Close() })
+	attempts := 0
+	open := func(context.Context, string) (*store.Store, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, errors.New("connection refused")
+		}
+		return want, nil
+	}
+	if got := openStoreWithRetry(t.Context(), "dsn", open, time.Millisecond); got != want || attempts != 3 {
+		t.Fatalf("got store %v after %d attempts, want the store on attempt 3", got, attempts)
+	}
+}
+
+func TestOpenStoreStopsRetryingOnShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	open := func(context.Context, string) (*store.Store, error) { return nil, errors.New("connection refused") }
+	if got := openStoreWithRetry(ctx, "dsn", open, time.Hour); got != nil {
+		t.Fatalf("got store %v after shutdown, want nil", got)
 	}
 }

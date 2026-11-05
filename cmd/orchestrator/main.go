@@ -83,11 +83,7 @@ func run(ctx context.Context, stop func()) error {
 	var db atomic.Pointer[store.Store]
 	if dsn := os.Getenv("SANDBOXD_DATABASE_URL"); dsn != "" {
 		go func() {
-			if st, err := store.Open(ctx, dsn); err != nil {
-				slog.Error("SANDBOXD_DATABASE_URL is set but the store could not be opened; "+
-					"admin analytics will proxy to nodes instead",
-					"component", "orchestrator", "err", err)
-			} else {
+			if st := openStoreWithRetry(ctx, dsn, store.Open, storeOpenRetry); st != nil {
 				// VAULT_SECRET_KEY is deliberately not in the node join bundle, so a
 				// node cannot read a tenant's provider credential from the shared DB.
 				if err := st.SetSecretKey(os.Getenv("SANDBOXD_SECRET_KEY")); err != nil {
@@ -243,4 +239,25 @@ func run(ctx context.Context, stop func()) error {
 		}
 	}
 	return exitErr
+}
+
+const storeOpenRetry = 5 * time.Second
+
+// openStoreWithRetry tries until the store opens or ctx ends, which returns nil.
+// A database down at boot would otherwise need this process restarted by hand:
+// it stays alive and unready, so nothing restarts it.
+func openStoreWithRetry(ctx context.Context, dsn string, open func(context.Context, string) (*store.Store, error), wait time.Duration) *store.Store {
+	for {
+		st, err := open(ctx, dsn)
+		if err == nil {
+			return st
+		}
+		slog.Error("SANDBOXD_DATABASE_URL is set but the store could not be opened; retrying, and not ready until it does",
+			"component", "orchestrator", "retry_in", wait.String(), "err", err)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(wait):
+		}
+	}
 }
