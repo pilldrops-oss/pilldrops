@@ -12,15 +12,13 @@ import (
 
 // VaultSecret is one org-scoped named entry, injected into sandboxes via
 // secret_refs or auto_inject. Name doubles as the env var, so it must be a
-// valid identifier. Kind is "secret" (sealed: list returns Last4 only) or
+// valid identifier. Kind is "secret" (sealed: list returns no value) or
 // "env" (readable: list returns Value).
 type VaultSecret struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`
 	// AutoInject adds the entry to every sandbox the org creates.
 	AutoInject bool `json:"auto_inject"`
-	// Last4 lets the UI show a hint without exposing the key.
-	Last4 string `json:"last4"`
 	// Value is set only for kind "env", never for a sealed secret.
 	Value string `json:"value,omitempty"`
 	// Scope is which sandboxes this may be injected into: "all" (default),
@@ -91,10 +89,8 @@ func (s *Store) putSecret(ctx context.Context, orgID, name, value string, secret
 	if err != nil {
 		return VaultSecret{}, err
 	}
-	last4 := value
-	if len(last4) > 4 {
-		last4 = last4[len(last4)-4:]
-	}
+	// The column stays empty: even part of a secret must not come back.
+	const last4 = ""
 	kind := VaultKindEnv
 	if secret {
 		kind = VaultKindSecret
@@ -131,7 +127,7 @@ func (s *Store) putSecret(ctx context.Context, orgID, name, value string, secret
 		}
 		stored = auto == 1
 	}
-	out := VaultSecret{Name: name, Kind: kind, AutoInject: stored, Last4: last4,
+	out := VaultSecret{Name: name, Kind: kind, AutoInject: stored,
 		Scope: ScopeAll, CreatedBy: owner, CreatedAt: now, UpdatedAt: now}
 	if kind == VaultKindEnv {
 		out.Value = value
@@ -145,9 +141,9 @@ func (s *Store) ListSecrets(ctx context.Context, orgID string) ([]VaultSecret, e
 		`SELECT name, value, last4, kind, auto_inject, scope, created_by, created_at, updated_at FROM vault_secrets
 		 WHERE org_id = ? ORDER BY name`, []any{orgID},
 		func(rows *sql.Rows, v *VaultSecret) error {
-			var enc string
+			var enc, unused string
 			var auto int
-			if err := rows.Scan(&v.Name, &enc, &v.Last4, &v.Kind, &auto, &v.Scope, &v.CreatedBy, &v.CreatedAt, &v.UpdatedAt); err != nil {
+			if err := rows.Scan(&v.Name, &enc, &unused, &v.Kind, &auto, &v.Scope, &v.CreatedBy, &v.CreatedAt, &v.UpdatedAt); err != nil {
 				return err
 			}
 			v.AutoInject = auto == 1

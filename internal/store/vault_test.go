@@ -1,7 +1,9 @@
 package store
 
 import (
+	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -25,9 +27,6 @@ func TestSecretRoundTrips(t *testing.T) {
 	got, err := s.PutSecret(ctx, "u:acme", "ANTHROPIC_API_KEY", "sk-ant-secret-abcd", true, false)
 	if err != nil {
 		t.Fatalf("put: %v", err)
-	}
-	if got.Last4 != "abcd" {
-		t.Errorf("last4 = %q, want abcd", got.Last4)
 	}
 	if got.Value != "" {
 		t.Errorf("Put returned the credential: %q", got.Value)
@@ -82,7 +81,7 @@ func TestEnvKindIsReadableAndSecretIsSealed(t *testing.T) {
 	for _, v := range list {
 		switch v.Name {
 		case "BAR":
-			if v.Value != "" || v.Last4 != "wxyz" || v.Kind != VaultKindSecret || v.AutoInject {
+			if v.Value != "" || v.Kind != VaultKindSecret || v.AutoInject {
 				t.Errorf("sealed secret listed as %+v", v)
 			}
 		case "FOO":
@@ -201,5 +200,25 @@ func TestPutSecretKeepingAutoInject(t *testing.T) {
 	}
 	if v, _, _ := s.SecretValue(ctx, "u:acme", "TOK"); v != "v2" {
 		t.Errorf("value = %q, want v2", v)
+	}
+}
+
+// Even the end of a secret helps an attacker and proves nothing to its owner.
+func TestListedSecretCarriesNoPartOfItsValue(t *testing.T) {
+	s := vaultStore(t)
+	if _, err := s.PutSecret(t.Context(), "u:acme", "K", "sk-secret-wxyz", true, false); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListSecrets(t.Context(), "u:acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(list)
+	if strings.Contains(string(b), "wxyz") {
+		t.Errorf("listed secret shows part of its value: %s", b)
+	}
+	var stored string
+	if err := s.db.QueryRowContext(t.Context(), `SELECT last4 FROM vault_secrets WHERE name = 'K'`).Scan(&stored); err != nil || stored != "" {
+		t.Errorf("last4 column = %q (err %v), want empty", stored, err)
 	}
 }

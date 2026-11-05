@@ -59,7 +59,7 @@ describe('Vault — custom secrets', () => {
 
   it('replaces the value of an existing secret under the same name, without touching auto-inject', async () => {
     vi.mocked(api.listSecrets).mockResolvedValue([
-      { name: 'AAA', kind: 'secret', auto_inject: false, last4: 'sdad', created_at: '2026-10-01T00:00:00Z' },
+      { name: 'AAA', kind: 'secret', auto_inject: false, created_at: '2026-10-01T00:00:00Z' },
     ] as never)
     const user = userEvent.setup()
     renderVault()
@@ -90,7 +90,7 @@ describe('Vault — custom secrets', () => {
 
   it('toggles an existing secret’s auto-inject flag on its own, without the value', async () => {
     vi.mocked(api.listSecrets).mockResolvedValue([
-      { name: 'OPENAI_KEY', auto_inject: true, last4: 'abcd', created_at: '', updated_at: '' },
+      { name: 'OPENAI_KEY', auto_inject: true, created_at: '', updated_at: '' },
     ])
     const user = userEvent.setup()
     renderVault()

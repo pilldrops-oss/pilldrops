@@ -2975,7 +2975,7 @@ func main() {
 
 		registerAPIKeyRoutes(r, keyStore, ownerID)
 
-		// Vault: provider keys stored encrypted, listed name+last4 only,
+		// Vault: provider keys stored encrypted, listed by name only,
 		// injected into creates via secret_refs.
 		registerVaultRoutes(r, vault, ownerID)
 

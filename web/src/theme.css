@@ -3734,7 +3734,6 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
 }
 .vault-input { flex: 1; min-width: 190px; }
 .vault-ok { color: var(--primbg); border-color: var(--greenline); background: var(--greensoft); }
-.vault-last4 { color: var(--faint); font-family: var(--mono); font-size: 12px; }
 
 .vault-custom-row {
   display: flex;

@@ -13,8 +13,8 @@ const tpl = { id: 'node', has_server: false } as Template
 describe('vault secrets at launch', () => {
   beforeEach(() => {
     vi.mocked(api.listSecrets).mockReset().mockResolvedValue([
-      { name: 'DB_URL', last4: 'abcd', created_at: '', updated_at: '' },
-      { name: 'ALWAYS', last4: 'wxyz', auto_inject: true, created_at: '', updated_at: '' },
+      { name: 'DB_URL', created_at: '', updated_at: '' },
+      { name: 'ALWAYS', auto_inject: true, created_at: '', updated_at: '' },
     ])
   })
 

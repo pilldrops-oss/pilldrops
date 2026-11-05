@@ -31,13 +31,11 @@ import (
 type VaultSecret struct {
 	Name  string `json:"name"`
 	Owner string `json:"owner,omitempty"`
-	// Kind is "secret" (sealed; List returns Last4 only) or "env" (List returns Value).
+	// Kind is "secret" (sealed; List returns no value) or "env" (List returns Value).
 	Kind string `json:"kind"`
 	// AutoInject adds the entry to every sandbox the owner creates.
 	AutoInject bool   `json:"auto_inject"`
 	Cipher     string `json:"cipher,omitempty"` // base64(nonce || AES-GCM(value)); never sent to clients
-	// Last4 lets the UI say "sk-…abcd connected" without ever exposing the key.
-	Last4 string `json:"last4"`
 	// Value is set only for kind "env", never for credentials.
 	Value     string `json:"value,omitempty"`
 	CreatedAt string `json:"created_at"`
@@ -131,10 +129,6 @@ func (vs *VaultStore) put(owner, name, value string, secret bool, autoInject *bo
 		return nil, err
 	}
 	sealed := vs.aead.Seal(nil, nonce, []byte(value), []byte(owner+"|"+name))
-	last4 := value
-	if len(last4) > 4 {
-		last4 = last4[len(last4)-4:]
-	}
 	now := time.Now().Format(time.RFC3339)
 	vs.mu.Lock()
 	defer vs.mu.Unlock()
@@ -144,8 +138,8 @@ func (vs *VaultStore) put(owner, name, value string, secret bool, autoInject *bo
 	}
 	s := &VaultSecret{
 		Name: name, Owner: owner, Kind: kind, AutoInject: autoInject != nil && *autoInject,
-		Cipher: base64.StdEncoding.EncodeToString(append(nonce, sealed...)),
-		Last4:  last4, CreatedAt: now, UpdatedAt: now,
+		Cipher:    base64.StdEncoding.EncodeToString(append(nonce, sealed...)),
+		CreatedAt: now, UpdatedAt: now,
 	}
 	if prev, ok := vs.secrets[vaultKey(owner, name)]; ok {
 		s.CreatedAt = prev.CreatedAt
@@ -261,7 +255,7 @@ func (vs *VaultStore) Delete(owner, name string) bool {
 
 // public strips the fields clients must never see.
 func (s *VaultSecret) public() *VaultSecret {
-	return &VaultSecret{Name: s.Name, Kind: s.Kind, AutoInject: s.AutoInject, Last4: s.Last4, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt}
+	return &VaultSecret{Name: s.Name, Kind: s.Kind, AutoInject: s.AutoInject, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt}
 }
 
 // save persists atomically via tmp+rename. Callers hold vs.mu.
