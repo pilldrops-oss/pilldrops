@@ -75,6 +75,39 @@ func isFleetPath(p string) bool {
 	return false
 }
 
+// registerFleetPassthrough mounts the routes the control plane answers for the
+// portal. chi only runs a handler for a matched pattern, so a route the dashboard
+// calls that is missing here 404s however healthy the fleet behind it is.
+func registerFleetPassthrough(r chi.Router, passthrough http.HandlerFunc) {
+	for _, pat := range []string{
+		// The node probes what the preview would actually serve.
+		"/v1/sandboxes/{id}/preview-status",
+		"/v1/sandboxes/{id}/fork", "/v1/sandboxes/{id}/visibility", "/v1/sandboxes/{id}/preview-access",
+		"/v1/domains", "/v1/domains/{host}",
+		"/v1/capabilities",
+		"/v1/limits",
+		"/v1/launch-stats",
+		"/v1/whoami",
+		"/v1/images",
+		"/v1/snapshots",
+		"/v1/snapshots/{name}",
+		"/v1/sandboxes/{id}/preview-token",
+		"/v1/sandboxes/{id}/config",
+		"/v1/sandboxes/{id}/checkpoints",
+		"/v1/sandboxes/{id}/checkpoints/{name}/restore",
+		"/v1/sandboxes/{id}/snapshot",
+		"/v1/sandboxes/{id}/standby",
+		"/v1/sandboxes/{id}/backups",
+		"/v1/sandboxes/{id}/backups/{bkp}/restore",
+		"/v1/sandboxes/{id}/forwards",
+		"/v1/sandboxes/{id}/forwards/{port}",
+	} {
+		r.Get(pat, passthrough)
+		r.Post(pat, passthrough)
+		r.Delete(pat, passthrough)
+	}
+}
+
 // maskKey renders a key as prefix…suffix without panicking on short keys.
 func maskKey(k string) string {
 	if len(k) <= 12 {
@@ -2852,16 +2885,7 @@ func main() {
 				http.Error(w, `{"error":"this requires fleet mode"}`, http.StatusNotImplemented)
 			})
 		}
-		for _, pat := range []string{
-			// The node probes what the preview would actually serve.
-			"/v1/sandboxes/{id}/preview-status",
-			"/v1/sandboxes/{id}/fork", "/v1/sandboxes/{id}/visibility", "/v1/sandboxes/{id}/preview-access",
-			"/v1/domains", "/v1/domains/{host}",
-		} {
-			r.Get(pat, fleetPassthrough)
-			r.Post(pat, fleetPassthrough)
-			r.Delete(pat, fleetPassthrough)
-		}
+		registerFleetPassthrough(r, fleetPassthrough)
 
 		// Long-lived server on an existing sandbox; explicit route so the proxy engages.
 		r.Post("/v1/sandboxes/{id}/start", func(w http.ResponseWriter, r *http.Request) {
