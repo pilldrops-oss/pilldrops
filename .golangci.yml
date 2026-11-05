@@ -115,6 +115,12 @@ linters:
           - noctx
           - rowserrcheck
           - errorlint
+      # Go 1.26 deprecated ReverseProxy.Director. Moving to Rewrite changes which
+      # forwarding headers reach the upstream, so it is its own change, not a
+      # side effect of the toolchain bump.
+      - linters:
+          - staticcheck
+        text: "SA1019: .*Director has been deprecated"
       # net.Listen / net.Dial at process startup. A listener is not a request:
       # it has no deadline to inherit and nothing to cancel it with, and
       # ListenConfig buys nothing here. Scoped to the specific files rather than
