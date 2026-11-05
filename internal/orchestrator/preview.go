@@ -120,6 +120,16 @@ func (s *Server) nodePreviewToken(ctx context.Context, id string, port int) stri
 	return previewtoken.Token([]byte(s.nodeToken), id, port, org)
 }
 
+func requestProto(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
+		return p
+	}
+	return "http"
+}
+
 // isPublicPreview reports whether the sandbox preview skips the token gate.
 // Read from the shared store so every replica agrees; fails closed on error.
 func (s *Server) isPublicPreview(ctx context.Context, id string) bool {
@@ -261,6 +271,10 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 		// app, internal prefix and all. Measured on a two-node fleet: the guest
 		// was asked for GET /preview/<id>/8000/mark.txt and answered 404.
 		req.Host = target.Host
+		// Overwritten, not passed through: the node hands these to the app, and
+		// the Host above no longer says where the visitor was.
+		req.Header.Set("X-Forwarded-Host", r.Host)
+		req.Header.Set("X-Forwarded-Proto", requestProto(r))
 		if tok != "" {
 			q := req.URL.Query()
 			q.Set("ptok", tok)

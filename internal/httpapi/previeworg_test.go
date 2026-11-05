@@ -2,9 +2,12 @@ package httpapi
 
 import (
 	"context"
+	"crypto/ed25519"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/auth/previewtoken"
 	"github.com/pilldrops-oss/pilldrops/internal/proxy"
@@ -71,6 +74,65 @@ func TestRefusedRequestCarriesNoOrg(t *testing.T) {
 	if !rec.called {
 		t.Fatal("control: a valid token did not reach the resolver either; the assertion above proves nothing")
 	}
+}
+
+// Only a hop signed by the control plane may name the public host. A node cannot
+// mint that token, so nobody reaching a node directly can pick what the app is told.
+func TestPreviewAppIsToldThePublicHostOnlyByTheControlPlane(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotHost, gotProto string
+	app := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		gotHost, gotProto = r.Header.Get("X-Forwarded-Host"), r.Header.Get("X-Forwarded-Proto")
+	}))
+	t.Cleanup(app.Close)
+	resolver := fixedResolver(strings.TrimPrefix(app.URL, "http://"))
+
+	for _, tc := range []struct {
+		name                string
+		asym                bool
+		wantHost, wantProto string
+	}{
+		{name: "signed control-plane hop", asym: true, wantHost: "app.example", wantProto: "https"},
+		{name: "direct to a standalone node", wantHost: "node.example:18080", wantProto: "http"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, st := newDaemonForPreviewTest(t)
+			s := New(d, st)
+			s.SetPreviewSecret([]byte(testPreviewSecret))
+			sb, err := d.Create(context.Background(), daemon.CreateSpec{Template: "base", OrgID: "u:cust1"})
+			if err != nil {
+				t.Fatalf("create sandbox: %v", err)
+			}
+			tok := previewtoken.Token([]byte(testPreviewSecret), sb.ID, 8000, "u:cust1")
+			if tc.asym {
+				s.SetOrgAssertPublicKey(pub)
+				tok = previewtoken.TokenAsym(priv, sb.ID, 8000, "u:cust1", time.Now().Add(time.Minute))
+			}
+			req := httptest.NewRequest("GET", "/preview/"+sb.ID+"/8000/?ptok="+tok, nil)
+			req.Host = "node.example:18080"
+			req.Header.Set("X-Forwarded-Host", "app.example")
+			req.Header.Set("X-Forwarded-Proto", "https")
+			w := httptest.NewRecorder()
+			s.requirePreviewToken(proxy.Handler(resolver)).ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, body %q", w.Code, w.Body.String())
+			}
+			if gotHost != tc.wantHost || gotProto != tc.wantProto {
+				t.Fatalf("app told host %q proto %q, want %q %q", gotHost, gotProto, tc.wantHost, tc.wantProto)
+			}
+		})
+	}
+}
+
+// fixedResolver sends every preview to one address.
+type fixedResolver string
+
+func (r fixedResolver) PreviewTarget(context.Context, string, int, string) (string, error) {
+	return string(r), nil
 }
 
 // recordingResolver records its arguments; 127.0.0.1:1 refuses instantly so

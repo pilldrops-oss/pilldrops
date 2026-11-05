@@ -7,6 +7,8 @@ import (
 
 type previewOrgKey struct{}
 
+type controlPlaneHopKey struct{}
+
 // WithPreviewOrg records that the request cleared the preview gate for org, the
 // sandbox owner read from the store. A context value, not a header, so the
 // client cannot set it and an ungated mount carries an empty org, which is refused.
@@ -19,6 +21,12 @@ func WithPreviewOrg(ctx context.Context, org string) context.Context {
 func previewOrgFrom(ctx context.Context) string {
 	org, _ := ctx.Value(previewOrgKey{}).(string)
 	return org
+}
+
+// WithControlPlaneHop records that the request carried a token only the control
+// plane can sign, so its X-Forwarded-Host and -Proto describe the real visitor.
+func WithControlPlaneHop(ctx context.Context) context.Context {
+	return context.WithValue(ctx, controlPlaneHopKey{}, true)
 }
 
 func requestWithPreviewOrg(req *http.Request, org string) *http.Request {
