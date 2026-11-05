@@ -185,7 +185,7 @@ func (s *Server) authorizePreview(w http.ResponseWriter, r *http.Request, id str
 		if devInsecure() {
 			return true
 		}
-		setPreviewGuards(w.Header(), s.previewGuardDomain(r))
+		setPreviewGuards(w.Header(), s.previewGuardDomain(r), s.portalOrigin)
 		http.Error(w, "preview gating unavailable: orchestrator has no API key configured", http.StatusServiceUnavailable)
 		return false
 	}
@@ -195,7 +195,7 @@ func (s *Server) authorizePreview(w http.ResponseWriter, r *http.Request, id str
 	// minted: this is what retracts a link on unshare. See previewGeneration.
 	gen, ok := s.previewGeneration(r.Context(), id)
 	if !ok {
-		setPreviewGuards(w.Header(), s.previewGuardDomain(r))
+		setPreviewGuards(w.Header(), s.previewGuardDomain(r), s.portalOrigin)
 		http.Error(w, "preview gating unavailable: cannot read the sandbox to judge who may open it",
 			http.StatusServiceUnavailable)
 		return false
@@ -213,7 +213,7 @@ func (s *Server) authorizePreview(w http.ResponseWriter, r *http.Request, id str
 	if ck, err := r.Cookie(ckName); err == nil && previewtoken.BrowserValid(key, ck.Value, id, port, gen) {
 		return true
 	}
-	setPreviewGuards(w.Header(), s.previewGuardDomain(r))
+	setPreviewGuards(w.Header(), s.previewGuardDomain(r), s.portalOrigin)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)
 	page := previewPrivatePage
@@ -300,13 +300,13 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 			resp.Header.Set("Cache-Control", "no-store")
 		}
 		// Every response, so an app cannot opt out of the framing protection.
-		setPreviewGuards(resp.Header, guardDomain)
+		setPreviewGuards(resp.Header, guardDomain, s.portalOrigin)
 		return nil
 	}
 	// An unreachable node is the same "not ready yet" class.
 	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, _ error) {
 		body, ctype := readinessBody(req, id, "starting")
-		setPreviewGuards(w.Header(), guardDomain)
+		setPreviewGuards(w.Header(), guardDomain, s.portalOrigin)
 		w.Header().Set("Content-Type", ctype)
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Retry-After", "2")
