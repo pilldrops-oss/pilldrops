@@ -27,7 +27,7 @@ for arg in "$@"; do
   esac
 done
 
-GO_IMAGE="golang:1.25"
+GO_IMAGE="golang:1.26"
 CHECK_TIMEOUT="${CHECK_TIMEOUT:-900}"
 
 # bounded CMD... runs with a wall-clock ceiling; macOS ships no timeout(1), so

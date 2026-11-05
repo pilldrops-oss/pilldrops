@@ -25,7 +25,7 @@
 # Env (defaults shown):
 #   FC_VERSION=v1.17.0            firecracker/jailer release (see the pin note below)
 #   FC_KERNEL_VERSION=5.10.223    guest kernel (see the pin note below)
-#   GO_VERSION=1.25.13            must satisfy go.mod
+#   GO_VERSION=1.26.10            must satisfy go.mod
 #   KERNEL_PATH=/var/lib/sandbox/vmlinux
 #   SNAPSHOT_DIR=/var/lib/sandbox/templates
 #   OVERLAY_DIR=/var/lib/sandbox/overlays
@@ -56,7 +56,7 @@ trap '_on_err $LINENO' ERR
 # snapshots rebuild themselves.
 FC_VERSION="${FC_VERSION:-v1.17.0}"
 FC_KERNEL_VERSION="${FC_KERNEL_VERSION:-5.10.223}"
-GO_VERSION="${GO_VERSION:-1.25.13}"
+GO_VERSION="${GO_VERSION:-1.26.10}"
 KERNEL_PATH="${KERNEL_PATH:-/var/lib/sandbox/vmlinux}"
 SNAPSHOT_DIR="${SNAPSHOT_DIR:-/var/lib/sandbox/templates}"
 OVERLAY_DIR="${OVERLAY_DIR:-/var/lib/sandbox/overlays}"
