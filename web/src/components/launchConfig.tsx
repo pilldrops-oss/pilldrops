@@ -7,7 +7,7 @@ export {
   sizeLabel, startsServer, withCur,
 } from '../lib/launchKinds'
 
-export { START_FILE, starterFiles, starterStart, universalTerminalScript } from '../lib/launchStarters'
+export { starterFiles, starterStart } from '../lib/launchStarters'
 
 export { buildCliSnippet, buildPilldropsExport, composeCreateBody, genSecret } from '../lib/launchBody'
 

@@ -1,7 +1,6 @@
 import type { Template } from '../types'
 import { PILLDROPS_VERSION, type PilldropsConfig } from './pilldropsConfig'
 import { type ComposedBody, type CustomEnv, type Kind, shellQuote, startsServer, requiredRuntime, resolveLifetime } from './launchKinds'
-import { START_FILE, universalStartBody } from './launchStarters'
 
 // composeCreateBody assembles the per-kind create-request slice from the form state.
 export function composeCreateBody(cfg: {
@@ -60,9 +59,8 @@ export function composeCreateBody(cfg: {
       const start = serveReport && tpl.outcome !== 'report' ? `${cmd}; ${reportServe}` : cmd
       return { ...vars, start, port: portNum, ...life }
     }
-    const body = universalStartBody(previewPort)
     const kal = resolveLifetime(true, timeoutInput, idleInput)
-    return { ...vars, ...body, ...kal }
+    return { ...vars, port: previewPort || 8000, ...kal }
   }
 
   if (kind === 'shell') {
@@ -74,16 +72,14 @@ export function composeCreateBody(cfg: {
         ...life,
       }
     }
-    const body = universalStartBody(previewPort)
     const kal = resolveLifetime(true, timeoutInput, idleInput)
-    return { ...vars, ...body, ...kal }
+    return { ...vars, port: previewPort || 8000, ...kal }
   }
 
-  // web: no start command and no built-in server gets a browser terminal so the preview never hangs.
+  // web: no start command and no built-in server leaves the port for the customer's app.
   if (!tpl.has_server && !start.trim()) {
-    const body = universalStartBody(previewPort)
     const kal = resolveLifetime(true, timeoutInput, idleInput)
-    return { ...vars, ...body, ...kal }
+    return { ...vars, port: previewPort || 8000, ...kal }
   }
   return {
     ...vars,
@@ -163,7 +159,6 @@ export function buildCliSnippet(cfg: {
   const envs = composed ? composed.env ?? [] : envList
   let portVal = port
   if (composed) portVal = composed.port ? String(composed.port) : ''
-  const hasUniversalScript = !!composed?.files?.some(f => f.path === START_FILE)
 
   for (const kv of envs) {
     // Mask secret-looking values but keep base URL and model visible.
@@ -179,11 +174,7 @@ export function buildCliSnippet(cfg: {
   if (composed?.idle_timeout !== undefined) parts.push(`--idle-timeout ${composed.idle_timeout}`)
   if (isPublic) parts.push('--public')
 
-  let out = parts.join(' \\\n  ')
-  if (hasUniversalScript) {
-    out += `\n  # terminal script written to ${START_FILE} (serves a browser terminal on the preview)`
-  }
-  return out
+  return parts.join(' \\\n  ')
 }
 
 // genSecret mints a URL-safe random credential; the alphabet omits look-alikes (0/O, 1/l/I).
