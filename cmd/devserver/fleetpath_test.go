@@ -1,6 +1,12 @@
 package main
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+)
 
 // A node-API resource left off the prefix list 404s at the portal even with a
 // healthy fleet behind it.
@@ -21,6 +27,28 @@ func TestFleetPathsCoverEveryProxiedResource(t *testing.T) {
 	for _, p := range local {
 		if isFleetPath(p) {
 			t.Errorf("%s was sent to the fleet, but the portal owns it", p)
+		}
+	}
+}
+
+// Each of these is called by the dashboard or a customer's key and answered by the
+// control plane; without a route the portal 404s. preview-token broke the terminal.
+func TestFleetPassthroughServesWhatTheDashboardCalls(t *testing.T) {
+	r := chi.NewRouter()
+	registerFleetPassthrough(r, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/v1/sandboxes/sb1/preview-token"},
+		{"GET", "/v1/capabilities"},
+		{"GET", "/v1/limits"},
+		{"GET", "/v1/whoami"},
+		{"POST", "/v1/sandboxes/sb1/checkpoints"},
+		{"POST", "/v1/sandboxes/sb1/snapshot"},
+		{"POST", "/v1/sandboxes/sb1/standby"},
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(c.method, c.path, nil))
+		if w.Code != http.StatusTeapot {
+			t.Errorf("%s %s = %d, want it passed to the control plane", c.method, c.path, w.Code)
 		}
 	}
 }

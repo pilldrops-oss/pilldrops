@@ -16,7 +16,7 @@ import (
 var (
 	chiRouteRe  = regexp.MustCompile(`\br\.(?:Handle|HandleFunc|Get|Post|Put|Delete|Patch)\("([^"]+)"`)
 	muxRouteRe  = regexp.MustCompile(`\bmux\.(?:Handle|HandleFunc)\("([^"]+)"`)
-	nodeRouteRe = regexp.MustCompile(`\broute\("([^"]+)"`)
+	nodeRouteRe = regexp.MustCompile(`\b(?:route|raw)\("([^"]+)"`)
 	pathParamRe = regexp.MustCompile(`\{[^}]*\}`)
 	methodRe    = regexp.MustCompile(`^(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+`)
 )
