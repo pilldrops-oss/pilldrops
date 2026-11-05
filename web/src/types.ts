@@ -207,10 +207,9 @@ export interface Capabilities {
   custom_domains: boolean
 }
 
-/** VaultSecret is GET /v1/secrets: name and last4 only, never the value. */
+/** VaultSecret is GET /v1/secrets: names only for sealed secrets, never any part of the value. */
 export interface VaultSecret {
   name: string
-  last4: string
   /** Present only for non-credential settings (gateway URL, model); never for API keys. */
   value?: string
   /** Injected into every new sandbox in the org without a secret_refs entry. */

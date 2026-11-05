@@ -52,8 +52,8 @@ func TestSetSecretScopeKeepsTheValue(t *testing.T) {
 		t.Fatalf("after the scope change: value=%q scope=%q owner=%q", val, scope, owner)
 	}
 	list, err := st.ListSecrets(t.Context(), "u:cust1")
-	if err != nil || len(list) != 1 || list[0].Last4 != before.Last4 || list[0].Scope != ScopePrivate {
-		t.Fatalf("list = %+v (err %v), want the same last4 with the new scope", list, err)
+	if err != nil || len(list) != 1 || list[0].Scope != ScopePrivate {
+		t.Fatalf("list = %+v (err %v), want the new scope", list, err)
 	}
 	// A scoped secret stops auto-injecting: "every sandbox" cannot honour a scope.
 	auto, err := st.ListAutoInject(t.Context(), "u:cust1")

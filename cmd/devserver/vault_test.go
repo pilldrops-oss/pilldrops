@@ -29,9 +29,9 @@ func TestVaultRoundTrip(t *testing.T) {
 	if got := vs.List("u:bob"); len(got) != 0 {
 		t.Fatalf("bob sees %d secrets", len(got))
 	}
-	// List never exposes value or ciphertext, does expose last4.
+	// List never exposes value, ciphertext or any part of the value.
 	list := vs.List("u:alice")
-	if len(list) != 1 || list[0].Cipher != "" || list[0].Owner != "" || list[0].Last4 != "1234" {
+	if len(list) != 1 || list[0].Cipher != "" || list[0].Owner != "" {
 		t.Fatalf("List leak/shape: %+v", list[0])
 	}
 }

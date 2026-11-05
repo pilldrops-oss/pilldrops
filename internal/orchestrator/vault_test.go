@@ -49,9 +49,6 @@ func TestVaultRoutesAreServedByTheControlPlane(t *testing.T) {
 	if len(list) != 1 || list[0].Name != "ANTHROPIC_API_KEY" {
 		t.Fatalf("list = %+v", list)
 	}
-	if list[0].Last4 != "wxyz" {
-		t.Errorf("last4 = %q, want wxyz", list[0].Last4)
-	}
 	if list[0].Value != "" {
 		t.Errorf("the API returned the credential: %q", list[0].Value)
 	}

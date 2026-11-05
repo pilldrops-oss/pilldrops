@@ -161,7 +161,6 @@ function CustomSecrets({
       {secrets.map(s => (
         <div key={s.name} className="vault-custom-row">
           <code className="chip mono">{s.name}</code>
-          <span className="vault-last4">…{s.last4}</span>
           <label className="chip" title="Injected into every new sandbox without a secret_refs entry">
             <input
               type="checkbox"
