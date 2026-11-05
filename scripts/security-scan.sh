@@ -53,7 +53,7 @@ next Linux run would report all of them as NEW.
 
 Regenerate where CI runs:
 
-  docker run --rm -v "$PWD":/src -w /src -e HOME=/tmp golang:1.25 \
+  docker run --rm -v "$PWD":/src -w /src -e HOME=/tmp golang:1.26 \
     bash -c './scripts/security-scan.sh --update'
 WHY
   exit 2

@@ -49,7 +49,7 @@ if [ "$fail" -ne 0 ]; then
   echo "A package with test files ran none of them on this platform."
   echo "Run those tests where they are constrained to run — for internal/vm that is Linux:"
   echo
-  echo "  docker run --rm -v \"\$PWD\":/src -w /src golang:1.25 go test ./internal/vm/"
+  echo "  docker run --rm -v \"\$PWD\":/src -w /src golang:1.26 go test ./internal/vm/"
   echo
   echo "Do NOT filter \"no test files\" out of a test run's output. That line is the"
   echo "only thing that distinguishes a tested package from an untested one."
@@ -61,7 +61,7 @@ if [ "$warned" -ne 0 ]; then
   echo "$warned package(s) above are constrained off $(go env GOOS) and did NOT run here."
   echo "Run them where they are constrained to run before trusting a green suite:"
   echo
-  echo "  docker run --rm -v \"\$PWD\":/src -w /src golang:1.25 go test ./internal/vm/"
+  echo "  docker run --rm -v \"\$PWD\":/src -w /src golang:1.26 go test ./internal/vm/"
   echo
 fi
 echo "no silent skips: $found package(s) with test files, $((found - warned)) selected on $(go env GOOS)/$(go env GOARCH)."

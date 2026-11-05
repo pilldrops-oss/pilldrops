@@ -382,7 +382,7 @@ and its pins then had to be reconstructed from git history:
 | --- | --- | --- |
 | Firecracker + jailer | `v1.17.0` | verified against the release's own `.sha256.txt`. **Not `v1.7`:** its userfaultfd library rejects the ioctl flags a 6.x+ host kernel reports (`Unrecognized ioctl flags`), so lazy memory cannot run on it. Snapshots do not carry across the bump — see *Upgrading Firecracker* |
 | guest kernel | **`5.10.223`** (`firecracker-ci/v1.10/<arch>/vmlinux-5.10.223`) | **load-bearing.** A 6.1 kernel cold-boots the VM and then envd never comes up — the guest contract does not match. The CI bucket publishes no checksum, so the script's own self-computed sha256 is the trust anchor and every fetch fails closed. |
-| Go | `1.25.13` | must satisfy `go.mod`; checksum from go.dev/dl |
+| Go | `1.26.10` | must satisfy `go.mod`; checksum from go.dev/dl |
 
 The guest CLI (`bin/pilldrops-linux`) comes from the sibling `pilldrops-cli`
 repo, as in the Makefile's `cli-linux`; point `CLI_REPO=` at it or drop a
