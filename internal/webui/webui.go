@@ -196,6 +196,7 @@ func New(sessionKey, runtime, mode string, clustered bool, sandboxDomain string)
 	// Per deployment, not baked into the bundle, or every self-hosted node would
 	// ship usage data to the hosted account.
 	idx = bytes.ReplaceAll(idx, []byte("__POSTHOG_KEY__"), []byte(os.Getenv("POSTHOG_PROJECT_KEY")))
+	idx = bytes.ReplaceAll(idx, []byte("__POSTHOG_HOST__"), []byte(os.Getenv("POSTHOG_HOST")))
 
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {

@@ -8,11 +8,12 @@ import './theme.css'
 // bundle is embedded in every binary, so a baked-in key would ship self-hosters'
 // data. Autocapture and replay stay off: this page holds API keys and env vars.
 const posthogKey = window.__SANDBOXD__?.posthogKey
+const posthogHost = window.__SANDBOXD__?.posthogHost
 if (posthogKey && !posthogKey.startsWith('__')) {
   // Deferred so self-hosted deployments, which never set a key, do not ship it.
   void import('posthog-js').then(({ default: posthog }) => {
     posthog.init(posthogKey, {
-      api_host: 'https://us.i.posthog.com',
+      api_host: posthogHost && !posthogHost.startsWith('__') ? posthogHost : 'https://us.i.posthog.com',
       autocapture: false,
       capture_pageview: false,
       capture_pageleave: false,
