@@ -551,6 +551,8 @@ PILLDROPS_IMAGE_ALLOWLIST=ghcr.io/acme,docker.io/library
 PILLDROPS_IMAGE_REQUIRE_DIGEST=1
 ```
 
+**A custom image on Firecracker boots as a VM, not as its container.** Its files and `ENV` carry over; its `CMD`, `ENTRYPOINT` and `WORKDIR` do not. Nothing starts on boot, and `exec` runs in `/root` unless the request sets `cwd`. Start a long-lived process with `POST /v1/sandboxes/{id}/start`. A Docker node runs the image's own entrypoint.
+
 **Where each control applies.**
 
 | | applies to | does not apply to |

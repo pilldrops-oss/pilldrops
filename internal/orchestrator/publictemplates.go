@@ -48,7 +48,34 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 		t["available"], _ = s.reg.TemplateSupport(place, now, cluster.NodeTTL)
 		listed = append(listed, t)
 	}
+	for _, t := range s.customTemplates(r) {
+		t["available"], _ = s.reg.TemplateSupport(cluster.Request{Template: t["id"].(string)}, now, cluster.NodeTTL)
+		listed = append(listed, t)
+	}
 	writeJSON(w, http.StatusOK, listed)
+}
+
+// customTemplates is what the caller's org built, which no node's catalogue
+// lists: the catalogue is compiled in and shared by every org.
+func (s *Server) customTemplates(r *http.Request) []map[string]any {
+	st := s.st.Load()
+	org := fastOrg(r)
+	if st == nil || org == "" {
+		return nil
+	}
+	built, err := st.CustomTemplatesForOrg(r.Context(), org)
+	if err != nil {
+		s.log().Warn("could not list custom templates", "component", "templates", "err", err)
+		return nil
+	}
+	out := make([]map[string]any, 0, len(built))
+	for _, b := range built {
+		out = append(out, map[string]any{
+			"id": b.TemplateID, "name": b.TemplateID, "custom": true, "published": true,
+			"size_mb": b.TotalSize >> 20, "updated_at": b.ReadyAt,
+		})
+	}
+	return out
 }
 
 // handleImagesList relays a node's image list without its internal templates,
@@ -71,6 +98,7 @@ func (s *Server) handleImagesList(w http.ResponseWriter, r *http.Request) {
 			listed = append(listed, img)
 		}
 	}
+	listed = append(listed, s.customTemplates(r)...)
 	writeJSON(w, http.StatusOK, map[string]any{"images": listed})
 }
 
