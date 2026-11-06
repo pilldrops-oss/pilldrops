@@ -753,7 +753,7 @@ DISK_SBX=$(sb_create_sized "$DISK_CAP_MB")
 if [ -z "$DISK_SBX" ]; then
   skip "exhaust.disk" "could not create a sandbox with a declared ${DISK_CAP_MB}MB cap"
 else
-  DISK=$(sb_exec "$DISK_SBX" "timeout 180 dd if=/dev/zero of=/root/fill bs=1M count=$DISK_TRY_MB oflag=direct 2>&1 | tail -1; rm -f /root/fill")
+  DISK=$(sb_exec "$DISK_SBX" "timeout 180 dd if=/dev/zero of=\$HOME/fill bs=1M count=$DISK_TRY_MB oflag=direct 2>&1 | tail -1; rm -f \$HOME/fill")
   WROTE=$(printf '%s' "$DISK" | grep -o '^[0-9]*' | head -1)
   if ! api GET /health >/dev/null 2>&1; then
     fail "exhaust.disk" "node stopped answering after a large guest write"
