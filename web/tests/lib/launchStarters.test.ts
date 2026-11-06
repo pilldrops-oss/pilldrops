@@ -29,3 +29,15 @@ describe('rust starter', () => {
     expect(main).toContain('env::var("PORT")')
   })
 })
+
+// "go" as a substring also matched mongodb and django, so they got a Go project.
+describe('go starter', () => {
+  const tpl = (id: string, language: string): Template => ({ id, name: id, description: '', cpu: 1, memory_mb: 512, visibility: 'public', language })
+
+  it('goes to Go templates only', () => {
+    expect(starterFiles(tpl('go', 'go')).map(f => f.path)).toEqual(['main.go', 'go.mod'])
+    expect(starterFiles(tpl('golang-1.22', '')).map(f => f.path)).toEqual(['main.go', 'go.mod'])
+    expect(starterFiles(tpl('mongodb', 'shell'))).toEqual([])
+    expect(starterFiles(tpl('django', 'python')).map(f => f.path)).not.toContain('main.go')
+  })
+})

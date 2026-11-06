@@ -142,7 +142,7 @@ export function starterFiles(tpl: Template): Array<{ path: string; content: stri
     ]
   if (has('node', 'typescript', 'javascript') || lang === 'node' || lang === 'ts' || lang === 'js')
     return [{ path: 'server.js', content: NODE_STARTER }]
-  if (has('go', 'golang') || lang === 'go')
+  if (id === 'go' || has('golang') || lang === 'go')
     return [
       { path: 'main.go', content: GO_STARTER },
       { path: 'go.mod', content: GO_MOD },
