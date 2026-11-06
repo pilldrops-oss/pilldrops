@@ -66,6 +66,11 @@ type fleetCapabilities struct {
 	// a node one: a bare-node deployment has nowhere to point a record.
 	CustomDomains bool `json:"custom_domains"`
 
+	// Features names the optional command groups this deployment serves, beyond
+	// the core sandbox API every server has. Never null: absent means a server
+	// from before this field, which a client cannot judge.
+	Features []string `json:"features"`
+
 	Nodes fleetNodeCounts `json:"nodes"`
 }
 
@@ -87,7 +92,7 @@ type fleetNodeCounts struct {
 // a sandbox unbidden; the capability verbs below are the OR, because placement
 // routes a create that needs one onto a node that has it.
 func aggregateCapabilities(nodes []*cluster.Node, now time.Time, ttl time.Duration) fleetCapabilities {
-	out := fleetCapabilities{Scope: "fleet"}
+	out := fleetCapabilities{Scope: "fleet", Features: []string{}}
 	withRuntime, allPause := 0, true
 	out.Nodes.Total = len(nodes)
 

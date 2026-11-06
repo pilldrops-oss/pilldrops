@@ -169,6 +169,9 @@ func TestCapabilitiesEndpoint(t *testing.T) {
 	if got.Scope != "node" {
 		t.Errorf("scope = %q, want \"node\"", got.Scope)
 	}
+	if got.Features == nil || len(got.Features) != 0 {
+		t.Errorf("features = %#v, want [] on the wire: absent would read as a server too old to say", got.Features)
+	}
 	if got.Runtime != "process" {
 		t.Errorf("runtime = %q, want \"process\" — the test server boots the process runtime, "+
 			"and the endpoint must report the engine it HAS", got.Runtime)

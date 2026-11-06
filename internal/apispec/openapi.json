@@ -1571,6 +1571,13 @@
         "type": "object",
         "description": "One node's answer: the engine it has and the ceilings it applies.",
         "properties": {
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional command groups this deployment serves, beyond the core sandbox API. Absent on older servers."
+          },
           "scope": {
             "type": "string",
             "enum": [
@@ -1653,6 +1660,13 @@
         "type": "object",
         "description": "The control plane's answer: the union across the fleet.",
         "properties": {
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional command groups this deployment serves, beyond the core sandbox API. Absent on older servers."
+          },
           "scope": {
             "type": "string",
             "enum": [

@@ -83,6 +83,11 @@ type nodeCapabilities struct {
 	Templates           []string `json:"templates"`
 	TemplatesEnumerated bool     `json:"templates_enumerated"`
 
+	// Features names the optional command groups this deployment serves, beyond
+	// the core sandbox API every server has. Never null: absent means a server
+	// from before this field, which a client cannot judge.
+	Features []string `json:"features"`
+
 	Limits nodeLimits `json:"limits"`
 }
 
@@ -162,6 +167,7 @@ func buildNodeCapabilities(rd runtimeDescriber, local func() []string, plan enti
 		WarmRestoreStorageMB: caps.WarmRestoreStorageMB,
 		Templates:            tmpl,
 		TemplatesEnumerated:  enumerated,
+		Features:             []string{},
 		Limits: nodeLimits{
 			MaxVCPU:       plan.MaxVCPU,
 			MaxMemMB:      plan.MaxMemMB,

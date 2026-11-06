@@ -75,6 +75,17 @@ func isFleetPath(p string) bool {
 	return false
 }
 
+// answerWithoutFleet is the local runtime's reply on a control-plane route. It
+// can still say what it serves, so the CLI hides what a quick start lacks.
+func answerWithoutFleet(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/v1/capabilities" {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"scope":"local","features":[]}`))
+		return
+	}
+	http.Error(w, `{"error":"this requires fleet mode"}`, http.StatusNotImplemented)
+}
+
 // registerFleetPassthrough mounts the routes the control plane answers for the
 // portal. chi only runs a handler for a matched pattern, so a route the dashboard
 // calls that is missing here 404s however healthy the fleet behind it is.
@@ -2897,9 +2908,7 @@ func main() {
 		// Explicit routes are required: chi only runs sandboxProxy for matched
 		// patterns, so a fleetPaths prefix alone still 404s.
 		fleetPassthrough := func(w http.ResponseWriter, r *http.Request) {
-			fleetProxy(w, r, func(w http.ResponseWriter) {
-				http.Error(w, `{"error":"this requires fleet mode"}`, http.StatusNotImplemented)
-			})
+			fleetProxy(w, r, func(w http.ResponseWriter) { answerWithoutFleet(w, r) })
 		}
 		registerFleetPassthrough(r, fleetPassthrough)
 
