@@ -75,6 +75,16 @@ Two neighbouring things are *not* this:
   who may reach the API.
 - Billing is per org either way; visibility changes reachability, not who pays.
 
+## What this server supports
+
+The CLI works with any PillDrops server. It reads `features` from
+`GET /v1/capabilities`, and help, `pilldrops ai` and `pilldrops mcp` then show
+only what that server has. This server reports none of the optional groups
+(agent, chat, cron, function, integrations, team, thread, volume), which are on
+PillDrops Cloud. Running one exits 1 with the code `feature_unavailable` before
+anything is sent. Logged out, or against an older server that does not report
+`features`, the CLI shows everything.
+
 ## Commands
 
     pilldrops templates

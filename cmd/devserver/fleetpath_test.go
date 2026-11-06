@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -50,5 +51,18 @@ func TestFleetPassthroughServesWhatTheDashboardCalls(t *testing.T) {
 		if w.Code != http.StatusTeapot {
 			t.Errorf("%s %s = %d, want it passed to the control plane", c.method, c.path, w.Code)
 		}
+	}
+}
+
+func TestLocalRuntimeReportsItsFeatures(t *testing.T) {
+	w := httptest.NewRecorder()
+	answerWithoutFleet(w, httptest.NewRequest("GET", "/v1/capabilities", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"features":[]`) {
+		t.Errorf("capabilities = %d %s", w.Code, w.Body)
+	}
+	w = httptest.NewRecorder()
+	answerWithoutFleet(w, httptest.NewRequest("GET", "/v1/limits", nil))
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("limits = %d, want 501", w.Code)
 	}
 }
