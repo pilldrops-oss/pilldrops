@@ -1,6 +1,8 @@
 # PillDrops CLI
 
-Single-binary customer CLI. Build: `make pilldrops` → `bin/pilldrops`.
+Single-binary customer CLI, from the
+[pilldrops-cli](https://github.com/pilldrops-oss/pilldrops-cli) repo:
+`npm install -g @pilldrops/cli`, or `go build ./cmd/pilldrops` there.
 
 ## Sign in
 

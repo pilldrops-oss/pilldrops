@@ -1,6 +1,6 @@
 """Sample web app for sandboxd — a tiny notes API that honors $PORT.
 
-Deploy it with:  ./cli/pilldrops deploy examples/sample-webapp --start "python3 app.py" --port 8000
+Deploy it with the CLI: see README.md
 """
 import json
 import os
