@@ -205,6 +205,10 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "unknown template or snapshot")
 		return
 	}
+	if !operatorPrincipal(r) && (templates.ForeignCustomImage(orgID(r), body.Template) || templates.ForeignCustomImage(orgID(r), body.Image)) {
+		writeErr(w, http.StatusBadRequest, "unknown template or image")
+		return
+	}
 	name, err := body.Validate(knownTemplate, sanitizeSandboxName, validateRepo)
 	if err != nil {
 		writeSandboxErr(w, err)

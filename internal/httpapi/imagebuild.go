@@ -22,23 +22,7 @@ import (
 const buildTimeout = 15 * time.Minute
 
 // imageSlug lowercases and sanitizes s into a Docker-name-safe token (a-z0-9._-).
-func imageSlug(s string) string {
-	s = strings.ToLower(s)
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('-')
-		}
-	}
-	out := strings.Trim(b.String(), "-.")
-	if out == "" {
-		out = "img"
-	}
-	return out
-}
+func imageSlug(s string) string { return templates.CustomImageSlug(s) }
 
 // customImageTag is the org-scoped local tag for a custom image, so two orgs'
 // "myapp" never collide.

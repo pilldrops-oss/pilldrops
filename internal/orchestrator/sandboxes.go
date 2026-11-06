@@ -106,6 +106,12 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "template "+peek.Template+" is a snapshot capture; create from a snapshot by its name instead")
 			return
 		}
+		// The node sees this tier as the operator, so only this tier can tell.
+		if _, role := callerKey(r.Context()); !moving && role != "operator" &&
+			(templates.ForeignCustomImage(fastOrg(r), peek.Template) || templates.ForeignCustomImage(fastOrg(r), peek.Image)) {
+			writeErr(w, http.StatusBadRequest, "unknown template or image")
+			return
+		}
 		if peek.Snapshot != "" {
 			resolved, ok := s.resolveSnapshotCreate(w, r, body, peek)
 			if !ok {
