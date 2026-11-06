@@ -78,7 +78,7 @@ func TestPausedSandboxOfADeadNodeRehomes(t *testing.T) {
 		return w
 	}
 
-	if w := req(http.MethodGet, "sb-paused", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"paused"`) {
+	if w := req(http.MethodGet, "sb-paused", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"paused"`) {
 		t.Fatalf("GET of an orphaned paused sandbox = %d %s", w.Code, w.Body.String())
 	}
 	if len(calls) != 0 {
