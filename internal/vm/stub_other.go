@@ -93,7 +93,7 @@ func (m *Manager) Alive(string) bool                                       { ret
 func (m *Manager) OOMKilled(string) bool                                   { return false }
 func (m *Manager) RecordOwner(string, string) error                        { return nil }
 func (m *Manager) AdoptOwned(string) (*Sandbox, bool)                      { return nil, false }
-func (m *Manager) KillUnadopted()                                          {}
+func (m *Manager) KillUnadopted([]string)                                  {}
 func (m *Manager) GetSandboxInfo(string) (SandboxInfo, error)              { return SandboxInfo{}, ErrUnsupported }
 func (m *Manager) ListUserSandboxes(string) []SandboxInfo                  { return nil }
 func (m *Manager) WriteFile(context.Context, string, string, []byte) error { return ErrUnsupported }

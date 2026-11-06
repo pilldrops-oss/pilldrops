@@ -95,7 +95,9 @@ type Manager struct {
 	createLimiter chan struct{} // concurrent create cap
 	// recoverable holds VMs found running at startup that have an adoption
 	// record: kept alive for the daemon to claim (adopt.go), keyed by vm id.
-	recoverable  map[string]*OrphanProcess
+	recoverable map[string]*OrphanProcess
+	// stranded holds, by owning sandbox, the disks of VMs that failed adoption.
+	stranded     map[string]string
 	diskPressure bool // set by monitor when disk >80%
 	log          *zap.Logger
 	mu           sync.RWMutex
@@ -134,6 +136,7 @@ func NewManager(cfg Config, log *zap.Logger) (*Manager, error) {
 		config:        cfg,
 		active:        make(map[string]*Sandbox),
 		recoverable:   make(map[string]*OrphanProcess),
+		stranded:      make(map[string]string),
 		createLimiter: make(chan struct{}, cfg.MaxConcurrent),
 		log:           log,
 	}

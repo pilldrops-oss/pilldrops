@@ -209,6 +209,9 @@ func (d *Daemon) ResumeTimed(ctx context.Context, id string) (took time.Duration
 	if !canTransition(sb.State, "resume") {
 		st := sb.State
 		d.mu.Unlock()
+		if st == StateFailed {
+			return 0, rt.ErrUnresumable
+		}
 		return 0, fmt.Errorf("cannot resume from state %s", st)
 	}
 	// Standby is the cheap half: the instance is still there, frozen. Thaw it
@@ -258,9 +261,17 @@ func (d *Daemon) ResumeTimed(ctx context.Context, id string) (took time.Duration
 	})
 	observability.End(restoreSpan, err)
 	if err != nil {
+		unresumable := errors.Is(err, rt.ErrUnresumable)
 		d.mu.Lock()
 		sb.State = StatePaused // revert so a retry can resume again
+		if unresumable {
+			sb.State = StateFailed
+		}
+		rec := d.recordOf(sb)
 		d.mu.Unlock()
+		if unresumable {
+			d.persistRec(ctx, rec)
+		}
 		return 0, fmt.Errorf("restore: %w", err)
 	}
 

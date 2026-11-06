@@ -1311,6 +1311,8 @@ func statusForErr(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, rt.ErrProtectedProcess):
 		return http.StatusBadRequest
+	case errors.Is(err, rt.ErrUnresumable):
+		return http.StatusGone
 	default:
 		return http.StatusServiceUnavailable
 	}

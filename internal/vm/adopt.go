@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -109,8 +110,19 @@ func (m *Manager) AdoptOwned(owner string) (*Sandbox, bool) {
 	// guest for good. Remove it rather than adopt a machine that will hang.
 	if _, err := os.Stat(filepath.Join(jailerChrootDir(), rec.VMID, "root", lazyPendingMarker)); err == nil {
 		m.log.Error("adopt_refused_lazy_memory", zap.String("vm_id", rec.VMID), zap.String("owner", owner))
-		m.killOrphan(proc, rec.OverlayPath, "its memory was still being served on demand when the daemon stopped")
+		m.strandOrphan(proc, owner, rec.OverlayPath, "its memory was still being served on demand when the daemon stopped")
 		return nil, false
+	}
+
+	root := filepath.Join(jailerChrootDir(), rec.VMID, "root")
+	machine := &attachedMachine{
+		pid:    proc.Machine.Pid(),
+		root:   root,
+		client: firecracker.NewClient(filepath.Join(root, "run", rec.VMID+".sock"), quietLogrus(), false),
+	}
+	// A daemon that stopped mid-capture left the guest frozen, and a frozen guest cannot answer envd.
+	if err := unfreeze(context.Background(), machine); err != nil {
+		m.log.Warn("adopt_thaw_failed", zap.String("vm_id", rec.VMID), zap.Error(err))
 	}
 
 	var client *envd.Client
@@ -122,18 +134,13 @@ func (m *Manager) AdoptOwned(owner string) (*Sandbox, bool) {
 	}
 	if err != nil {
 		m.log.Warn("adopt_failed_envd", zap.String("vm_id", rec.VMID), zap.String("owner", owner), zap.Error(err))
-		m.killOrphan(proc, rec.OverlayPath, "adoption: envd did not answer: "+err.Error())
+		m.strandOrphan(proc, owner, rec.OverlayPath, "adoption: envd did not answer: "+err.Error())
 		return nil, false
 	}
-	root := filepath.Join(jailerChrootDir(), rec.VMID, "root")
 	sb := &Sandbox{
 		ID: rec.VMID, Template: rec.Template, RootfsPath: rec.RootfsPath, UserID: "sandboxd",
-		Machine: &attachedMachine{
-			pid:    proc.Machine.Pid(),
-			root:   root,
-			client: firecracker.NewClient(filepath.Join(root, "run", rec.VMID+".sock"), quietLogrus(), false),
-		},
-		Envd: client, OverlayPath: rec.OverlayPath, TapName: rec.TapName, VMIP: rec.VMIP,
+		Machine: machine,
+		Envd:    client, OverlayPath: rec.OverlayPath, TapName: rec.TapName, VMIP: rec.VMIP,
 		NodeAddr: rec.NodeAddr, NetNS: rec.NetNS, Token: rec.Token, Egress: rec.Egress,
 		BootType: "adopted", CreatedAt: time.Now(),
 		// MemBase stays empty: without a lineage the next snapshot is a full one.
@@ -146,32 +153,63 @@ func (m *Manager) AdoptOwned(owner string) (*Sandbox, bool) {
 	return sb, true
 }
 
-// KillUnadopted removes every held VM the daemon did not claim.
-func (m *Manager) KillUnadopted() {
+// KillUnadopted removes every held VM the daemon did not claim, and every
+// stranded disk whose sandbox is not among known.
+func (m *Manager) KillUnadopted(known []string) {
 	m.mu.Lock()
 	left := m.recoverable
 	m.recoverable = map[string]*OrphanProcess{}
+	stranded := m.stranded
+	m.stranded = map[string]string{}
 	m.mu.Unlock()
+	for owner, overlay := range stranded {
+		if !slices.Contains(known, owner) {
+			deleteOverlay(overlay)
+		}
+	}
 	for id, p := range left {
 		rec, _ := m.readAdopt(id)
 		m.killOrphan(p, rec.OverlayPath, "no daemon sandbox claimed it after the restart")
 	}
 }
 
-// killOrphan stops an orphaned VMM and releases what it held.
+// strandOrphan stops a VM that could not be adopted and keeps its disk: the
+// sandbox's record may hold a snapshot that resumes on it, though the disk is now
+// newer than that snapshot. KillUnadopted removes the disk if no record claims it.
+func (m *Manager) strandOrphan(proc *OrphanProcess, owner, overlay, reason string) {
+	if !m.stopOrphan(proc, reason) {
+		return
+	}
+	if overlay == "" {
+		overlay = proc.OverlayPath
+	}
+	m.mu.Lock()
+	m.stranded[owner] = overlay
+	m.mu.Unlock()
+}
+
+// killOrphan stops an orphaned VMM and releases what it held, disk included.
 func (m *Manager) killOrphan(proc *OrphanProcess, overlay, reason string) {
-	killErr := proc.Kill()
-	m.log.Info("killing_orphan", zap.String("sandbox_id", proc.SandboxID),
-		zap.String("reason", reason), zap.Error(killErr))
-	if killErr != nil {
-		// Never unlink the backing files of a VM that is still running.
-		m.log.Warn("orphan_still_running_after_kill", zap.String("sandbox_id", proc.SandboxID), zap.Error(killErr))
+	if !m.stopOrphan(proc, reason) {
 		return
 	}
 	if overlay == "" {
 		overlay = proc.OverlayPath
 	}
 	deleteOverlay(overlay)
+}
+
+// stopOrphan stops an orphaned VMM and releases all but its disk. false means it
+// is still running, so its backing files must stay.
+func (m *Manager) stopOrphan(proc *OrphanProcess, reason string) bool {
+	killErr := proc.Kill()
+	m.log.Info("killing_orphan", zap.String("sandbox_id", proc.SandboxID),
+		zap.String("reason", reason), zap.Error(killErr))
+	if killErr != nil {
+		// Never unlink the backing files of a VM that is still running.
+		m.log.Warn("orphan_still_running_after_kill", zap.String("sandbox_id", proc.SandboxID), zap.Error(killErr))
+		return false
+	}
 	cleanJailerRoot(filepath.Join(jailerChrootDir(), proc.SandboxID, "root"))
 	if rec, ok := m.readAdopt(proc.SandboxID); ok && rec.NetNS != "" {
 		teardownNetNS(rec.NetNS)
@@ -183,6 +221,7 @@ func (m *Manager) killOrphan(proc *OrphanProcess, overlay, reason string) {
 	m.removeEndpoint(proc.SandboxID)
 	m.removeTap(proc.SandboxID)
 	m.removeOwner(proc.SandboxID)
+	return true
 }
 
 // attachedMachine drives a VMM this daemon did not start, through its API

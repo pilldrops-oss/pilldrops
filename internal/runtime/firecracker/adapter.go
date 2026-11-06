@@ -60,7 +60,7 @@ type vmBackend interface {
 	// and removing the VMs no sandbox claimed (vm/adopt.go).
 	RecordOwner(vmID, owner string) error
 	AdoptOwned(owner string) (*vm.Sandbox, bool)
-	KillUnadopted()
+	KillUnadopted(known []string)
 }
 
 // detachLog receives a detached exec's output; inheriting envd's fds would hang the RPC.
@@ -876,7 +876,7 @@ func (r *fcRuntime) Adopt(_ context.Context, sandboxID string) (rt.Instance, err
 
 // SweepUnknown implements rt.Sweeper: once the daemon has adopted what it
 // owns, every VM still held for adoption belongs to nothing and is removed.
-func (r *fcRuntime) SweepUnknown([]string) { r.be.KillUnadopted() }
+func (r *fcRuntime) SweepUnknown(known []string) { r.be.KillUnadopted(known) }
 
 var (
 	_ rt.Adopter = (*fcRuntime)(nil)

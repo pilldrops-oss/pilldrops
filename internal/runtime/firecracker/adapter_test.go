@@ -138,7 +138,7 @@ func (f *fakeBackend) Alive(string) bool { return true }
 
 func (f *fakeBackend) RecordOwner(string, string) error      { return nil }
 func (f *fakeBackend) AdoptOwned(string) (*vm.Sandbox, bool) { return nil, false }
-func (f *fakeBackend) KillUnadopted()                        {}
+func (f *fakeBackend) KillUnadopted([]string)                {}
 
 func (f *fakeBackend) SnapshotSandbox(_ context.Context, id, destDir string) error {
 	f.snapshotted = append(f.snapshotted, id+"→"+destDir)
