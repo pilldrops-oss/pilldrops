@@ -325,7 +325,7 @@ func (s *Server) dialNodeTunnel(ctx context.Context, id string, port int, proto 
 
 	dialCtx, cancel := context.WithTimeout(ctx, forwardDialTimeout)
 	defer cancel()
-	conn, err := (&net.Dialer{Timeout: forwardDialTimeout}).DialContext(dialCtx, "tcp", host)
+	conn, err := httpx.DialNode(dialCtx, u, host)
 	if err != nil {
 		return nil, err
 	}

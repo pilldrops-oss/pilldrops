@@ -79,6 +79,7 @@ func TestNetNSHostRulesetProtectsTheHost(t *testing.T) {
 		"ip saddr 10.128.0.0/16 ct state established,related accept",
 		`iifname "vh*" ip saddr 10.128.0.0/16 drop`, // a source-only drop kills the host's own local dials
 		"ip saddr 10.128.0.0/16 ip daddr 10.128.0.0/16 drop",
+		"ip saddr 10.128.0.0/16 ip daddr 100.64.0.0/10 drop", // the node may itself sit on a tailnet
 	} {
 		if !strings.Contains(rs, want) {
 			t.Errorf("host ruleset lost %q:\n%s", want, rs)
