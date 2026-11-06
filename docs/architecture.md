@@ -95,7 +95,6 @@ internal/
   proxy/           preview reverse proxy
 templates/         sandbox image recipes
 web/               dashboard source
-cli/               older Python CLI (the maintained CLI is pilldrops-oss/pilldrops-cli)
 agent/             a small Python coding agent that drives sandboxes (example)
 action/            GitHub Action: run a command in a sandbox from a workflow
 examples/          API and SDK examples
