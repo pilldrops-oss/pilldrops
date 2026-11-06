@@ -308,6 +308,7 @@ table ip %[1]s {
 		ip saddr . ip daddr @%[4]s accept
 		ip saddr %[5]s ip daddr %[5]s drop
 		ip saddr %[5]s ip daddr 169.254.0.0/16 drop
+		ip saddr %[5]s ip daddr 100.64.0.0/10 drop
 	}
 }
 `, netnsHostTable, masq, localAPIHostRule(), peerSetName, netnsSupernet)

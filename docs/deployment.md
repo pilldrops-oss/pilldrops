@@ -842,6 +842,30 @@ being asked to do. A CA attests *"this host answers to that name"*; the pin
 attests *"this is the key belonging to the node holding node-N's heartbeat
 credential"* — which is the question the control plane actually has.
 
+### Running the hop over a private network
+
+Optional, and the pin stays the proof of which node answered. To send the hop
+through a mesh client or any other proxy, set these on the orchestrator:
+
+```bash
+HTTPS_PROXY=socks5://127.0.0.1:1055   # pinned nodes
+HTTP_PROXY=socks5://127.0.0.1:1055    # nodes with no pin yet
+NO_PROXY=api.example.com              # anything the proxy cannot reach
+```
+
+Every call to a node takes this route, including raw TCP and UDP forwards.
+`socks5://`, `socks5h://` and `http://` work for all of them; a forward through
+any other scheme is refused rather than dialled directly. A proxy that is down
+fails the call, so nothing falls back to the public path.
+
+- `ALL_PROXY` is not read, and a node on a loopback address is never proxied.
+- These variables cover the process's other outbound HTTP too, which is what
+  `NO_PROXY` is for. The environment is read once, so changing it needs a restart.
+- Close the node's public port yourself. This setting does not prove it is closed.
+
+Each node's firewall drops sandbox traffic to `100.64.0.0/10`, so a node on a
+tailnet does not offer that network to its sandboxes.
+
 ### The trust chain, in one line
 
 Node → orchestrator is HTTPS to a named host with a real certificate; that hop
