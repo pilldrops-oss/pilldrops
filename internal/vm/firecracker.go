@@ -330,22 +330,16 @@ func restoreFirecrackerSnapshot(fc FirecrackerConfig) (FirecrackerMachine, error
 	return &fcMachine{m: m}, nil
 }
 
-// resolveVCPUAndMem applies the request's VCPUs/MemoryMB, then the node
-// default, then safe minimums. Shared by both builders.
+// resolveVCPUAndMem applies the request's VCPUs/MemoryMB, then the template's
+// default, which is also what a golden restore's guest was built with.
 func resolveVCPUAndMem(fc *FirecrackerConfig) (vcpuCount, memSize int64, smt bool) {
-	vcpuCount = int64(fc.VCPUs)
+	defVCPU, defMem := defaultResources(fc.Config, fc.Template)
+	vcpuCount, memSize = int64(fc.VCPUs), int64(fc.MemoryMB)
 	if vcpuCount <= 0 {
-		vcpuCount = int64(fc.Config.VCPUs)
-	}
-	if vcpuCount <= 0 {
-		vcpuCount = 1
-	}
-	memSize = int64(fc.MemoryMB)
-	if memSize <= 0 {
-		memSize = int64(fc.Config.MemoryMB)
+		vcpuCount = int64(defVCPU)
 	}
 	if memSize <= 0 {
-		memSize = 1024 // 512 MiB OOM-kills V8/CPython on real init
+		memSize = int64(defMem)
 	}
 	return vcpuCount, memSize, false
 }
