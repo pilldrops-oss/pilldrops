@@ -5,6 +5,8 @@ package vm
 import (
 	"os"
 	"testing"
+
+	"github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
 
 // newTestFCVM has just enough set for the pure config builders. NonRootVMM is
@@ -137,4 +139,20 @@ func sigs(s []os.Signal) interface{ Len() int } {
 		return nil
 	}
 	return sigList(s)
+}
+
+// A golden restore names no size. Its guest has the template's memory from the
+// snapshot, so the cgroup ceiling must not fall back to the node default: that
+// killed a 2 GB guest at 1.5 GB.
+func TestResolveUsesTemplateResourcesWhenTheRequestNamesNone(t *testing.T) {
+	fc := newTestFCVM(t)
+	fc.VCPUs, fc.MemoryMB = 0, 0
+	fc.Template = "hermes"
+	fc.Config.VCPUs, fc.Config.MemoryMB = 1, 1024
+	fc.Config.Resources = map[string]runtime.Resources{"hermes": {VCPUs: 2, MemoryMB: 2048}}
+
+	vcpus, memMB, _ := resolveVCPUAndMem(fc)
+	if vcpus != 2 || memMB != 2048 {
+		t.Fatalf("resolved %d vCPU, %d MB; want the template's 2 vCPU, 2048 MB", vcpus, memMB)
+	}
 }
