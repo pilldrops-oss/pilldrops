@@ -172,7 +172,7 @@ func nodeView(n *cluster.Node, now time.Time) map[string]any {
 	return map[string]any{
 		"id": n.ID, "url": n.URL, "zone": n.Zone, "labels": n.Labels,
 		"healthy": n.Healthy(now, cluster.NodeTTL), "status": n.Status(now, cluster.NodeTTL),
-		"runtime": n.Runtime, "isolation": n.Isolation,
+		"runtime": n.Runtime, "isolation": n.Isolation, "version": n.Version,
 		"first_seen": n.FirstSeen.Unix(), "last_seen": n.LastSeen.Unix(),
 		"capacity":     n.Cap,
 		"url_changes":  n.URLChanges,
