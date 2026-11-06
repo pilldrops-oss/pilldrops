@@ -62,7 +62,7 @@ const NODE_STARTER = `const http = require('http');
 const PORT = process.env.PORT || 8000;
 
 http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end('<h1>🚀 Your Node sandbox is running</h1><p>Edit <code>server.js</code> and redeploy.</p>');
 }).listen(PORT, '0.0.0.0', () => console.log('listening on ' + PORT));
 `

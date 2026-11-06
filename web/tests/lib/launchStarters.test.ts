@@ -41,3 +41,10 @@ describe('go starter', () => {
     expect(starterFiles(tpl('django', 'python')).map(f => f.path)).not.toContain('main.go')
   })
 })
+
+describe('node starter', () => {
+  it('declares UTF-8, since it serves an emoji', () => {
+    const tpl: Template = { id: 'node', name: 'Node', description: '', cpu: 1, memory_mb: 512, visibility: 'public', language: 'node' }
+    expect(starterFiles(tpl)[0].content).toContain('text/html; charset=utf-8')
+  })
+})
