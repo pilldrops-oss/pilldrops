@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -737,5 +738,42 @@ func TestMemoryResumeDoesNotStartTheAppTwice(t *testing.T) {
 	}
 	if got := disk.ServerLog(sb2.ID); len(got) != 1 || got[0] != "serve.sh" {
 		t.Fatalf("a resume with no memory image left the app unstarted: %v", got)
+	}
+}
+
+type unresumableRT struct{ *runtimetest.Fake }
+
+func (unresumableRT) Restore(context.Context, rt.SnapshotRef, rt.BootSpec) (rt.Instance, error) {
+	return nil, rt.ErrUnresumable
+}
+
+// A sandbox whose disk is gone must say so, not stay "paused" answering a
+// retryable error forever. Destroy still has to clean it up.
+func TestAnUnresumableSandboxBecomesFailed(t *testing.T) {
+	d := New(Config{
+		Runtime:     unresumableRT{runtimetest.NewFake()},
+		SnapshotDir: t.TempDir(),
+		IdleTimeout: time.Minute,
+		HardTTL:     time.Hour,
+	})
+	ctx := t.Context()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Pause(ctx, sb.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		if err := d.Resume(ctx, sb.ID); !errors.Is(err, rt.ErrUnresumable) {
+			t.Errorf("resume = %v, want ErrUnresumable", err)
+		}
+	}
+	if got, ok := d.Get(sb.ID); !ok || got.State != StateFailed {
+		t.Fatalf("state = %v (ok=%v), want failed", got.State, ok)
+	}
+	if err := d.Destroy(ctx, sb.ID); err != nil {
+		t.Errorf("destroy: %v", err)
 	}
 }

@@ -34,7 +34,7 @@ func (m *Manager) captureLive(ctx context.Context, sb *Sandbox, dir, overlayDst 
 		}
 		copyMs = time.Since(t1).Milliseconds()
 	}
-	resumeErr := sb.Machine.ResumeVM(ctx)
+	resumeErr := unfreeze(ctx, sb.Machine)
 	paused = time.Since(t0)
 	if resumeErr != nil {
 		// The captured sandbox is the one that matters; a stranded one is logged loudly.
@@ -149,6 +149,17 @@ func (m *Manager) FreezeVM(ctx context.Context, sandboxID string) error {
 		return ErrSandboxNotFound
 	}
 	return sb.Machine.PauseVM(ctx)
+}
+
+const unfreezeTimeout = 10 * time.Second
+
+// unfreeze restarts a VM frozen for a capture. ctx may be the reason the capture
+// failed, and resuming on an expired one leaves the guest frozen: at shutdown the
+// next daemon then cannot adopt it and removes its disk.
+func unfreeze(ctx context.Context, machine FirecrackerMachine) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), unfreezeTimeout)
+	defer cancel()
+	return machine.ResumeVM(ctx)
 }
 
 // ThawVM starts a frozen sandbox's vCPUs again.

@@ -108,7 +108,7 @@ func (m *Manager) SnapshotSandbox(ctx context.Context, sandboxID, destDir string
 	// its timer — is what left a frozen, unreachable VM behind while the daemon's
 	// record, which reverts to "running" on this error, still billed it as live.
 	abort := func(format string, a ...any) error {
-		if err := sb.Machine.ResumeVM(ctx); err != nil {
+		if err := unfreeze(ctx, sb.Machine); err != nil {
 			m.log.Error("snapshot_abort_resume_failed",
 				zap.String("sandbox_id", sandboxID), zap.Error(err))
 		}
@@ -205,7 +205,11 @@ func (m *Manager) RestoreSandbox(ctx context.Context, sandboxID, srcDir string, 
 		return nil, fmt.Errorf("snapshot meta has invalid vmip %q", meta.VMIP)
 	}
 	if _, err := os.Stat(meta.OverlayPath); err != nil {
-		return nil, fmt.Errorf("snapshot overlay missing: %w", err)
+		if os.IsNotExist(err) {
+			m.log.Error("resume_disk_missing", zap.String("sandbox_id", sandboxID), zap.Error(err))
+			return nil, fmt.Errorf("%w: its disk is missing", runtime.ErrUnresumable)
+		}
+		return nil, fmt.Errorf("snapshot overlay: %w", err)
 	}
 
 	// The resuming VMM's uid is derived from this id, which need not be the id

@@ -32,8 +32,10 @@ var (
 	// ErrNodeBusy: this node cannot take the sandbox right now (full, no boot
 	// slot, disk pressure) though another node might. The control plane
 	// re-places the create instead of failing it.
-	ErrNodeBusy    = errors.New("node busy")
-	ErrPaused      = errors.New("sandbox is paused")
+	ErrNodeBusy = errors.New("node busy")
+	ErrPaused   = errors.New("sandbox is paused")
+	// ErrUnresumable is a saved sandbox that retrying will never bring back.
+	ErrUnresumable = errors.New("this sandbox can no longer be resumed")
 	ErrNoAppOnPort = errors.New("no app listening on that port")
 	// ErrPathNotFound means the sandbox is fine and the path inside it is not
 	// there. Distinct from ErrNotFound, which names the sandbox: reporting a

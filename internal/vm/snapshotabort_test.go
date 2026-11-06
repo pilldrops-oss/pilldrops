@@ -17,12 +17,17 @@ import (
 type abortMachine struct {
 	FirecrackerMachine
 	paused, resumed, stopped int
+	resumeErr                error
 }
 
-func (a *abortMachine) PauseVM(context.Context) error  { a.paused++; return nil }
-func (a *abortMachine) ResumeVM(context.Context) error { a.resumed++; return nil }
-func (a *abortMachine) Stop(context.Context) error     { a.stopped++; return nil }
-func (a *abortMachine) ChrootRoot() string             { return "" }
+func (a *abortMachine) PauseVM(context.Context) error { a.paused++; return nil }
+func (a *abortMachine) ResumeVM(ctx context.Context) error {
+	a.resumed++
+	a.resumeErr = ctx.Err()
+	return ctx.Err()
+}
+func (a *abortMachine) Stop(context.Context) error { a.stopped++; return nil }
+func (a *abortMachine) ChrootRoot() string         { return "" }
 
 // A pause that cannot write its image must give the sandbox back. Before this,
 // SnapshotSandbox dropped the machine from the active set, closed envd and
@@ -66,6 +71,31 @@ func TestAFailedPauseGivesTheSandboxBack(t *testing.T) {
 	}
 	if timerCancelled {
 		t.Error("the sandbox's TTL timer was cancelled by a pause that failed")
+	}
+}
+
+// Node shutdown shares one short deadline across every pause. The sandbox whose
+// pause it expired in has to be thawed anyway: left frozen, its envd cannot answer
+// the next daemon, which then kills it and deletes its disk.
+func TestAPauseThatRanOutOfTimeStillThawsTheGuest(t *testing.T) {
+	mach := &abortMachine{}
+	m := &Manager{
+		config: Config{OverlayDir: t.TempDir()},
+		log:    zap.NewNop(),
+		active: map[string]*Sandbox{"sb-1": {ID: "sb-1", Machine: mach}},
+	}
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := m.SnapshotSandbox(expired, "sb-1", filepath.Join(blocker, "snap")); err == nil {
+		t.Fatal("pause reported success with no snapshot written")
+	}
+	if mach.resumed != 1 || mach.resumeErr != nil {
+		t.Errorf("resumed %d times, last on a context with error %v: the guest stays frozen", mach.resumed, mach.resumeErr)
 	}
 }
 
