@@ -231,3 +231,30 @@ func TestAllowEntriesMustBePublicDestinations(t *testing.T) {
 		}
 	}
 }
+
+// An allow wildcard over a public suffix admits every registrant under it.
+func TestCheckWildcardsRefusesPublicSuffixAllows(t *testing.T) {
+	for _, tc := range []struct {
+		rules  Rules
+		refuse bool
+	}{
+		{Rules{Allow: []string{"*.co.uk"}}, true},          // ICANN section
+		{Rules{Allow: []string{"*.github.io"}}, true},      // private section: shared hosting
+		{Rules{Allow: []string{"*.herokuapp.com"}}, true},  // private section
+		{Rules{Allow: []string{"*.example.co.uk"}}, false}, // one registrant
+		{Rules{Allow: []string{"*.pages.example.com"}}, false},
+		{Rules{Allow: []string{"co.uk", "api.github.com"}}, false}, // exact names admit one host
+		{Rules{Deny: []string{"*.co.uk"}}, false},                  // a deny only narrows
+	} {
+		err := CheckWildcards(&tc.rules)
+		if tc.refuse && err == nil {
+			t.Errorf("%+v was accepted; a wildcard over a public suffix allows every site registered under it", tc.rules)
+		}
+		if !tc.refuse && err != nil {
+			t.Errorf("%+v was refused: %v", tc.rules, err)
+		}
+	}
+	if err := CheckWildcards(nil); err != nil {
+		t.Errorf("no rules refused: %v", err)
+	}
+}

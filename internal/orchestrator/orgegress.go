@@ -59,6 +59,10 @@ func (s *Server) handleOrgEgressPut(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "network: "+err.Error())
 			return
 		}
+		if err := egress.CheckWildcards(body.Network); err != nil {
+			writeErr(w, http.StatusBadRequest, "network: "+err.Error())
+			return
+		}
 		// Same refusal as a create carrying domains, and for a worse reason: a
 		// stored domain rule would fail every later create in the org at boot,
 		// far from whoever typed it.
