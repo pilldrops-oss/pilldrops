@@ -156,3 +156,67 @@ func TestLiveIPv6BackstopActuallyDrops(t *testing.T) {
 			"and the load tests above are unable to distinguish from a working control.")
 	}
 }
+
+// A node on a tailnet has a route to 100.64.0.0/10 on the host, so the host's
+// forward chain must stop a sandbox using it. The positive controls are the same
+// ping before the table loads, and a public address that must still pass after.
+// Topology: [guest] vp0 10.128.0.2 <--> vh0 10.128.0.1 [host] vt0 <--> vt1 [far].
+func TestLiveHostRulesetStopsASandboxReachingTheTailnetRange(t *testing.T) {
+	if _, err := exec.LookPath("ping"); err != nil {
+		t.Skip("ping not installed")
+	}
+	hostNS := liveNetNS(t)
+	guestNS, farNS := hostNS+"-guest", hostNS+"-far"
+	for _, ns := range []string{guestNS, farNS} {
+		_ = exec.Command("ip", "netns", "delete", ns).Run()
+		if out, err := exec.Command("ip", "netns", "add", ns).CombinedOutput(); err != nil {
+			t.Skipf("cannot create namespace %s: %v: %s", ns, err, out)
+		}
+		t.Cleanup(func() { _ = exec.Command("ip", "netns", "delete", ns).Run() })
+	}
+	for _, s := range [][]string{
+		{"ip", "-n", hostNS, "link", "add", "vh0", "type", "veth", "peer", "name", "vp0"},
+		{"ip", "-n", hostNS, "link", "set", "vp0", "netns", guestNS},
+		{"ip", "-n", hostNS, "addr", "add", "10.128.0.1/30", "dev", "vh0"},
+		{"ip", "-n", hostNS, "link", "set", "vh0", "up"},
+		{"ip", "-n", guestNS, "addr", "add", "10.128.0.2/30", "dev", "vp0"},
+		{"ip", "-n", guestNS, "link", "set", "vp0", "up"},
+		{"ip", "-n", guestNS, "route", "add", "default", "via", "10.128.0.1"},
+		{"ip", "-n", hostNS, "link", "add", "vt0", "type", "veth", "peer", "name", "vt1"},
+		{"ip", "-n", hostNS, "link", "set", "vt1", "netns", farNS},
+		{"ip", "-n", hostNS, "addr", "add", "100.64.0.1/24", "dev", "vt0"},
+		{"ip", "-n", hostNS, "addr", "add", "203.0.113.1/24", "dev", "vt0"},
+		{"ip", "-n", hostNS, "link", "set", "vt0", "up"},
+		{"ip", "-n", farNS, "addr", "add", "100.64.0.2/24", "dev", "vt1"},
+		{"ip", "-n", farNS, "addr", "add", "203.0.113.2/24", "dev", "vt1"},
+		{"ip", "-n", farNS, "link", "set", "vt1", "up"},
+		{"ip", "-n", farNS, "route", "add", "default", "via", "100.64.0.1"},
+		{"ip", "netns", "exec", hostNS, "sh", "-c", "echo 1 > /proc/sys/net/ipv4/ip_forward"},
+	} {
+		if out, err := exec.Command(s[0], s[1:]...).CombinedOutput(); err != nil {
+			t.Skipf("could not build the probe topology (%v): %v: %s", s, err, out)
+		}
+	}
+
+	const tailnetAddr, publicAddr = "100.64.0.2", "203.0.113.2"
+	ping := func(addr string) error {
+		return exec.Command("ip", "netns", "exec", guestNS, "ping", "-c", "1", "-W", "2", addr).Run()
+	}
+	for _, addr := range []string{tailnetAddr, publicAddr} {
+		if err := ping(addr); err != nil {
+			t.Skipf("POSITIVE CONTROL FAILED: %s is unreachable with no rules loaded, so this host "+
+				"cannot answer the question: %v", addr, err)
+		}
+	}
+
+	if out, err := loadRuleset(t, hostNS, buildNetNSHostRuleset("vt0")); err != nil {
+		t.Fatalf("loading the host ruleset: %s", out)
+	}
+
+	if err := ping(tailnetAddr); err == nil {
+		t.Error("a sandbox still reaches the tailnet range through the host")
+	}
+	if err := ping(publicAddr); err != nil {
+		t.Errorf("the rule also stopped public traffic, which every sandbox needs: %v", err)
+	}
+}

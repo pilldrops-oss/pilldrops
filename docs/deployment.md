@@ -861,6 +861,7 @@ fails the call, so nothing falls back to the public path.
 - `ALL_PROXY` is not read, and a node on a loopback address is never proxied.
 - These variables cover the process's other outbound HTTP too, which is what
   `NO_PROXY` is for. The environment is read once, so changing it needs a restart.
+- On a node, the same variables also route its heartbeat to the orchestrator.
 - Close the node's public port yourself. This setting does not prove it is closed.
 
 Each node's firewall drops sandbox traffic to `100.64.0.0/10`, so a node on a
