@@ -407,10 +407,10 @@ func (s *Server) Routes() http.Handler {
 	// the path form before the mux sees it. observability.Middleware resolves
 	// the correlation id everything below reads. The span is named by mux
 	// pattern so sandbox ids do not become distinct operations.
-	return s.hostIngress(observability.Middleware(observability.TraceMiddleware(func(r *http.Request) string {
+	return s.shareFront(s.hostIngress(observability.Middleware(observability.TraceMiddleware(func(r *http.Request) string {
 		_, pattern := mux.Handler(r)
 		return pattern
-	})(s.capBody(mux))))
+	})(s.capBody(mux)))))
 }
 
 // EdgeRoutes is the sandbox data path alone: previews in path and host form,
@@ -424,10 +424,10 @@ func (s *Server) EdgeRoutes() http.Handler {
 	mux.HandleFunc("GET /livez", s.handleLive)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("/preview/{id}/{rest...}", s.handlePreview)
-	return s.hostIngress(observability.Middleware(observability.TraceMiddleware(func(r *http.Request) string {
+	return s.shareFront(s.hostIngress(observability.Middleware(observability.TraceMiddleware(func(r *http.Request) string {
 		_, pattern := mux.Handler(r)
 		return pattern
-	})(mux)))
+	})(mux))))
 }
 
 // handleLive checks no dependency: the only response to a liveness failure is

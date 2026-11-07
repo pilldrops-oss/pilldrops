@@ -45,11 +45,6 @@ var (
 		"juniper", "kestrel", "lark", "maple", "otter", "pine", "quail", "reef"}
 )
 
-// shareHub holds this replica's share tunnels. Task 3 replaces it.
-type shareHub struct{}
-
-func (h *shareHub) end(name, reason string) {}
-
 // shareDomain is SHARE_DOMAIN as set. Only a local dev run gives it a port.
 func shareDomain() string { return strings.TrimSpace(os.Getenv("SHARE_DOMAIN")) }
 
