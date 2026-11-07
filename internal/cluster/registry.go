@@ -42,11 +42,37 @@ type Registry struct {
 	// a wiped or restarted Redis loses every route, and until the nodes'
 	// inventories rebuild them each sandbox would read as not found.
 	routeFallback func(sandboxID string) (nodeID string, ok bool)
+
+	saveFlags func(SavedNodeFlags)
 }
 
 // SetRouteFallback installs where NodeFor looks after a route miss; the
 // control plane points it at the sandbox rows, which record the owning node.
 func (r *Registry) SetRouteFallback(f func(sandboxID string) (string, bool)) { r.routeFallback = f }
+
+// KeepFlags makes cordon and drain outlive a restart of an in-memory node table:
+// saved seeds the table, and save runs on every later change. It does nothing
+// for a shared table, whose flags already live outside the process.
+func (r *Registry) KeepFlags(saved []SavedNodeFlags, save func(SavedNodeFlags)) {
+	mem, ok := r.nodes.(*memNodeStore)
+	if !ok {
+		return
+	}
+	mem.seedFlags(saved)
+	r.saveFlags = save
+}
+
+// flagsChanged hands a node's current flags to KeepFlags' save.
+func (r *Registry) flagsChanged(id string) {
+	if r.saveFlags == nil {
+		return
+	}
+	saved := SavedNodeFlags{NodeID: id}
+	if n, ok, err := r.nodes.Get(id); err == nil && ok {
+		saved.Cordoned, saved.Draining = n.Cordoned, n.Draining
+	}
+	r.saveFlags(saved)
+}
 
 // NewRegistry builds a registry backed by in-memory stores.
 func NewRegistry() *Registry {
@@ -262,6 +288,9 @@ func (r *Registry) SetCordon(id string, on bool) bool {
 	defer r.invalidate()
 	found, err := r.nodes.SetFlag(id, FlagCordoned, on)
 	logStoreErr("cordon", err)
+	if found {
+		r.flagsChanged(id)
+	}
 	return found
 }
 
@@ -270,6 +299,9 @@ func (r *Registry) SetDrain(id string, on bool) bool {
 	defer r.invalidate()
 	found, err := r.nodes.SetFlag(id, FlagDraining, on)
 	logStoreErr("drain", err)
+	if found {
+		r.flagsChanged(id)
+	}
 	return found
 }
 
@@ -282,6 +314,7 @@ func (r *Registry) Remove(id string) bool {
 	if !found {
 		return false
 	}
+	r.flagsChanged(id)
 	_, _ = r.routes.UnplaceNode(id)
 	return true
 }

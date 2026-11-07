@@ -1929,4 +1929,25 @@ BEGIN SELECT RAISE(ABORT, 'sandboxes_state_known'); END`,
 			`ALTER TABLE sandboxes ADD COLUMN IF NOT EXISTS pause_archive TEXT NOT NULL DEFAULT ''`,
 		},
 	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 70,
+		name:    "node_flags",
+		// Cordon and drain for a control plane with no Redis, whose node table is
+		// in memory. A node with neither flag has no row.
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS node_flags (
+				node_id  TEXT PRIMARY KEY,
+				cordoned INTEGER NOT NULL DEFAULT 0,
+				draining INTEGER NOT NULL DEFAULT 0
+			)`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS node_flags (
+				node_id  TEXT PRIMARY KEY,
+				cordoned BOOLEAN NOT NULL DEFAULT FALSE,
+				draining BOOLEAN NOT NULL DEFAULT FALSE
+			)`,
+		},
+	},
 }

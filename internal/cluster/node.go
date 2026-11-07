@@ -207,6 +207,12 @@ type nodeFlags struct {
 	Draining bool `json:"draining,omitempty"`
 }
 
+// SavedNodeFlags is one node's operator flags as kept outside the node table.
+type SavedNodeFlags struct {
+	NodeID             string
+	Cordoned, Draining bool
+}
+
 func (f *nodeFlags) set(flag NodeFlag, on bool) {
 	switch flag {
 	case FlagCordoned:
@@ -330,6 +336,16 @@ func (m *memNodeStore) SetFlag(id string, f NodeFlag, on bool) (bool, error) {
 	}
 	fl.set(f, on)
 	return true, nil
+}
+
+// seedFlags sets flags for nodes that have not sent a heartbeat yet, which
+// SetFlag refuses: after a restart the table starts empty.
+func (m *memNodeStore) seedFlags(saved []SavedNodeFlags) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, s := range saved {
+		m.flags[s.NodeID] = &nodeFlags{Cordoned: s.Cordoned, Draining: s.Draining}
+	}
 }
 
 func (m *memNodeStore) flagsFor(id string) nodeFlags {
