@@ -121,12 +121,25 @@ RestartSec=3
 # Turns the fail-closed guards ON: ProductionDBError, IsolationGuardError,
 # StorageCapGuardError, SnapshotGuardError. Without it every one is inert.
 Environment=SANDBOXD_PRODUCTION=1
+# Must match packaging/sandboxd.service: wrong PORT/SANDBOXD_DATA strand the
+# node off the port the join response advertised and off real persistent
+# storage; a missing KERNEL_PATH/FIRECRACKER_BIN/JAILER_BIN silently drops the
+# node to Docker-only (no Firecracker).
+Environment=PORT=18080
+Environment=SANDBOXD_DATA=/var/lib/sandbox/state
+Environment=KERNEL_PATH=/var/lib/sandbox/vmlinux
+Environment=FIRECRACKER_BIN=/usr/bin/firecracker
+Environment=JAILER_BIN=/usr/bin/jailer
+Environment=SNAPSHOT_DIR=/var/lib/sandbox/templates
+Environment=OVERLAY_DIR=/var/lib/sandbox/overlays
 MemoryMax=60%
 TasksMax=8192
 NoNewPrivileges=yes
 [Install]
 WantedBy=multi-user.target
 UNIT
+sudo mkdir -p -m 0700 /var/lib/sandbox/state
+sudo chown root:root /var/lib/sandbox/state
 sudo systemctl daemon-reload
 sudo systemctl enable sandboxd
 # restart, not enable --now: a re-run must replace a running node's identity.

@@ -82,9 +82,9 @@ KERNEL_SHA256_x86_64="22847375721aceea63d934c28f2dfce4670b6f52ec904fae19f5145a97
 KERNEL_SHA256_aarch64="eb5d95ac8a67f7a86acf0cb35625633713ad5170b56de8617808d0e18bb832ec"
 # Go tarball checksums as published by go.dev/dl.
 # shellcheck disable=SC2034
-GO_SHA256_x86_64="39042a078ea9ceebe3ecda4a7188f0f5b96e14a071d27923ba7f40b456e85ae3"
+GO_SHA256_x86_64="ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5"
 # shellcheck disable=SC2034
-GO_SHA256_aarch64="adad240fcb6bd180cf973b4b7c747baf4ec81d08b7d40ca35940ee4531971490"
+GO_SHA256_aarch64="3f4227ce7b206a513e794f1393adb473a07b46e94d18bd15d1c684bbb7319797"
 
 log() { echo "── $*"; }
 

@@ -107,6 +107,16 @@ type nodeLimits struct {
 func (s *Server) SetLocalTemplates(fn func() []string) { s.localTemplates = fn }
 
 // handleCapabilities answers GET /v1/capabilities for this node.
+// handleWhoami names the caller on a node with no control plane, which is what
+// `pilldrops login --key` checks a key against.
+func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
+	principal := "key"
+	if operatorPrincipal(r) {
+		principal = "operator"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"org": orgID(r), "principal": principal})
+}
+
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	// Refuse rather than describe: a zero Caps would read as isolation_level "trusted".
 	if s.d == nil {

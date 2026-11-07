@@ -92,7 +92,7 @@ type fleetNodeCounts struct {
 // a sandbox unbidden; the capability verbs below are the OR, because placement
 // routes a create that needs one onto a node that has it.
 func aggregateCapabilities(nodes []*cluster.Node, now time.Time, ttl time.Duration) fleetCapabilities {
-	out := fleetCapabilities{Scope: "fleet", Features: []string{}}
+	out := fleetCapabilities{Scope: "fleet", Features: []string{"control-plane"}}
 	withRuntime, allPause := 0, true
 	out.Nodes.Total = len(nodes)
 

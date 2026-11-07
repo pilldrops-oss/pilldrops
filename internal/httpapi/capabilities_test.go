@@ -334,3 +334,33 @@ func TestCapabilitiesReportWarmRestoreStorageSize(t *testing.T) {
 		})
 	}
 }
+
+func TestWhoamiNamesTheKeyOnANode(t *testing.T) {
+	srv, key := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/whoami", nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("code %d", resp.StatusCode)
+	}
+	var who map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&who); err != nil {
+		t.Fatal(err)
+	}
+	if who["principal"] == "" || who["org"] == "" {
+		t.Errorf("whoami = %v, want a principal and an org", who)
+	}
+
+	anonymous, err := http.Get(srv.URL + "/v1/whoami")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer anonymous.Body.Close()
+	if anonymous.StatusCode != http.StatusUnauthorized {
+		t.Errorf("no key: code %d, want 401", anonymous.StatusCode)
+	}
+}

@@ -11,6 +11,7 @@ import (
 
 // A pasted command lands in shell history.
 func TestBootstrapCommandDoesNotCarryTheToken(t *testing.T) {
+	t.Setenv("NODE_BOOTSTRAP_DSN", "postgres://u:p@h:5432/db")
 	t.Setenv("NODE_BOOTSTRAP_SECRET", "sekret")
 	s := NewServer("op-key", "nodetoken")
 	req := httptest.NewRequest(http.MethodPost, "/v1/join-tokens", nil)
