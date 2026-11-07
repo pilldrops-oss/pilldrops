@@ -93,6 +93,9 @@ func (s *Server) movable(r *http.Request, st *store.Store, id string) (store.San
 		return store.SandboxRecord{}, nil, false
 	}
 	rec, found, err := st.SandboxByID(r.Context(), id)
+	if err != nil {
+		s.log().ErrorContext(r.Context(), "could not read the sandbox to move", "component", "move", "sandbox", id, "err", err)
+	}
 	if err != nil || !found || rec.OrgID != fastOrg(r) {
 		return store.SandboxRecord{}, nil, false
 	}

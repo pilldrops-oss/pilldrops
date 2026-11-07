@@ -115,3 +115,24 @@ func TestSandboxesByOrgSpansNodesAndExcludesOtherOrgs(t *testing.T) {
 		t.Fatalf("want u:abc's two sandboxes across both nodes, got %v", ids)
 	}
 }
+
+// The control plane's row is a fallback for a node write that failed, never a
+// second writer: a row the node already wrote keeps its own config.
+func TestRecordPlacedSandboxFillsInButNeverOverwrites(t *testing.T) {
+	st := openTemp(t)
+	saveOn(t, st, "node-wrote", "u:abc", "node-1")
+	placed := SandboxRecord{OrgID: "u:abc", NodeID: "node-2", Template: "base", State: "running",
+		CreatedAt: 1, UpdatedAt: 1}
+	for _, id := range []string{"node-wrote", "node-failed"} {
+		placed.ID = id
+		if err := st.RecordPlacedSandbox(t.Context(), placed); err != nil {
+			t.Fatalf("record %s: %v", id, err)
+		}
+	}
+	if rec, _, _ := st.SandboxByID(t.Context(), "node-wrote"); rec.NodeID != "node-1" || rec.Template != "python-3.11" {
+		t.Errorf("the node's row was overwritten: %+v", rec)
+	}
+	if rec, ok, _ := st.SandboxByID(t.Context(), "node-failed"); !ok || rec.NodeID != "node-2" || rec.OrgID != "u:abc" {
+		t.Errorf("no row filled in for a sandbox the node did not record: %+v ok=%v", rec, ok)
+	}
+}

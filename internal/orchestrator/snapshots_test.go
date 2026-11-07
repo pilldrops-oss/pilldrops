@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/artifact"
+	"github.com/pilldrops-oss/pilldrops/internal/auth/orgassert"
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
@@ -44,6 +45,20 @@ type fakeSnapshotNode struct {
 	rootfs      []byte
 	lieDigest   bool
 	rootfsReads int
+	// exportOrgs is the org each snapshot-export call verifiably named, "" for none.
+	exportOrgs []string
+}
+
+// exportOrg verifies the org assertion on a snapshot-export call as a node does.
+func (n *fakeSnapshotNode) exportOrg(r *http.Request) {
+	var principal []string
+	if id := r.Header.Get(keyIDHeader); id != "" {
+		principal = []string{id, r.Header.Get(keyRoleHeader)}
+	}
+	org, _, _ := orgassert.Verify([]byte("nodetoken"), r.Header.Get(orgOverride), "node-fc", r.Method, r.URL.Path, time.Now(), principal...)
+	n.mu.Lock()
+	n.exportOrgs = append(n.exportOrgs, org)
+	n.mu.Unlock()
 }
 
 func newFakeSnapshotNode(t *testing.T) *fakeSnapshotNode {
@@ -51,6 +66,7 @@ func newFakeSnapshotNode(t *testing.T) *fakeSnapshotNode {
 	n := &fakeSnapshotNode{mark: "v1", payload: artifact.PayloadSnapshot}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/sandboxes/{id}/snapshot-export", func(w http.ResponseWriter, r *http.Request) {
+		n.exportOrg(r)
 		_, _ = io.Copy(io.Discard, r.Body)
 		n.mu.Lock()
 		n.captures++
@@ -76,6 +92,7 @@ func newFakeSnapshotNode(t *testing.T) *fakeSnapshotNode {
 		_, _ = w.Write([]byte(mark + ":image.tar:" + strings.Repeat("d", 96))) //nolint:errcheck // test
 	})
 	mux.HandleFunc("GET /v1/sandboxes/{id}/snapshot-export/{build}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		n.exportOrg(r)
 		n.mu.Lock()
 		mark, rootfs, lie := n.mark, n.rootfs, n.lieDigest
 		if rootfs != nil && r.PathValue("name") == artifact.NameRootfs {
@@ -103,10 +120,20 @@ func newFakeSnapshotNode(t *testing.T) *fakeSnapshotNode {
 			strings.Repeat("x", 64+len(r.PathValue("name")))))
 	})
 	mux.HandleFunc("DELETE /v1/sandboxes/{id}/snapshot-export/{build}", func(w http.ResponseWriter, r *http.Request) {
+		n.exportOrg(r)
 		n.mu.Lock()
 		n.deleted = append(n.deleted, r.PathValue("build"))
 		n.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
+	})
+	// A create that, like a node whose own row write failed, leaves no row.
+	mux.HandleFunc("POST /v1/sandboxes", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck // test
+			"id": "sb-made-here", "template": "base", "status": "running",
+			"created_at": time.Now().UTC(), "expires_at": nil, "visibility": "org",
+		})
 	})
 	mux.HandleFunc("DELETE /v1/sandboxes/{id}", func(w http.ResponseWriter, r *http.Request) {
 		n.mu.Lock()
@@ -503,5 +530,46 @@ func TestAnotherOrgCannotSnapshotASandbox(t *testing.T) {
 	defer f.node.mu.Unlock()
 	if f.node.captures != 0 {
 		t.Errorf("the node was asked to capture for another org")
+	}
+}
+
+// A node answers the snapshot-export API only for the sandbox's own org, so a
+// save outside "default" has to name it on every call: once it did not, and
+// every customer's save and move failed with the node's 404.
+func TestASnapshotOfAnotherOrgsSandboxNamesThatOrgToTheNode(t *testing.T) {
+	f := newSnapshotFleet(t)
+	_, key, err := f.st.CreateKey(t.Context(), "acme", "u:acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.s.reg.Place("sb-2", "node-fc")
+	if err := f.st.SaveSandbox(t.Context(), store.SandboxRecord{
+		ID: "sb-2", OrgID: "u:acme", NodeID: "node-fc", Template: "base", State: "running",
+		CreatedAt: 1, UpdatedAt: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status, out := f.do(t, "POST", "/v1/sandboxes/sb-2/snapshot", key, `{"name":"acme-golden"}`); status != http.StatusAccepted {
+		t.Fatalf("save: status %d body %v", status, out["_raw"])
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		f.node.mu.Lock()
+		done := len(f.node.deleted) > 0
+		f.node.mu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	f.node.mu.Lock()
+	defer f.node.mu.Unlock()
+	if len(f.node.exportOrgs) == 0 {
+		t.Fatal("the node was never asked to capture")
+	}
+	for i, org := range f.node.exportOrgs {
+		if org != "u:acme" {
+			t.Errorf("snapshot-export call %d named org %q, want u:acme", i, org)
+		}
 	}
 }

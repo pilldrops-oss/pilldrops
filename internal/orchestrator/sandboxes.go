@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
 	"github.com/pilldrops-oss/pilldrops/internal/egress"
@@ -334,6 +336,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.Unmarshal(rb, &created) == nil && created.ID != "" {
 			s.reg.Place(created.ID, node.ID)
+			s.recordPlaced(r.Context(), rb, fastOrg(r), node.ID, req.VCPU, req.MemoryMB)
 			if st := s.st.Load(); st != nil {
 				_ = st.SetSandboxAttribution(r.Context(), created.ID, store.ClassifySource(req.Client), req.Client) //nolint:errcheck // best-effort: a failure here just means attribution shows up later, not never
 			}
@@ -368,6 +371,47 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(rb) //nolint:errcheck // best-effort: status/headers are already committed, nothing left to do on a write failure
+}
+
+// recordPlaced makes sure the control plane has a row for a sandbox a node
+// just answered 201 for. The row is what move, the store-backed list and the
+// route fallback read; the node writes it, but only best-effort, so a failed
+// write there left a running sandbox no fleet verb could find.
+func (s *Server) recordPlaced(ctx context.Context, nodeAnswer []byte, org, nodeID string, vcpu, memMiB int) {
+	st := s.st.Load()
+	if st == nil {
+		return
+	}
+	var doc struct {
+		ID         string     `json:"id"`
+		Template   string     `json:"template"`
+		Name       string     `json:"name"`
+		Status     string     `json:"status"`
+		CreatedBy  string     `json:"created_by"`
+		Visibility string     `json:"visibility"`
+		CreatedAt  time.Time  `json:"created_at"`
+		ExpiresAt  *time.Time `json:"expires_at"`
+	}
+	if json.Unmarshal(nodeAnswer, &doc) != nil || doc.ID == "" {
+		return
+	}
+	now := s.now()
+	if doc.CreatedAt.IsZero() {
+		doc.CreatedAt = now
+	}
+	var expires int64
+	if doc.ExpiresAt != nil {
+		expires = doc.ExpiresAt.Unix()
+	}
+	if err := st.RecordPlacedSandbox(ctx, store.SandboxRecord{
+		ID: doc.ID, Template: doc.Template, Name: doc.Name, OrgID: org, NodeID: nodeID,
+		State: cmp.Or(doc.Status, "running"), VCPU: vcpu, MemMiB: memMiB,
+		CreatedBy: doc.CreatedBy, Visibility: doc.Visibility,
+		CreatedAt: doc.CreatedAt.Unix(), ExpiresAt: expires, UpdatedAt: now.Unix(),
+	}); err != nil {
+		s.log().ErrorContext(ctx, "could not record a created sandbox; move and the list will not find it",
+			"component", "orchestrator", "sandbox", doc.ID, "node", nodeID, "err", err)
+	}
 }
 
 // anyEgressDomainsOn reports whether a schedulable node of runtime runs the

@@ -135,7 +135,7 @@ func (d *Daemon) Fork(ctx context.Context, parentID string, spec ForkSpec) (res 
 		// private. The HTTP layer has already refused a fork of a sandbox this
 		// key cannot see, so nothing here needs the parent's own visibility.
 		CreatedBy:  spec.CreatedBy,
-		Visibility: visibilityOrPrivate(spec.Visibility),
+		Visibility: forkVisibility(spec.Visibility, spec.CreatedBy),
 		inst:       inst,
 		meter:      newMeter(vcpu, memMiB, storageMB, now),
 		unpin:      unpin,

@@ -109,6 +109,21 @@ func (s *Store) SaveSandbox(ctx context.Context, r SandboxRecord) error {
 	return err
 }
 
+// RecordPlacedSandbox inserts the row for a sandbox a node has just created,
+// unless the node already wrote one: the node's own write is best-effort and
+// only logged there, and without the row the control plane cannot list, move
+// or route-fall-back to a sandbox that is running and billing.
+func (s *Store) RecordPlacedSandbox(ctx context.Context, r SandboxRecord) error {
+	_, err := s.exec(ctx,
+		`INSERT INTO sandboxes (id, template, name, org_id, node_id, state, vcpu, mem_mib, created_by, visibility, created_at, expires_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO NOTHING`,
+		r.ID, r.Template, r.Name, r.OrgID, r.NodeID, r.State, r.VCPU, r.MemMiB, r.CreatedBy, r.Visibility,
+		r.CreatedAt, r.ExpiresAt, r.UpdatedAt,
+	)
+	return err
+}
+
 // SandboxBySlug returns the live sandbox holding slug; ok=false when none does.
 func (s *Store) SandboxBySlug(ctx context.Context, slug string) (SandboxRecord, bool, error) {
 	if slug == "" {

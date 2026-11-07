@@ -253,13 +253,13 @@ func (s *Server) captureSnapshot(ctx context.Context, node *cluster.Node, sandbo
 	if st == nil || blobs == nil {
 		return errors.New("the control plane lost its database or artifact store mid-save")
 	}
-	capt, err := s.nodeSnapshotExport(ctx, node, sandboxID, snap.BuildID)
+	capt, err := s.nodeSnapshotExport(ctx, node, snap.OrgID, sandboxID, snap.BuildID)
 	if err != nil {
 		return err
 	}
 	// The export directory is the node's, and it is the size of the guest's RAM.
 	defer func() {
-		if err := s.nodeSnapshotExportDelete(context.WithoutCancel(ctx), node, sandboxID, snap.BuildID); err != nil {
+		if err := s.nodeSnapshotExportDelete(context.WithoutCancel(ctx), node, snap.OrgID, sandboxID, snap.BuildID); err != nil {
 			slog.Warn("a snapshot export directory was left on the node", "component", "artifact",
 				"node", node.ID, "sandbox", sandboxID, "build", snap.BuildID, "err", err)
 		}
@@ -301,7 +301,7 @@ func (s *Server) captureSnapshot(ctx context.Context, node *cluster.Node, sandbo
 				SourceSandbox: sandboxID, TapName: capt.TapName, VMIP: capt.VMIP,
 			},
 			Open: func(ctx context.Context, name string) (io.ReadCloser, error) {
-				return s.nodeSnapshotObject(ctx, node, sandboxID, snap.BuildID, name)
+				return s.nodeSnapshotObject(ctx, node, snap.OrgID, sandboxID, snap.BuildID, name)
 			},
 			Now: s.now().Unix(),
 		}); err != nil {
@@ -362,7 +362,7 @@ type snapshotCapture struct {
 // export API. Its own client, not forward: a capture writes the guest's whole
 // RAM to disk and a transfer moves it, so both outlast the ordinary node
 // timeout, and neither may be replayed after a transport error.
-func (s *Server) nodeSnapshotRequest(ctx context.Context, node *cluster.Node,
+func (s *Server) nodeSnapshotRequest(ctx context.Context, node *cluster.Node, org,
 	method, path string, body []byte, timeout time.Duration) (*http.Response, error) {
 
 	base, hop, err := s.nodeHopLong(node, timeout)
@@ -383,6 +383,10 @@ func (s *Server) nodeSnapshotRequest(ctx context.Context, node *cluster.Node,
 	if node.Key != "" {
 		req.Header.Set("Authorization", "Bearer "+node.Key)
 	}
+	// The node answers only for the sandbox's own org; without it every org but "default" is a 404.
+	if err := s.setOrgAndKey(ctx, req, node, method, path, org); err != nil {
+		return nil, err
+	}
 	resp, err := hop.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s on %s: %w", method, path, node.ID, err)
@@ -397,13 +401,13 @@ func snapshotExportPath(sandboxID, buildID string) string {
 
 // nodeSnapshotExport asks the node to capture the sandbox into an export
 // directory named for the build. The sandbox keeps running.
-func (s *Server) nodeSnapshotExport(ctx context.Context, node *cluster.Node, sandboxID, buildID string) (snapshotCapture, error) {
+func (s *Server) nodeSnapshotExport(ctx context.Context, node *cluster.Node, org, sandboxID, buildID string) (snapshotCapture, error) {
 	var out snapshotCapture
 	body, err := json.Marshal(map[string]string{"build_id": buildID})
 	if err != nil {
 		return out, err
 	}
-	resp, err := s.nodeSnapshotRequest(ctx, node,
+	resp, err := s.nodeSnapshotRequest(ctx, node, org,
 		"POST", "/v1/sandboxes/"+url.PathEscape(sandboxID)+"/snapshot-export", body, snapshotPublishTimeout)
 	if err != nil {
 		return out, err
@@ -429,8 +433,8 @@ func (s *Server) nodeSnapshotExport(ctx context.Context, node *cluster.Node, san
 
 // nodeSnapshotObject streams one captured object off the node, the way
 // exportImage streams a built rootfs.
-func (s *Server) nodeSnapshotObject(ctx context.Context, node *cluster.Node, sandboxID, buildID, name string) (io.ReadCloser, error) {
-	resp, err := s.nodeSnapshotRequest(ctx, node,
+func (s *Server) nodeSnapshotObject(ctx context.Context, node *cluster.Node, org, sandboxID, buildID, name string) (io.ReadCloser, error) {
+	resp, err := s.nodeSnapshotRequest(ctx, node, org,
 		"GET", snapshotExportPath(sandboxID, buildID)+"/"+url.PathEscape(name), nil, snapshotPublishTimeout)
 	if err != nil {
 		return nil, err
@@ -445,8 +449,8 @@ func (s *Server) nodeSnapshotObject(ctx context.Context, node *cluster.Node, san
 }
 
 // nodeSnapshotExportDelete drops the node's export directory.
-func (s *Server) nodeSnapshotExportDelete(ctx context.Context, node *cluster.Node, sandboxID, buildID string) error {
-	resp, err := s.nodeSnapshotRequest(ctx, node, "DELETE", snapshotExportPath(sandboxID, buildID), nil, 30*time.Second)
+func (s *Server) nodeSnapshotExportDelete(ctx context.Context, node *cluster.Node, org, sandboxID, buildID string) error {
+	resp, err := s.nodeSnapshotRequest(ctx, node, org, "DELETE", snapshotExportPath(sandboxID, buildID), nil, 30*time.Second)
 	if err != nil {
 		return err
 	}

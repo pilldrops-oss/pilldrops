@@ -52,6 +52,7 @@ func (s *Server) handleFork(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.Unmarshal(rb, &created) == nil && created.ID != "" {
 			s.reg.Place(created.ID, node.ID)
+			s.recordPlaced(r.Context(), rb, fastOrg(r), node.ID, 0, 0)
 			// Called even with no url: the node's other *_url fields carry its
 			// own ?ptok= and must not be relayed either. See sanitizeNodeURLs.
 			to, viewer := s.previewLinks(r, created.URL)

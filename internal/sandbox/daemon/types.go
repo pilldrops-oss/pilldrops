@@ -282,13 +282,16 @@ func visibilityOrDefault(v string) string {
 	return v
 }
 
-// visibilityOrPrivate is the fork default: a child nobody asked to share is
-// private to whoever forked it.
-func visibilityOrPrivate(v string) string {
-	if v == "" {
+// forkVisibility is the fork default: a child nobody asked to share is
+// private to whoever forked it. A forker with no key id (the portal acting for
+// an org, an unsigned hop) owns nothing, and a private child with no creator is
+// visible to no one but an operator, so that child stays org-visible as an
+// unowned create does.
+func forkVisibility(v, createdBy string) string {
+	if v == "" && createdBy != "" {
 		return sandbox.VisibilityPrivate
 	}
-	return v
+	return visibilityOrDefault(v)
 }
 
 // unixOrZero maps the zero time to 0; time.Time{}.Unix() would read back as long expired.
