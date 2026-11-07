@@ -486,22 +486,24 @@ A production node refuses to start rather than run unsafely:
 > path under `/var/lib/...`). `FC_MEM_SNAPSHOTS=0` opts a node back out, and
 > then pause is a 500 and the idle timers never fire.
 >
-> **Not every intermittent resume failure was the shared node.** One of them is
-> the guest: a VM restored from a memory image intermittently stops executing
+> **Not every intermittent resume failure was the shared node.** One of them was
+> the guest: a VM restored from a memory image intermittently stopped executing
 > anything a timer drives — a 1 Hz timer inside it managed one tick in 303
-> seconds while its clock ran normally — and the stall lasts as long as that VM
+> seconds while its clock ran normally — and the stall lasted as long as that VM
 > had been alive when it was snapshotted, measured 1:1 up to 303.9 s on a
-> 300-second-old sandbox, on an idle node, with no standby anywhere in its life.
-> It is intermittent, and gets likelier with age: 0 of 3 at 30 s, 3 of 8 at
-> 86 s, 4 of 5 at 300 s. The node waits it out rather than declaring the guest
-> dead — a push that Firecracker acked and nothing answered proves the guest is
-> alive — so such a resume is **slow**, up to a quarter of an hour, not failed.
-> Before that rule a five-minute-old sandbox simply could not be resumed: the
-> same snapshot stalls the same length every time, so all three attempts failed
-> identically at the 120 s deadline. `hibernate_timeout` (4 h) drives this path
-> on every Firecracker node, so it is not a standby-only risk: a long-lived
-> sandbox is the *worst* case, not a safe one, and a resume of one can take
-> minutes.
+> 300-second-old sandbox. It was intermittent and likelier with age: 0 of 3 at
+> 30 s, 3 of 8 at 86 s, 4 of 5 at 300 s.
+>
+> **It does not reproduce on Firecracker v1.17.0 with host kernel 7.0.**
+> Measured 2026-10-11 on one node: 22 pause/resume cycles of `base` sandboxes,
+> 6 aged 120 s and 16 aged 300 s (8 of them running a 1 Hz timer loop), 0
+> stalled. Every resume took 67–300 ms and every credential push 9–33 ms. The
+> original measurement's Firecracker version and host kernel were not recorded,
+> so an older host may still stall. The node still waits a stall out rather
+> than declaring the guest dead — a push that Firecracker acked and nothing
+> answered proves the guest is alive — for up to a quarter of an hour, and logs
+> `resumed guest accepted the push but is not answering` when it does. That
+> line on a node is the signal the stall is back.
 >
 > **A rebaked template's goldens are rebuilt on their own.** A golden is a
 > memory image captured against one exact `rootfs.squashfs`, and the restored
@@ -618,19 +620,30 @@ which then boots store-less — and `admitBody` returns "allow" when the store i
 nil. Watch the boot logs for a store error on any replica; a fleet where one
 replica lost the race enforces no fleet-wide concurrency cap at all.
 
-**Restarting a node destroys every Firecracker sandbox on it.** The VMs survive
-the daemon — they are separate processes — but nothing can re-address them
-afterwards: `Boot` never passes the daemon's sandbox id down to the vm layer,
-the pairing between the two ids lives only in memory, and
-`fcRuntime.RecoverOrphans` returns nil. So `RecoverOrphans` reaps them on the
-way back up, logging `killing_orphan` with the reason.
+**Running Firecracker sandboxes survive a `sandboxd` restart or crash.**
 
-This is deliberate as of the orphan-recovery fix — the alternative is a live
-microVM holding its RAM that no API call can reach and no TTL will ever expire
-— but plan around it: **a `sandboxd` restart or crash is a full loss of that
-node's running sandboxes.** Drain a node before restarting it. Docker-backed
-nodes are not affected in the same way; `RecoverOrphans` there returns instances
-the daemon re-registers.
+- **A clean stop or restart** (`systemctl restart`, SIGTERM) pauses every
+  running sandbox to disk, memory included, and the next daemon resumes each one
+  on its next request (`Shutdown` in `internal/sandbox/daemon/restore.go`). A
+  sandbox whose pause fails is left running for the next daemon to adopt.
+- **A crash** (SIGKILL, OOM kill, panic) leaves the VMs running, because each is
+  a separate process. Every VM a sandbox runs on has an adoption record
+  (`<vm id>.adopt` in the token dir) naming the sandbox that owns it, written
+  when the VM is booted, restored or forked. On the way back up,
+  `RecoverOrphans` holds every VM with a record instead of killing it, the
+  daemon's restore adopts the ones its sandbox records say are running
+  (`vm_held_for_adoption`, then `vm_adopted`), and any held VM left unclaimed is
+  killed (`internal/vm/adopt.go`). A VM with no record — another daemon's, or a
+  template build's — is left alone. If writing the record fails, the node logs
+  `could not record which sandbox a VM belongs to` and that one sandbox is lost
+  on the next crash.
+
+Measured 2026-10-12 on one node: a clean restart resumed a sandbox from its
+pause snapshot with its files and uptime intact, and after a `kill -9` of
+`sandboxd` the same Firecracker process carried on and a guest process
+survived with no gap over 1.01 s in its 1 Hz tick log. Docker-backed nodes
+recover the same way through `RecoverOrphans`, which returns the containers the
+daemon re-registers.
 
 **Admission binds in exactly one of three states.** This is measured, not
 described — `TestAdmissionInTheThreeStatesAnOperatorCanBeIn` produces it, and

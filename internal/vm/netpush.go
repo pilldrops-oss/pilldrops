@@ -9,6 +9,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 	"time"
@@ -138,6 +139,8 @@ func pushToGuestWaitingOutStalls(chrootRoot, sandboxID, command string, deadline
 		if errors.Is(err, ErrGuestNoReply) && stalled > effective {
 			// The guest is there and stalled, not gone. Wait it out from the
 			// start of this push, not from now, so the bound stays a bound.
+			slog.Warn("resumed guest accepted the push but is not answering; waiting out a timer stall",
+				"component", "vm", "sandbox_id", sandboxID, "wait", stalled)
 			until = until.Add(stalled - effective)
 			effective = stalled
 		}
