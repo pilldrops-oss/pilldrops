@@ -844,3 +844,62 @@ func TestAnUnresumableSandboxBecomesFailed(t *testing.T) {
 		t.Errorf("destroy: %v", err)
 	}
 }
+
+// expiringRuntime makes the caller's deadline run out as a snapshot finishes.
+type expiringRuntime struct {
+	rt.Runtime
+	expire context.CancelFunc
+}
+
+func (e expiringRuntime) Boot(ctx context.Context, s rt.BootSpec) (rt.Instance, error) {
+	inst, err := e.Runtime.Boot(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	return expiringInstance{inst, e.expire}, nil
+}
+
+type expiringInstance struct {
+	rt.Instance
+	expire context.CancelFunc
+}
+
+func (e expiringInstance) Snapshot(ctx context.Context, dst rt.SnapshotRef) error {
+	defer e.expire()
+	return e.Instance.Snapshot(ctx, dst)
+}
+
+// ctxStore fails a write on a dead context, as the real database does.
+type ctxStore struct{ *fakePersister }
+
+func (s ctxStore) SaveSandbox(ctx context.Context, rec PersistedSandbox) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.fakePersister.SaveSandbox(ctx, rec)
+}
+
+func TestPauseRecordsTheSnapshotAfterTheDeadline(t *testing.T) {
+	ctx, expire := context.WithCancel(context.Background())
+	defer expire()
+	fp := newFakePersister(nil)
+	d := New(Config{
+		Runtime: expiringRuntime{runtimetest.NewFake(), expire}, Store: ctxStore{fp},
+		SnapshotDir: t.TempDir(),
+		IdleTimeout: time.Hour, HardTTL: time.Hour,
+	})
+	defer d.Stop()
+	sb, err := d.Create(context.Background(), CreateSpec{Template: "python-3.11", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := d.Pause(ctx, sb.ID); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	fp.mu.Lock()
+	rec := fp.saved[sb.ID]
+	fp.mu.Unlock()
+	if rec.State != string(StatePaused) || rec.Snapshot == "" {
+		t.Errorf("record state %q snapshot %q, want paused with its snapshot: a restart would drop it", rec.State, rec.Snapshot)
+	}
+}
