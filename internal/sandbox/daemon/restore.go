@@ -2,7 +2,10 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"time"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
@@ -290,12 +293,15 @@ func (d *Daemon) Shutdown(ctx context.Context) {
 	// below must not queue behind it.
 	d.stopRevives()
 	d.mu.RLock()
-	var ids []string
+	var ids, awake []string
 	for id, sb := range d.boxes {
 		// Standby too: Pause thaws first, so a frozen sandbox is written to disk
 		// rather than left holding RAM for a process that is about to exit.
 		if sb.State == StateRunning || sb.State == StateStandby || sb.State == StateResuming {
 			ids = append(ids, id)
+		}
+		if sb.State == StateRunning || sb.State == StateResuming {
+			awake = append(awake, id)
 		}
 	}
 	d.mu.RUnlock()
@@ -312,6 +318,9 @@ func (d *Daemon) Shutdown(ctx context.Context) {
 	// nothing the adopted container does not, and on the rig its commits ran
 	// out the stop window for 7 of 9 containers.
 	pause := caps.Snapshot && (caps.MemoryRestore || !adoptable)
+	if pause {
+		d.rememberForResume(awake)
+	}
 	pauseCtx := context.WithValue(ctx, shutdownKey{}, true)
 	for _, id := range ids {
 		if pause {
@@ -339,6 +348,79 @@ func (d *Daemon) Shutdown(ctx context.Context) {
 		}
 	}
 	d.Stop()
+}
+
+// resumeListName holds the sandboxes Shutdown is pausing, in SnapshotDir. It is
+// a local file, not a column: only this node's next daemon ever reads it.
+const resumeListName = "resume-after-restart.json"
+
+func (d *Daemon) readResumeList() []string {
+	raw, err := os.ReadFile(filepath.Join(d.cfg.SnapshotDir, resumeListName))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	var ids []string
+	if err == nil {
+		err = json.Unmarshal(raw, &ids)
+	}
+	if err != nil {
+		d.log().Warn("restart: could not read the sandboxes to resume; they stay paused", "error", err)
+	}
+	return ids
+}
+
+// rememberForResume runs before the first pause, so a daemon killed mid-shutdown
+// still leaves the list. It keeps ids an interrupted resume never reached.
+func (d *Daemon) rememberForResume(awake []string) {
+	ids := append(d.readResumeList(), awake...)
+	if len(ids) == 0 {
+		return
+	}
+	raw, err := json.Marshal(ids)
+	if err == nil {
+		err = os.WriteFile(filepath.Join(d.cfg.SnapshotDir, resumeListName), raw, 0o600)
+	}
+	if err != nil {
+		d.log().Warn("shutdown: could not record the sandboxes to resume; they stay paused until woken", "error", err)
+	}
+}
+
+// resumeAfterRestart wakes what the last Shutdown paused. A restart is the
+// operator's act, so a sandbox that was serving must not wait for a request
+// the wake challenge would refuse from anything but a browser.
+func (d *Daemon) resumeAfterRestart() {
+	ids := d.readResumeList()
+	if len(ids) == 0 {
+		return
+	}
+	d.mu.Lock()
+	stopping := closed(d.reviveStop)
+	if !stopping {
+		d.revives.Add(1)
+	}
+	d.mu.Unlock()
+	if stopping {
+		return
+	}
+	go func() {
+		defer d.revives.Done()
+		forEachTarget(context.Background(), len(ids), lifecycleConcurrency, func(i int) {
+			if closed(d.reviveStop) {
+				return
+			}
+			// Not found: the sandbox had no snapshot to come back from, or it moved.
+			if err := d.Resume(context.Background(), ids[i]); err != nil && !errors.Is(err, rt.ErrNotFound) {
+				d.log().Warn("restart: could not resume a sandbox; it stays paused until woken",
+					"sandbox_id", ids[i], "error", err)
+			}
+		})
+		if closed(d.reviveStop) {
+			return
+		}
+		if err := os.Remove(filepath.Join(d.cfg.SnapshotDir, resumeListName)); err != nil {
+			d.log().Warn("restart: could not remove the list of sandboxes to resume", "error", err)
+		}
+	}()
 }
 
 // reviveStopWait bounds how long stopping waits for revives to give up; a var

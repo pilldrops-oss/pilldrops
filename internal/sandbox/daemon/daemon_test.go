@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -443,6 +445,71 @@ func TestShutdownPausesRunningSandboxes(t *testing.T) {
 	}
 	if rec.StartCmd != "python3 app.py" || rec.PublicPort != 8000 {
 		t.Errorf("persisted app config = (%q, %d), want (python3 app.py, 8000)", rec.StartCmd, rec.PublicPort)
+	}
+}
+
+// A restart is not a request to sleep: the wake challenge refuses every client
+// but a browser, so a public API left paused would stay down.
+func TestRestartResumesOnlyWhatShutdownPaused(t *testing.T) {
+	fake := runtimetest.NewFake()
+	fp := newFakePersister(nil)
+	snapshots := t.TempDir()
+	newDaemon := func(store *fakePersister) *Daemon {
+		return New(Config{
+			Runtime: fake, Store: store,
+			SnapshotDir: snapshots,
+			IdleTimeout: time.Hour, HardTTL: time.Hour,
+		})
+	}
+	ctx := context.Background()
+	first := newDaemon(fp)
+	create := func() string {
+		t.Helper()
+		sb, err := first.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "default"})
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		return sb.ID
+	}
+	serving, ownerPaused, asleep := create(), create(), create()
+	if err := first.Pause(ctx, ownerPaused); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if _, err := first.Standby(ctx, asleep); err != nil {
+		t.Fatalf("standby: %v", err)
+	}
+
+	first.Shutdown(ctx)
+	var saved []PersistedSandbox
+	fp.mu.Lock()
+	for _, rec := range fp.saved {
+		saved = append(saved, rec)
+	}
+	fp.mu.Unlock()
+	second := newDaemon(newFakePersister(saved))
+	second.Start()
+
+	defer second.Stop()
+	// The list going is the last step, and proves a later owner's pause survives.
+	list := filepath.Join(snapshots, resumeListName)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, statErr := os.Stat(list)
+		if errors.Is(statErr, os.ErrNotExist) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("resume list still there: %v", statErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got, _ := second.Get(serving); got.State != StateRunning {
+		t.Errorf("serving sandbox state = %s, want running", got.State)
+	}
+	for _, id := range []string{ownerPaused, asleep} {
+		if got, _ := second.Get(id); got.State != StatePaused {
+			t.Errorf("%s state = %s, want paused", id, got.State)
+		}
 	}
 }
 
