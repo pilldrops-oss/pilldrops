@@ -1929,4 +1929,43 @@ BEGIN SELECT RAISE(ABORT, 'sandboxes_state_known'); END`,
 			`ALTER TABLE sandboxes ADD COLUMN IF NOT EXISTS pause_archive TEXT NOT NULL DEFAULT ''`,
 		},
 	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 70,
+		name:    "shares",
+		// One row per public link to a developer's local app. Rows stay after
+		// close so a name is never reassigned and a takedown has a record.
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS shares (
+				id           TEXT PRIMARY KEY,
+				name         TEXT NOT NULL UNIQUE,
+				org_id       TEXT NOT NULL,
+				created_by   TEXT NOT NULL DEFAULT '',
+				created_at   INTEGER NOT NULL,
+				expires_at   INTEGER NOT NULL,
+				last_seen_at INTEGER NOT NULL DEFAULT 0,
+				closed_at    INTEGER NOT NULL DEFAULT 0,
+				blocked_at   INTEGER NOT NULL DEFAULT 0,
+				bytes_in     INTEGER NOT NULL DEFAULT 0,
+				bytes_out    INTEGER NOT NULL DEFAULT 0
+			)`,
+			`CREATE INDEX IF NOT EXISTS shares_org ON shares (org_id)`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS shares (
+				id           TEXT PRIMARY KEY,
+				name         TEXT NOT NULL UNIQUE,
+				org_id       TEXT NOT NULL,
+				created_by   TEXT NOT NULL DEFAULT '',
+				created_at   BIGINT NOT NULL,
+				expires_at   BIGINT NOT NULL,
+				last_seen_at BIGINT NOT NULL DEFAULT 0,
+				closed_at    BIGINT NOT NULL DEFAULT 0,
+				blocked_at   BIGINT NOT NULL DEFAULT 0,
+				bytes_in     BIGINT NOT NULL DEFAULT 0,
+				bytes_out    BIGINT NOT NULL DEFAULT 0
+			)`,
+			`CREATE INDEX IF NOT EXISTS shares_org ON shares (org_id)`,
+		},
+	},
 }

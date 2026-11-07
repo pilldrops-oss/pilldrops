@@ -65,6 +65,10 @@ type fleetCapabilities struct {
 	// needs a PORTAL_SANDBOX_DOMAIN to CNAME at. A control-plane property, not
 	// a node one: a bare-node deployment has nowhere to point a record.
 	CustomDomains bool `json:"custom_domains"`
+	// ShareLinks is true when a local app can be given a public link: a share
+	// domain is set and a replica is declared as its ingress. A deployment
+	// setting like CustomDomains, so it is not in Features.
+	ShareLinks bool `json:"share_links"`
 
 	// Features names the optional command groups this deployment serves, beyond
 	// the core sandbox API every server has. Never null: absent means a server
@@ -157,5 +161,6 @@ func sortedKeys(m map[string]bool) []string {
 func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	caps := aggregateCapabilities(s.reg.Nodes(), s.now(), cluster.NodeTTL)
 	caps.CustomDomains = strings.TrimSpace(s.sandboxDomain) != ""
+	caps.ShareLinks = shareLinksOn()
 	writeJSON(w, 200, caps)
 }

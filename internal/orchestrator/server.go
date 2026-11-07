@@ -85,6 +85,9 @@ type Server struct {
 	flipsMu      sync.Mutex
 	flips        map[string]int64 // sandbox id -> preview access flips; no-store fallback only
 
+	// shares holds this replica's share tunnels. Zero value ready; see shareingress.go.
+	shares shareHub
+
 	// logger is the structured logger. Use the ...Context variants so
 	// request_id and trace_id are stamped from the context.
 	logger *slog.Logger
@@ -370,6 +373,7 @@ func (s *Server) Routes() http.Handler {
 	s.registerPreviewSourceRoutes(mux)
 	s.registerOrgEgressRoutes(mux)
 	s.registerForwardRoutes(mux)
+	s.registerShareRoutes(mux)
 	s.registerPublicTemplateRoutes(mux)
 	s.registerLaunchStatsRoutes(mux)
 	// Artifact publish lives here because a node's database role has only SELECT on template_builds and artifacts.

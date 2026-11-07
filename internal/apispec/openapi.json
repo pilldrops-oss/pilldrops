@@ -1159,6 +1159,127 @@
         }
       }
     },
+    "/v1/shares": {
+      "post": {
+        "summary": "Create a public share link",
+        "description": "Give an app on your own machine a public URL. Returns the link and what the CLI needs to open its tunnel: a tunnel URL and a short-lived tunnel token. Needs SHARE_DOMAIN and a share ingress on the control plane, else 501.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ttl_seconds": {
+                    "type": "integer",
+                    "description": "How long the link lives, 1 to 86400. Default 28800 (8 hours)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Share"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "description": "The org is at its share limit (code `share_limit`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "This deployment has no share ingress (code `no_share_ingress`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/shares/{id}/token": {
+      "post": {
+        "summary": "Get a fresh tunnel token for a share",
+        "description": "Lets a reconnecting CLI open its tunnel again. 410 means the link has ended and the CLI should stop.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Share"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "description": "The link has ended (code `share_ended`); `reason` is closed, blocked or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/shares/{id}": {
+      "delete": {
+        "summary": "Stop a share link",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Closed. Body is `{id, status}`."
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/capabilities": {
       "get": {
         "summary": "What this node \u2014 or this fleet \u2014 can actually do",
@@ -1706,8 +1827,48 @@
           "auto_pause": {
             "type": "boolean"
           },
+          "share_links": {
+            "type": "boolean",
+            "description": "A local app can be given a public link: a share domain is set and a replica is its ingress."
+          },
           "nodes": {
             "$ref": "#/components/schemas/FleetNodeCounts"
+          }
+        }
+      },
+      "Share": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "tunnel_url",
+          "tunnel_token",
+          "expires_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "The link's subdomain label."
+          },
+          "url": {
+            "type": "string",
+            "description": "The public link."
+          },
+          "tunnel_url": {
+            "type": "string",
+            "description": "Where the CLI opens its tunnel."
+          },
+          "tunnel_token": {
+            "type": "string",
+            "description": "Short-lived; fetch a new one from POST /v1/shares/{id}/token."
+          },
+          "expires_at": {
+            "type": "integer",
+            "description": "Unix seconds."
           }
         }
       },
