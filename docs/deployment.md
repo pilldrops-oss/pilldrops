@@ -1202,7 +1202,7 @@ The rules that keep this honest:
   lost. `SANDBOXD_LAZY_MEMORY=0` closes the window at the cost of the download.
 
 A node daemon that merely restarts loses nothing: `SIGTERM` pauses every
-running sandbox to local disk and the next daemon restores them; `kill -9`
+running sandbox to local disk and the next daemon resumes them; `kill -9`
 leaves the VMs running and the next daemon adopts them (verified both ways on
 the rig).
 

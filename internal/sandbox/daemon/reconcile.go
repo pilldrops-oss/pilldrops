@@ -28,6 +28,7 @@ func (d *Daemon) Start() {
 	var retry restoreRetry
 	if restored {
 		d.sweepCheckpoints()
+		d.resumeAfterRestart()
 	} else {
 		retry.failed(d.clock.Now())
 	}
@@ -42,6 +43,7 @@ func (d *Daemon) Start() {
 				if !restored && retry.due(d.clock.Now()) {
 					if restored = d.restoreFromStore(tickCtx); restored {
 						d.sweepCheckpoints()
+						d.resumeAfterRestart()
 					} else {
 						retry.failed(d.clock.Now())
 					}
