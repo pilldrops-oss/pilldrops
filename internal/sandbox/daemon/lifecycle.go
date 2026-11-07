@@ -46,6 +46,10 @@ func (d *Daemon) acquireOp(id string) (*Sandbox, func(), error) {
 	return sb, sb.opMu.Unlock, nil
 }
 
+// pauseRecordTimeout bounds the bookkeeping after a pause's snapshot, however
+// little of the caller's deadline is left.
+const pauseRecordTimeout = 5 * time.Second
+
 // Pause snapshots and stops a running sandbox's instance. Serialized per
 // sandbox on opMu and idempotent.
 func (d *Daemon) Pause(ctx context.Context, id string) error {
@@ -133,7 +137,11 @@ func (d *Daemon) PauseTimed(ctx context.Context, id string) (took time.Duration,
 	observability.End(snapSpan, nil)
 	took = d.clock.Now().Sub(snapStart)
 	d.metrics.PauseDuration.Observe(took)
-	if err := inst.Stop(ctx); err != nil {
+	// From here the instance is gone and only the record leads back to the
+	// snapshot, so a caller's deadline expiring must not lose the sandbox.
+	recordCtx, cancelRecord := context.WithTimeout(context.WithoutCancel(ctx), pauseRecordTimeout)
+	defer cancelRecord()
+	if err := inst.Stop(recordCtx); err != nil {
 		// The snapshot succeeded, so still mark paused rather than strand it as running.
 		d.log().Warn("pause: instance would not stop", "sandbox_id", id, "error", err)
 	}
@@ -153,8 +161,8 @@ func (d *Daemon) PauseTimed(ctx context.Context, id string) (took time.Duration,
 	rec := d.recordOf(sb)
 	d.mu.Unlock()
 
-	d.flushUsage(ctx, id, orgID, u)
-	d.persistRec(ctx, rec)
+	d.flushUsage(recordCtx, id, orgID, u)
+	d.persistRec(recordCtx, rec)
 	if d.portableArchive() {
 		if capDir != "" {
 			if pid, ok := d.archivePause(ctx, id, capDir); ok {
@@ -169,8 +177,8 @@ func (d *Daemon) PauseTimed(ctx context.Context, id string) (took time.Duration,
 	} else {
 		d.archiveSnapshot(ctx, id, snap.Path)
 	}
-	d.recordEvent(ctx, orgID, id, "paused", template)
-	d.revokeConsoleTokens(ctx, id)
+	d.recordEvent(recordCtx, orgID, id, "paused", template)
+	d.revokeConsoleTokens(recordCtx, id)
 	d.log().Info("sandbox paused", "sandbox_id", id, "org_id", orgID, "paused_ms", took.Milliseconds())
 	return took, nil
 }
