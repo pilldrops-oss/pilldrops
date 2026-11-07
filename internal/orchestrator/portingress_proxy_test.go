@@ -6,8 +6,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,16 +14,9 @@ import (
 )
 
 // The forward path hand-writes its dial, so nothing else proves it takes the
-// operator's proxy. http.ProxyFromEnvironment reads the environment once per
-// process, hence the child process: the body must be its first caller.
+// operator's proxy.
 func TestForwardTunnelGoesThroughTheConfiguredProxy(t *testing.T) {
-	const childEnv = "PILLDROPS_TEST_TUNNEL_PROXY_CHILD"
-	if os.Getenv(childEnv) == "" {
-		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+t.Name()+"$", "-test.v")
-		cmd.Env = append(os.Environ(), childEnv+"=1")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v\n%s", err, out)
-		}
+	if !reexecWithEnv(t, "PILLDROPS_TEST_TUNNEL_PROXY_CHILD") {
 		return
 	}
 
