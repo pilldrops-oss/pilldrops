@@ -247,9 +247,19 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			// "Nothing can boot this template" is a 400; "capacity is tight" is a retryable 503.
 			if canonTemplate != "" {
 				if supported, bootable := s.reg.TemplateSupport(place, s.now(), cluster.NodeTTL); !supported {
-					msg := "template " + req.Template + " is not available on any online node"
-					if len(bootable) > 0 {
-						msg += " — bootable now: " + strings.Join(bootable, ", ")
+					var msg string
+					// TemplateSupport only ever looks at schedulable nodes, so "no
+					// schedulable node supports it" and "no node is schedulable at
+					// all" both come back as !supported. When every online node is
+					// drained or cordoned, that is the real reason — naming the
+					// template instead sends an operator looking for the wrong fix.
+					if len(s.reg.Healthy(s.now())) > 0 && !s.reg.AnySchedulable(s.now(), cluster.NodeTTL) {
+						msg = "no node is accepting new sandboxes (every online node is draining or cordoned)"
+					} else {
+						msg = "template " + req.Template + " is not available on any online node"
+						if len(bootable) > 0 {
+							msg += " — bootable now: " + strings.Join(bootable, ", ")
+						}
 					}
 					s.metrics.recordSchedule(schedNoTemplate)
 					writeErr(w, 400, msg)

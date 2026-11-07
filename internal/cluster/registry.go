@@ -209,6 +209,19 @@ func (r *Registry) TemplateSupport(req Request, now time.Time, ttl time.Duration
 	return supported, union
 }
 
+// AnySchedulable reports whether any node is healthy and neither cordoned
+// nor draining. It separates "no node is accepting new sandboxes" (every
+// online node drained or cordoned, a fleet-management state) from "no node
+// runs what was asked for" (a template, runtime or capability miss).
+func (r *Registry) AnySchedulable(now time.Time, ttl time.Duration) bool {
+	for _, n := range r.list() {
+		if n.Schedulable(now, ttl) {
+			return true
+		}
+	}
+	return false
+}
+
 // AnyByRuntime reports whether any schedulable node runs the given runtime.
 func (r *Registry) AnyByRuntime(runtime string, now time.Time, ttl time.Duration) bool {
 	for _, n := range r.list() {

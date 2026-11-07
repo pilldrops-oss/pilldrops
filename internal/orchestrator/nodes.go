@@ -78,6 +78,13 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "id and url required")
 		return
 	}
+	// Checked before the credential branches below so a removed id is
+	// refused whichever path would otherwise accept it, including the
+	// NODE_KEY_SECRET-unset dev-insecure fallback that skips heartbeatAuthorized entirely.
+	if s.nodeRemoved(r.Context(), b.ID) {
+		writeErr(w, 403, "node removed: this id was revoked by an operator and will not be re-registered")
+		return
+	}
 	if s.nodeKeySecret == "" {
 		// Fail closed: without NODE_KEY_SECRET every node would share one credential.
 		if !devInsecure() {
