@@ -121,3 +121,45 @@ func TestPortalKeepsTheDashboardOffThePreviewDomain(t *testing.T) {
 		t.Fatalf("rp %d site %d, want the preview host to the orchestrator and the dashboard host to the site", rpHits, siteHits)
 	}
 }
+
+// A browser opening the path form is sent to the host form; the CLI's
+// terminal WebSocket, which sends no fetch metadata, is served as before.
+func TestPortalSendsPathFormNavigationsToTheHostForm(t *testing.T) {
+	withDomain(t, "pilldrops.app")
+	hits := 0
+	h := pathPreviewRedirect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ }))
+
+	req := httptest.NewRequest(http.MethodGet, "http://x/preview/sb1/8000/a?token=t", nil)
+	req.Host = "pilldrops.com"
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusFound || w.Header().Get("Location") != "https://8000-sb1.pilldrops.app/a?token=t" {
+		t.Fatalf("navigation = %d %q, want 302 to the host form", w.Code, w.Header().Get("Location"))
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://x/preview/sb1/7681/ws", nil)
+	req.Host = "pilldrops.com"
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if hits != 1 {
+		t.Fatalf("hits = %d, want the WebSocket served in the path form", hits)
+	}
+}
+
+// The portal names the host the visitor used, overwriting any the client sent,
+// so the orchestrator does not bounce a rewritten host-form request.
+func TestPortalPreviewProxyNamesTheVisitorsHost(t *testing.T) {
+	var got string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Forwarded-Host")
+	}))
+	defer up.Close()
+	rp := previewReverseProxy(up.URL)
+	req := httptest.NewRequest(http.MethodGet, "http://x/preview/sb1/8000/", nil)
+	req.Host = "8000-sb1.pilldrops.app"
+	req.Header.Set("X-Forwarded-Host", "forged.example")
+	rp.ServeHTTP(httptest.NewRecorder(), req)
+	if got != "8000-sb1.pilldrops.app" {
+		t.Fatalf("X-Forwarded-Host = %q, want the visitor's host", got)
+	}
+}

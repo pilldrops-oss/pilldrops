@@ -282,3 +282,46 @@ func TestSandboxDomainOnlyServesNoDashboard(t *testing.T) {
 		t.Fatalf("hits = %d, want every request through with no legacy domain", hits)
 	}
 }
+
+func TestPathPreviewTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, host, xfh, target, dest, domain, want string
+	}{
+		{"document", "GET", "pilldrops.com", "", "/preview/sb1/8000/a/b?token=t", "document", "pilldrops.app", "https://8000-sb1.pilldrops.app/a/b?token=t"},
+		{"iframe", "GET", "pilldrops.com", "", "/preview/sb1/3000/", "iframe", "pilldrops.app", "https://3000-sb1.pilldrops.app/"},
+		{"frame, no trailing slash", "HEAD", "pilldrops.com", "", "/preview/sb1/3000", "frame", "pilldrops.app", "https://3000-sb1.pilldrops.app/"},
+		{"dashboard on the sandbox apex", "GET", "example.com", "", "/preview/sb1/8000/", "document", "example.com", "https://8000-sb1.example.com/"},
+		{"a POST is not a navigation", "POST", "pilldrops.com", "", "/preview/sb1/8000/", "document", "pilldrops.app", ""},
+		{"no fetch metadata: the CLI, curl, an old browser", "GET", "pilldrops.com", "", "/preview/sb1/7681/ws", "", "pilldrops.app", ""},
+		{"a browser WebSocket", "GET", "pilldrops.com", "", "/preview/sb1/7681/ws", "websocket", "pilldrops.app", ""},
+		{"a sub-resource", "GET", "pilldrops.com", "", "/preview/sb1/8000/app.js", "script", "pilldrops.app", ""},
+		{"rewritten in process from the host form", "GET", "8000-sb1.pilldrops.app", "", "/preview/sb1/8000/", "document", "pilldrops.app", ""},
+		{"rewritten by a portal in front", "GET", "orchestrator:8080", "8000-sb1.pilldrops.app", "/preview/sb1/8000/", "document", "pilldrops.app", ""},
+		{"rewritten by a portal still on the legacy domain", "GET", "orchestrator:8080", "8000-sb1.pilldrops.com", "/preview/sb1/8000/", "document", "pilldrops.app", ""},
+		{"a slug rewritten by a portal still on the legacy domain", "GET", "orchestrator:8080", "myapp.pilldrops.com", "/preview/sb1/8000/", "document", "pilldrops.app", ""},
+		{"rewritten by a portal already on a newer domain", "GET", "orchestrator:8080", "8000-sb1.pilldrops.app", "/preview/sb1/8000/", "document", "pilldrops.com", ""},
+		{"the legacy dashboard host is not a preview host", "GET", "orchestrator:8080", "app.pilldrops.com", "/preview/sb1/8000/", "document", "pilldrops.app", "https://8000-sb1.pilldrops.app/"},
+		{"no sandbox domain", "GET", "localhost:8080", "", "/preview/sb1/8000/", "document", "", ""},
+		{"an id that is not a label", "GET", "pilldrops.com", "", "/preview/a.evil.com/8000/", "document", "pilldrops.app", ""},
+	} {
+		r := httptest.NewRequest(tc.method, "http://x"+tc.target, nil)
+		r.Host = tc.host
+		if tc.xfh != "" {
+			r.Header.Set("X-Forwarded-Host", tc.xfh)
+		}
+		if tc.dest != "" {
+			r.Header.Set("Sec-Fetch-Dest", tc.dest)
+		}
+		got, ok := PathPreviewTarget(r, tc.domain, &LegacyDomains{Current: tc.domain, Domains: []string{"pilldrops.com"}})
+		if got != tc.want || ok != (tc.want != "") {
+			t.Errorf("%s: = %q %v, want %q", tc.name, got, ok, tc.want)
+		}
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "http://x/preview/sb1/8000/", nil)
+	r.Host = "pilldrops.com"
+	r.Header.Set("Sec-Fetch-Dest", "document")
+	if got, _ := PathPreviewTarget(r, "pilldrops.app", nil); got != "https://8000-sb1.pilldrops.app/" {
+		t.Errorf("no legacy domains = %q", got)
+	}
+}

@@ -1,12 +1,14 @@
 package proxy
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"html"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -125,6 +127,9 @@ func (l *LegacyDomains) SandboxHost(host string) (id string, port int, ok bool) 
 // Platform labels (www, api, login, docs...) are not preview-shaped, so the
 // site, dashboard and sign-in on a legacy domain keep answering.
 func (l *LegacyDomains) previewLabel(host string) (domain, label string, ok bool) {
+	if l == nil {
+		return "", "", false
+	}
 	for _, d := range l.Domains {
 		if _, _, ok := ParseSandboxHost(host, d); ok {
 			return d, strings.TrimSuffix(host, "."+d), true
@@ -246,4 +251,43 @@ func (l *LegacyDomains) SandboxDomainOnly(domain, origin string, next http.Handl
 			http.Error(w, "sandbox not found", http.StatusNotFound)
 		}
 	})
+}
+
+// PathPreviewTarget is where a browser navigating the path form
+// /preview/<id>/<port>/... should go instead: the same request on the
+// sandbox's own host under domain, so sandbox code never runs on the host
+// that serves the path form. ok=false for everything else, which keeps the
+// path form: API clients, WebSockets, sub-resources, browsers that send no
+// fetch metadata, and a request a host stage already rewrote into the path
+// form, whose Host (or X-Forwarded-Host, from a portal in front) is a preview
+// host: under domain, preview-shaped under a legacy domain, or named for this
+// sandbox under any domain, which is a portal configured for another domain.
+// legacy may be nil.
+func PathPreviewTarget(r *http.Request, domain string, legacy *LegacyDomains) (string, bool) {
+	d := strings.ToLower(strings.TrimSpace(domain))
+	if d == "" || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+		return "", false
+	}
+	switch r.Header.Get("Sec-Fetch-Dest") {
+	case "document", "iframe", "frame":
+	default:
+		return "", false
+	}
+	shown, _, _ := strings.Cut(cmp.Or(r.Header.Get("X-Forwarded-Host"), r.Host), ",")
+	shownHost := NormalizeHost(strings.TrimSpace(shown))
+	if strings.HasSuffix(shownHost, "."+d) {
+		return "", false
+	}
+	if _, _, ok := legacy.previewLabel(shownHost); ok {
+		return "", false
+	}
+	id, port, rest, ok := ParsePreviewPath(r.URL.EscapedPath())
+	if !ok || !isDNSLabel(id) || strings.HasPrefix(shownHost, strconv.Itoa(port)+"-"+id+".") {
+		return "", false
+	}
+	target := "https://" + strconv.Itoa(port) + "-" + id + "." + d + rest
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	return target, true
 }

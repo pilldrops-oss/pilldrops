@@ -230,6 +230,12 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
+	// A browser on the path form would run sandbox code on this host. A
+	// customer host is the sandbox's own origin already.
+	if target, ok := proxy.PathPreviewTarget(r, s.sandboxDomain, s.legacy); ok && !onCustomHost(r) {
+		http.Redirect(w, r, target, http.StatusFound)
+		return
+	}
 	id := r.PathValue("id")
 	node, ok := s.reg.NodeFor(id)
 	if !ok {

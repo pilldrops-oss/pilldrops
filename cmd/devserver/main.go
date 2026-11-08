@@ -564,6 +564,19 @@ func portalHandler(legacy *proxy.LegacyDomains, rp, site http.Handler, bySlug sl
 		legacy.SandboxDomainOnly(portalSandboxDomain, dashboardOrigin, site), bySlug))
 }
 
+// pathPreviewRedirect sends a browser navigating the path form to the
+// sandbox's own host, so sandbox code never runs on the portal's origin.
+// Host-form requests reach rp through hostPreview, not through here.
+func pathPreviewRedirect(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if target, ok := proxy.PathPreviewTarget(r, portalSandboxDomain, nil); ok {
+			http.Redirect(w, r, target, http.StatusFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // isInfraPreviewErr reports whether a preview error body came from the
 // platform rather than the customer's app; only those get the branded page.
 func isInfraPreviewErr(body string) bool {
@@ -718,6 +731,9 @@ func previewReverseProxy(orchURL string) http.Handler {
 	origDirector := rp.Director
 	rp.Director = func(req *http.Request) {
 		origDirector(req)
+		// Overwritten, not passed through: it is how the orchestrator tells a
+		// preview host rewritten here from the path form a browser opened.
+		req.Header.Set("X-Forwarded-Host", req.Host)
 		req.Host = base.Host
 	}
 	rp.ModifyResponse = previewErrorIntercept
@@ -3145,8 +3161,9 @@ func main() {
 	var previewRP http.Handler
 	if proxyMode {
 		if previewRP = previewReverseProxy(orchURL); previewRP != nil {
-			r.Handle("/preview/{id}/{port}/*", previewRP)
-			r.Handle("/preview/{id}/{port}", previewRP)
+			pathRP := pathPreviewRedirect(previewRP)
+			r.Handle("/preview/{id}/{port}/*", pathRP)
+			r.Handle("/preview/{id}/{port}", pathRP)
 		}
 	} else {
 		// Local mode: the app is on the sandbox's assigned localhost port, and
