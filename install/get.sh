@@ -78,7 +78,7 @@ fi
 case "$runtime" in
   firecracker)
     [ -e /dev/kvm ] || die "PILLDROPS_RUNTIME=firecracker needs /dev/kvm"
-    say "KVM found: setting up Firecracker microVMs (kernel, networking, base template)"
+    say "KVM found: setting up microVMs (kernel, networking, base template)"
     (cd "$SRC" && BUILD_DIR="$SRC" TEMPLATES=base bash scripts/provision-node.sh) ||
       die "provisioning failed; the lines above say where"
     ;;
@@ -145,9 +145,10 @@ until curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:$PORT/health"; do
 done
 
 host=$(hostname -I 2>/dev/null | awk '{print $1}')
+if [ "$runtime" = docker ]; then isolation="Docker containers"; else isolation=microVMs; fi
 cat <<DONE
 
-✓ PillDrops is running ($runtime).
+✓ PillDrops is running (sandboxes are $isolation).
 
   Dashboard   http://${host:-<this-host>}:$PORT/dashboard   (the first visit creates the admin account)
   API key     sudo cat $STATE/bootstrap.key                  (store it, then delete the file)
