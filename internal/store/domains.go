@@ -24,6 +24,9 @@ type Domain struct {
 	Error     string `json:"error,omitempty"`
 	CreatedAt int64  `json:"created_at"`
 	CheckedAt int64  `json:"checked_at,omitempty"`
+	// LegacyTargetSeenAt is nonzero while the row's DNS names a legacy sandbox
+	// domain: when that was first seen, then when it last served traffic.
+	LegacyTargetSeenAt int64 `json:"legacy_target_seen_at,omitempty"`
 }
 
 // ErrDomainTaken means another org already attached the host. Hosts are global:
@@ -48,7 +51,7 @@ var ErrDomainTaken = errors.New("host is already attached by another org")
 // migration, which is why it is not here.
 const DomainClaimGrace = 7 * 24 * 60 * 60 // seconds
 
-const domainCols = `host, org_id, sandbox_id, port, wildcard, status, error, created_at, checked_at`
+const domainCols = `host, org_id, sandbox_id, port, wildcard, status, error, created_at, checked_at, legacy_target_seen_at`
 
 // PutDomain inserts the row, or re-points the org's own existing row and sends
 // it back to 'pending'. The ownership test is inside the statement, so two orgs
@@ -65,7 +68,7 @@ func (s *Store) PutDomain(ctx context.Context, d Domain) error {
 	}
 	res, err := s.exec(ctx,
 		`INSERT INTO custom_domains (`+domainCols+`)
-		 VALUES (?, ?, ?, ?, ?, 'pending', '', ?, 0)
+		 VALUES (?, ?, ?, ?, ?, 'pending', '', ?, 0, 0)
 		 ON CONFLICT(host) DO UPDATE SET
 		   org_id = excluded.org_id,
 		   sandbox_id = excluded.sandbox_id, port = excluded.port, wildcard = excluded.wildcard,
@@ -93,7 +96,8 @@ func (s *Store) GetDomain(ctx context.Context, host string) (Domain, bool, error
 	var d Domain
 	err := s.queryRow(ctx, `SELECT `+domainCols+` FROM custom_domains WHERE host = ?`,
 		strings.ToLower(strings.TrimSpace(host)),
-	).Scan(&d.Host, &d.OrgID, &d.SandboxID, &d.Port, &d.Wildcard, &d.Status, &d.Error, &d.CreatedAt, &d.CheckedAt)
+	).Scan(&d.Host, &d.OrgID, &d.SandboxID, &d.Port, &d.Wildcard, &d.Status, &d.Error, &d.CreatedAt, &d.CheckedAt,
+		&d.LegacyTargetSeenAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Domain{}, false, nil
 	}
@@ -148,6 +152,6 @@ func (s *Store) queryDomains(ctx context.Context, where string, args ...any) ([]
 	return collectRows(ctx, s, `SELECT `+domainCols+` FROM custom_domains `+where, args,
 		func(rows *sql.Rows, d *Domain) error {
 			return rows.Scan(&d.Host, &d.OrgID, &d.SandboxID, &d.Port, &d.Wildcard,
-				&d.Status, &d.Error, &d.CreatedAt, &d.CheckedAt)
+				&d.Status, &d.Error, &d.CreatedAt, &d.CheckedAt, &d.LegacyTargetSeenAt)
 		})
 }
