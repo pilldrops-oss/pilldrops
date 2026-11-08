@@ -34,6 +34,7 @@ func mintToken(t *testing.T, srv *httptest.Server, key string) map[string]any {
 }
 
 func TestMintJoinTokenRequiresAdminAndReturnsCommand(t *testing.T) {
+	t.Setenv("NODE_BOOTSTRAP_DSN", "postgres://u:p@h:5432/db")
 	t.Setenv("NODE_BOOTSTRAP_SECRET", "sekret")
 	s := NewServer("adminkey", "nodetoken")
 	srv := httptest.NewServer(s.Routes())
@@ -244,6 +245,7 @@ func TestNodeBinaryServed(t *testing.T) {
 }
 
 func TestJoinRejectsBadTokenAndPlaintext(t *testing.T) {
+	t.Setenv("NODE_BOOTSTRAP_DSN", "postgres://u:p@h:5432/db")
 	t.Setenv("NODE_BOOTSTRAP_SECRET", "sekret")
 	s := NewServer("adminkey", "nodetoken")
 	srv := httptest.NewServer(s.Routes())
@@ -287,5 +289,31 @@ func TestMintJoinTokenRefusesWithoutBootstrapSecret(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "NODE_BOOTSTRAP_SECRET") {
 		t.Fatalf("error does not name NODE_BOOTSTRAP_SECRET: %s", body)
+	}
+}
+
+// Without this, a clustered control plane hands a joining node an empty
+// postgres_dsn; the join itself succeeds and the node only discovers it is
+// unusable later, under SANDBOXD_PRODUCTION=1. Refuse at mint time instead.
+func TestMintJoinTokenRefusesWithoutBootstrapDSN(t *testing.T) {
+	t.Setenv("NODE_BOOTSTRAP_SECRET", "sekret")
+	t.Setenv("NODE_BOOTSTRAP_DSN", "")
+	s := NewServer("adminkey", "nodetoken") // nodeToken set: this is a clustered control plane
+	op := httptest.NewServer(s.Routes())
+	defer op.Close()
+
+	req, _ := http.NewRequest("POST", op.URL+"/v1/join-tokens", nil)
+	req.Header.Set("Authorization", "Bearer adminkey")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 409 && resp.StatusCode != 503 {
+		t.Fatalf("mint with no NODE_BOOTSTRAP_DSN = %d, want 409 or 503", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "NODE_BOOTSTRAP_DSN") {
+		t.Fatalf("error does not name NODE_BOOTSTRAP_DSN: %s", body)
 	}
 }
