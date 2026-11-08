@@ -2039,4 +2039,20 @@ BEGIN SELECT RAISE(ABORT, 'sandboxes_state_known'); END`,
 			`ALTER TABLE custom_domains ADD COLUMN IF NOT EXISTS legacy_target_seen_at BIGINT NOT NULL DEFAULT 0`,
 		},
 	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 75,
+		name:    "custom_domain_txt",
+		// A host that matches only by address also needs a TXT record holding
+		// txt_token. txt_required_at is when it becomes required; rows from
+		// before this get cron.TXTGrace from the verifier's first ask.
+		sqlite: []string{
+			`ALTER TABLE custom_domains ADD COLUMN txt_token TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE custom_domains ADD COLUMN txt_required_at INTEGER NOT NULL DEFAULT 0`,
+		},
+		postgres: []string{
+			`ALTER TABLE custom_domains ADD COLUMN IF NOT EXISTS txt_token TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE custom_domains ADD COLUMN IF NOT EXISTS txt_required_at BIGINT NOT NULL DEFAULT 0`,
+		},
+	},
 }

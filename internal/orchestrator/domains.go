@@ -266,7 +266,7 @@ func (s *Server) prepareSandboxDomain(w http.ResponseWriter, r *http.Request, d 
 // domainJSON is the wire shape: the row plus the record the customer must create.
 func (s *Server) domainJSON(d store.Domain) map[string]any {
 	target := s.domainTarget(d)
-	return map[string]any{
+	out := map[string]any{
 		"host": d.Host, "sandbox_id": d.SandboxID, "port": d.Port, "wildcard": d.Wildcard,
 		"status": d.Status, "error": d.Error, "created_at": d.CreatedAt,
 		"cname_target": target,
@@ -274,6 +274,16 @@ func (s *Server) domainJSON(d store.Domain) map[string]any {
 		// The row's DNS still names a legacy sandbox domain: record is the one to create.
 		"legacy_target": d.LegacyTargetSeenAt != 0,
 	}
+	// The record an A record or flattened apex needs beside the address match;
+	// txt_required once the verifier has seen such a match without it.
+	if d.TXTToken != "" {
+		out["txt_record"] = cron.TXTRecord(d)
+		out["txt_required"] = d.TXTRequiredAt != 0
+		if s.now().Unix() < d.TXTRequiredAt {
+			out["txt_grace_ends_at"] = d.TXTRequiredAt
+		}
+	}
+	return out
 }
 
 func (s *Server) handleDomainList(w http.ResponseWriter, r *http.Request) {

@@ -162,3 +162,63 @@ func TestUnverifiedDomainClaimExpires(t *testing.T) {
 		t.Fatalf("an active row moved or was reset: %+v", d)
 	}
 }
+
+// The TXT token is what a customer's record holds, so once a row has one it
+// never changes for that org. A new holder gets a fresh token and no clock.
+func TestDomainTXTTokenIsMintedOnceAndKept(t *testing.T) {
+	st, ctx := openTemp(t), t.Context()
+	get := func() Domain {
+		t.Helper()
+		d, ok, err := st.GetDomain(ctx, "app.example.com")
+		if err != nil || !ok {
+			t.Fatalf("get: ok=%v err=%v", ok, err)
+		}
+		return d
+	}
+
+	if err := st.PutDomain(ctx, Domain{Host: "app.example.com", OrgID: "org1", CreatedAt: 10}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	token := get().TXTToken
+	if len(token) < 26 {
+		t.Fatalf("token %q on insert, want at least 128 random bits", token)
+	}
+	if err := st.SetDomainTXT(ctx, "app.example.com", "other", 500); err != nil {
+		t.Fatalf("set txt: %v", err)
+	}
+	if d := get(); d.TXTToken != token || d.TXTRequiredAt != 500 {
+		t.Fatalf("row = %+v, want token %q kept and the TXT required at 500", d, token)
+	}
+	if err := st.PutDomain(ctx, Domain{Host: "app.example.com", OrgID: "org1", Port: 9000, CreatedAt: 20}); err != nil {
+		t.Fatalf("re-point: %v", err)
+	}
+	if d := get(); d.TXTToken != token || d.TXTRequiredAt != 500 {
+		t.Fatalf("after re-pointing, row = %+v, want token and clock kept", d)
+	}
+
+	// A row from before tokens existed gets one from the verifier, once.
+	if _, err := st.exec(ctx, `UPDATE custom_domains SET txt_token = '', txt_required_at = 0`); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if err := st.SetDomainTXT(ctx, "App.Example.com", "first", 600); err != nil {
+		t.Fatalf("set txt: %v", err)
+	}
+	if err := st.SetDomainTXT(ctx, "app.example.com", "second", 0); err != nil {
+		t.Fatalf("set txt: %v", err)
+	}
+	if d := get(); d.TXTToken != "first" || d.TXTRequiredAt != 0 {
+		t.Fatalf("row = %+v, want the first token kept and the clock cleared", d)
+	}
+
+	if err := st.PutDomain(ctx, Domain{Host: "app.example.com", OrgID: "org2", CreatedAt: 10 + DomainClaimGrace + 1}); err != nil {
+		t.Fatalf("takeover: %v", err)
+	}
+	if d := get(); d.TXTToken == "first" || len(d.TXTToken) < 26 || d.TXTRequiredAt != 0 {
+		t.Fatalf("after another org took the host, row = %+v, want a new token and no clock", d)
+	}
+
+	var name string
+	if err := st.queryRow(ctx, `SELECT name FROM schema_migrations WHERE version = 75`).Scan(&name); err != nil || name != "custom_domain_txt" {
+		t.Fatalf("v75 not recorded (name=%q err=%v)", name, err)
+	}
+}

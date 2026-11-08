@@ -73,9 +73,18 @@ preview source gate would see one client for the whole internet.
 ### Customer domains (`myapp.customer.com`)
 
 A customer hostname is a row (`POST /v1/domains`), verified by DNS, and served
-by the same preview path as the platform wildcard. The certificate is the
-deployment's half of the job: put Caddy in front of the orchestrator with
-on-demand TLS and let it ask the platform which hosts are real.
+by the same preview path as the platform wildcard. The exact CNAME the API hands
+out verifies on its own. A host that only resolves to the same addresses, such
+as an A record or a flattened apex, also needs a TXT record at
+`_pilldrops-challenge.<host>` (a wildcard's at its base domain) holding the
+row's token, because a shared proxy's addresses match for every site behind it.
+The API returns that record as `txt_record`, and `txt_required` once an address
+match lacks it. A host attached before this check existed that routed by
+address keeps routing for 14 days from its first check after the upgrade
+(`txt_grace_ends_at`), then goes `pending` until the record exists.
+
+The certificate is the deployment's half of the job: put Caddy in front of the
+orchestrator with on-demand TLS and let it ask the platform which hosts are real.
 
 ```caddyfile
 {
@@ -166,9 +175,10 @@ What changes once it runs:
 - A customer domain is accepted on its old target only by an exact CNAME to the
   legacy host, not by matching addresses, and only while it gets traffic; it
   stops being accepted 90 days after its last request. Customers with a
-  flattened apex or an A record must update to the new target. The Domains page
-  asks the owner to create the new record. New hosts under `example.app`,
-  `example.com` or the dashboard's registrable domain are refused.
+  flattened apex or an A record must update to the new target and add the TXT
+  record the Domains page shows. The Domains page asks the owner to create the
+  new record. New hosts under `example.app`, `example.com` or the dashboard's
+  registrable domain are refused.
 - With the dashboard off the preview domain, preview cookies are `SameSite=None;
   Secure; Partitioned`, so a private preview keeps its access inside the
   dashboard's iframe. A browser that blocks third-party cookies shows only the

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"strings"
@@ -27,6 +28,12 @@ type Domain struct {
 	// LegacyTargetSeenAt is nonzero while the row's DNS names a legacy sandbox
 	// domain: when that was first seen, then when it last served traffic.
 	LegacyTargetSeenAt int64 `json:"legacy_target_seen_at,omitempty"`
+	// TXTToken is the value a TXT record at _pilldrops-challenge.<host> must
+	// hold when the host matches only by address. Set once, never changed.
+	TXTToken string `json:"txt_token,omitempty"`
+	// TXTRequiredAt is nonzero while the host matches only by address and
+	// lacks that record: when the record is required. Until then it routes.
+	TXTRequiredAt int64 `json:"txt_required_at,omitempty"`
 }
 
 // ErrDomainTaken means another org already attached the host. Hosts are global:
@@ -51,7 +58,11 @@ var ErrDomainTaken = errors.New("host is already attached by another org")
 // migration, which is why it is not here.
 const DomainClaimGrace = 7 * 24 * 60 * 60 // seconds
 
-const domainCols = `host, org_id, sandbox_id, port, wildcard, status, error, created_at, checked_at, legacy_target_seen_at`
+// NewDomainToken returns a TXT token: 130 random bits, lower-case base32.
+func NewDomainToken() string { return strings.ToLower(rand.Text()) }
+
+const domainCols = `host, org_id, sandbox_id, port, wildcard, status, error, created_at, checked_at, legacy_target_seen_at,
+	txt_token, txt_required_at`
 
 // PutDomain inserts the row, or re-points the org's own existing row and sends
 // it back to 'pending'. The ownership test is inside the statement, so two orgs
@@ -66,9 +77,10 @@ func (s *Store) PutDomain(ctx context.Context, d Domain) error {
 	if d.OrgID == "" {
 		d.OrgID = "default"
 	}
+	d.TXTToken = NewDomainToken()
 	res, err := s.exec(ctx,
 		`INSERT INTO custom_domains (`+domainCols+`)
-		 VALUES (?, ?, ?, ?, ?, 'pending', '', ?, 0, 0)
+		 VALUES (?, ?, ?, ?, ?, 'pending', '', ?, 0, 0, ?, 0)
 		 ON CONFLICT(host) DO UPDATE SET
 		   org_id = excluded.org_id,
 		   sandbox_id = excluded.sandbox_id, port = excluded.port, wildcard = excluded.wildcard,
@@ -76,10 +88,15 @@ func (s *Store) PutDomain(ctx context.Context, d Domain) error {
 		   -- Only a change of holder restarts the clock. Re-pointing your own
 		   -- row must not extend a squat by another grace period.
 		   created_at = CASE WHEN custom_domains.org_id = excluded.org_id
-		                     THEN custom_domains.created_at ELSE excluded.created_at END
+		                     THEN custom_domains.created_at ELSE excluded.created_at END,
+		   -- A customer's TXT record holds the token, so it stays with its org.
+		   txt_token = CASE WHEN custom_domains.org_id = excluded.org_id AND custom_domains.txt_token <> ''
+		                    THEN custom_domains.txt_token ELSE excluded.txt_token END,
+		   txt_required_at = CASE WHEN custom_domains.org_id = excluded.org_id
+		                          THEN custom_domains.txt_required_at ELSE 0 END
 		 WHERE custom_domains.org_id = excluded.org_id
 		    OR (custom_domains.status = 'pending' AND custom_domains.created_at <= ?)`,
-		d.Host, d.OrgID, d.SandboxID, d.Port, d.Wildcard, d.CreatedAt,
+		d.Host, d.OrgID, d.SandboxID, d.Port, d.Wildcard, d.CreatedAt, d.TXTToken,
 		d.CreatedAt-DomainClaimGrace,
 	)
 	if err != nil {
@@ -97,7 +114,7 @@ func (s *Store) GetDomain(ctx context.Context, host string) (Domain, bool, error
 	err := s.queryRow(ctx, `SELECT `+domainCols+` FROM custom_domains WHERE host = ?`,
 		strings.ToLower(strings.TrimSpace(host)),
 	).Scan(&d.Host, &d.OrgID, &d.SandboxID, &d.Port, &d.Wildcard, &d.Status, &d.Error, &d.CreatedAt, &d.CheckedAt,
-		&d.LegacyTargetSeenAt)
+		&d.LegacyTargetSeenAt, &d.TXTToken, &d.TXTRequiredAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Domain{}, false, nil
 	}
@@ -146,12 +163,23 @@ func (s *Store) SetDomainStatus(ctx context.Context, host, status, errText strin
 	return err
 }
 
+// SetDomainTXT records the verifier's TXT state. token is stored only on a
+// row without one, so a replica racing another cannot change a token a
+// customer may already have published.
+func (s *Store) SetDomainTXT(ctx context.Context, host, token string, requiredAt int64) error {
+	_, err := s.exec(ctx,
+		`UPDATE custom_domains SET txt_token = CASE WHEN txt_token = '' THEN ? ELSE txt_token END,
+		   txt_required_at = ? WHERE host = ?`,
+		token, requiredAt, strings.ToLower(host))
+	return err
+}
+
 // queryDomains runs a custom_domains SELECT. where is appended verbatim, so it
 // must be a constant, never caller data.
 func (s *Store) queryDomains(ctx context.Context, where string, args ...any) ([]Domain, error) {
 	return collectRows(ctx, s, `SELECT `+domainCols+` FROM custom_domains `+where, args,
 		func(rows *sql.Rows, d *Domain) error {
 			return rows.Scan(&d.Host, &d.OrgID, &d.SandboxID, &d.Port, &d.Wildcard,
-				&d.Status, &d.Error, &d.CreatedAt, &d.CheckedAt, &d.LegacyTargetSeenAt)
+				&d.Status, &d.Error, &d.CreatedAt, &d.CheckedAt, &d.LegacyTargetSeenAt, &d.TXTToken, &d.TXTRequiredAt)
 		})
 }
