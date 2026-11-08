@@ -619,7 +619,9 @@ TAGNET_OK=$(api GET /v1/capabilities | jq -r '.tag_networks // false')
 # A unique suffix: slugs are unique platform-wide and a previous run's leftovers
 # would otherwise take the name.
 TAGSFX="$$"
-if [ "$TAGNET_OK" != "true" ]; then
+if [ "$RUNTIME" != "firecracker" ]; then
+  skiptagnet "tag networks are a firecracker-only feature (docs/runtimes.md)" na
+elif [ "$TAGNET_OK" != "true" ]; then
   skiptagnet "this node reports tag_networks=false, so there is nothing to opt into"
 else
   TA=$(sb_create_net "sec-t-$TAGSFX" "tagalpha$TAGSFX")

@@ -48,7 +48,7 @@ func TestFilesystemErrorHidesHostPath(t *testing.T) {
 	_, out := do(t, "POST", srv.URL+"/v1/sandboxes", key, `{"template":"python-3.11"}`)
 	id, _ := out["id"].(string)
 
-	code, body := getText(t, srv.URL+"/v1/sandboxes/"+id+"/files?path=/app/missing.txt", key)
+	code, body := getText(t, srv.URL+"/v1/sandboxes/"+id+"/files?path=app/missing.txt", key)
 	if code != 404 {
 		t.Fatalf("read missing = %d, want 404", code)
 	}

@@ -317,3 +317,60 @@ func TestMintJoinTokenRefusesWithoutBootstrapDSN(t *testing.T) {
 		t.Fatalf("error does not name NODE_BOOTSTRAP_DSN: %s", body)
 	}
 }
+
+// TestInstallScriptUnitMatchesPackaging guards against the two unit
+// definitions drifting apart: install.sh writes /etc/systemd/system/sandboxd.service
+// inline instead of shipping packaging/sandboxd.service, and a key present
+// there but missing (or different) here silently strands a node — wrong port,
+// no persistent data dir, Firecracker skipped. TEMPLATE and
+// SANDBOXD_SANDBOX_DOMAIN are site-specific and set per node at join time, not
+// hardcoded in either unit, so they are exempt.
+func TestInstallScriptUnitMatchesPackaging(t *testing.T) {
+	siteSpecific := map[string]bool{
+		"TEMPLATE":                true,
+		"SANDBOXD_SANDBOX_DOMAIN": true,
+	}
+
+	packaged, err := os.ReadFile("../../packaging/sandboxd.service")
+	if err != nil {
+		t.Fatalf("reading packaging/sandboxd.service: %v", err)
+	}
+	packagedEnv := environmentDirectives(string(packaged))
+	if len(packagedEnv) == 0 {
+		t.Fatal("packaging/sandboxd.service has no Environment= directives — test cannot validate anything")
+	}
+	installEnv := environmentDirectives(string(installScript))
+
+	for key, want := range packagedEnv {
+		if siteSpecific[key] {
+			continue
+		}
+		got, ok := installEnv[key]
+		if !ok {
+			t.Errorf("install.sh's inline unit is missing Environment=%s (packaging/sandboxd.service has %q)", key, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("install.sh's inline unit has %s=%q, packaging/sandboxd.service has %s=%q", key, got, key, want)
+		}
+	}
+}
+
+// environmentDirectives parses every `Environment=KEY=VALUE` line of a
+// systemd unit into a map. It ignores anything else in the file.
+func environmentDirectives(unit string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(unit, "\n") {
+		line = strings.TrimSpace(line)
+		rest, ok := strings.CutPrefix(line, "Environment=")
+		if !ok {
+			continue
+		}
+		key, value, ok := strings.Cut(rest, "=")
+		if !ok {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}

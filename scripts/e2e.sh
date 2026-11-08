@@ -6,7 +6,8 @@
 #   ./scripts/e2e.sh            # full run, tears down after
 #   KEEP=1 ./scripts/e2e.sh     # leave the stack up for poking at
 #
-# Requires: docker (Postgres + the sandbox runtime), go, python3, curl.
+# Requires: root (a docker node verifies its egress rules with iptables), docker
+# (Postgres + the sandbox runtime), go, python3, curl, openssl.
 set -uo pipefail
 
 ORCH_PORT=${ORCH_PORT:-19090}
@@ -87,13 +88,17 @@ DSN="postgres://postgres:pw@localhost:${PG_PORT}/sb?sslmode=disable"
 echo "  postgres up on :$PG_PORT"
 
 sec "Control plane"
+NODE_SECRET_KEY=$(openssl rand -hex 32)
 ORCHESTRATOR_API_KEY=$FLEET_KEY ORCHESTRATOR_TOKEN=$SHARED_TOKEN \
+  NODE_KEY_SECRET=$(openssl rand -hex 32) ORG_ASSERT_KEY=$(openssl rand -hex 32) VAULT_SECRET_KEY=$(openssl rand -hex 32) \
+  SANDBOXD_SECRET_KEY=$NODE_SECRET_KEY NODE_BOOTSTRAP_DSN="$DSN" \
   SANDBOXD_DATABASE_URL="$DSN" PORT=$ORCH_PORT \
   "$WORK/orchestrator" > "$WORK/orch.log" 2>&1 &
 ORCH_PID=$!
 for i in $(seq 1 30); do [ "$(code $O/health)" = "200" ] && break; sleep 1; done
-# The store opens in a goroutine; give it a moment before /readyz.
-sleep 2
+[ "$(code $O/health)" = "200" ] || tail -5 "$WORK/orch.log"
+# The store opens in a goroutine; /readyz answers 503 until it has.
+for i in $(seq 1 30); do [ "$(code $O/readyz)" = "200" ] && break; sleep 1; done
 ck "liveness answers without any dependency"      200 "$(code $O/health)"
 ck "readiness answers once the store is up"       200 "$(code $O/readyz)"
 
@@ -137,21 +142,22 @@ sec "Node joins the fleet"
 # X-Forwarded-Proto header stands in for the TLS terminator on this loopback run.
 JOIN_TOKEN=$(curl -s -X POST "$O/v1/join-tokens" -H "Authorization: Bearer $FLEET_KEY" \
   | jq_ ";print(json.load(sys.stdin)['token'])")
-ckc "control plane mints a join token" "." "$JOIN_TOKEN"
+ckc "control plane mints a join token" "sfj_" "$JOIN_TOKEN"
 JOIN=$(curl -s -X POST "$O/v1/join" -H 'Content-Type: application/json' \
   -H 'X-Forwarded-Proto: https' \
   -d "{\"token\":\"$JOIN_TOKEN\",\"suggested_id\":\"e2e-node\",\"zone\":\"default\"}")
 NODE_KEY=$(printf '%s' "$JOIN" | jq_ ";print(json.load(sys.stdin)['node_api_key'])")
 NODE_ID=$(printf '%s' "$JOIN" | jq_ ";print(json.load(sys.stdin)['node_id'])")
+NODE_TOKEN=$(printf '%s' "$JOIN" | jq_ ";print(json.load(sys.stdin)['node_token'])")
 ckc "redeeming it returns the node key" "sf_node_" "$NODE_KEY"
 ckc "and the node id it allocated"      "e2e-node" "$NODE_ID"
 ck  "the token is single-use" 401 \
     "$(code -X POST $O/v1/join -H 'Content-Type: application/json' -H 'X-Forwarded-Proto: https' \
        -d "{\"token\":\"$JOIN_TOKEN\",\"suggested_id\":\"e2e-dupe\",\"zone\":\"default\"}")"
 ( cd "$WORK" && env -i PATH="$PATH" HOME="$HOME" \
-    ORCHESTRATOR_URL=$O ORCHESTRATOR_TOKEN=$SHARED_TOKEN \
+    ORCHESTRATOR_URL=$O ORCHESTRATOR_TOKEN=$NODE_TOKEN \
     NODE_ID="$NODE_ID" NODE_ZONE=default NODE_URL=$N NODE_API_KEY="$NODE_KEY" \
-    SANDBOXD_DATABASE_URL="$DSN" SANDBOXD_RUNTIME=docker \
+    SANDBOXD_DATABASE_URL="$DSN" SANDBOXD_SECRET_KEY=$NODE_SECRET_KEY SANDBOXD_RUNTIME=docker \
     SANDBOXD_DATA="$WORK/nodedata" PORT=$NODE_PORT \
     HOSTSTATS_MEM_TOTAL_MB=${HOSTSTATS_MEM_TOTAL_MB:-16384} \
     "$WORK/sandboxd" > "$WORK/node.log" 2>&1 & echo $! > "$WORK/node.pid" )
