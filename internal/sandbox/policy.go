@@ -41,7 +41,7 @@ func (s Spec) Validate(knownTemplate func(string) bool, nameOK func(string) (str
 			return "", &InvalidError{Reason: err.Error()}
 		}
 	}
-	if err := ValidSlug(s.Slug); err != nil {
+	if err := AssignableSlug(s.Slug); err != nil {
 		return "", &InvalidError{Reason: err.Error()}
 	}
 	if err := ValidNetworks(s.Networks); err != nil {

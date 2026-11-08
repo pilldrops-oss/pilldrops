@@ -28,6 +28,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/httpx"
 	"github.com/pilldrops-oss/pilldrops/internal/mcp"
 	"github.com/pilldrops-oss/pilldrops/internal/observability"
+	"github.com/pilldrops-oss/pilldrops/internal/proxy"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 	"github.com/pilldrops-oss/pilldrops/internal/webui"
 )
@@ -98,10 +99,17 @@ type Server struct {
 	// sandboxDomain is PORTAL_SANDBOX_DOMAIN; empty means previews share the
 	// dashboard's origin. See frameAncestorsPolicy.
 	sandboxDomain string
+	// legacy redirects preview hosts under PORTAL_LEGACY_SANDBOX_DOMAINS to
+	// sandboxDomain; nil when none is set.
+	legacy *proxy.LegacyDomains
 
 	// domains caches custom-domain routing decisions for customDomainTTL,
 	// negative answers included. Zero value ready.
 	domains routeCache
+
+	// legacyStamps throttles recording traffic on custom domains still on a
+	// legacy CNAME. Zero value ready.
+	legacyStamps stampThrottle
 
 	// maxBodyBytes (MAX_REQUEST_BYTES) bounds only the buffered-JSON endpoints,
 	// not the streamed proxies, which the node caps itself. See capBody.
@@ -218,6 +226,10 @@ func NewServer(apiKey, nodeToken string) *Server {
 		// does, and it only applies to a store that can presign. =0 when the
 		// nodes cannot reach the bucket's endpoint.
 		artifactDirect: time.Duration(config.Int("ORCHESTRATOR_ARTIFACT_DIRECT_SECONDS", 900)) * time.Second,
+	}
+	// cmd/orchestrator has already refused a bad value, so an error here means none is set.
+	if domains, err := proxy.ParseLegacyDomains(os.Getenv("PORTAL_LEGACY_SANDBOX_DOMAINS"), s.sandboxDomain, s.portalOrigin); err == nil && len(domains) > 0 {
+		s.setLegacyDomains(domains)
 	}
 	// Per-sandbox locks (a move and a destroy must not overlap) go wherever the
 	// replicas share state; one replica keeps them in process.

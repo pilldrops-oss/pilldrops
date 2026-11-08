@@ -6,8 +6,11 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+
+	"golang.org/x/net/publicsuffix"
 
 	"github.com/pilldrops-oss/pilldrops/internal/cron"
 	"github.com/pilldrops-oss/pilldrops/internal/httpx"
@@ -48,6 +51,23 @@ func (s *Server) domainTarget(d store.Domain) string {
 	return strconv.Itoa(d.Port) + "-" + d.SandboxID + "." + s.sandboxDomain
 }
 
+// domainLegacyTargets are the records a row was told to create under each
+// legacy sandbox domain, which the verifier still accepts for a while.
+func (s *Server) domainLegacyTargets(d store.Domain) []string {
+	if s.legacy == nil {
+		return nil
+	}
+	out := make([]string, 0, len(s.legacy.Domains))
+	for _, old := range s.legacy.Domains {
+		if d.Wildcard {
+			out = append(out, old)
+		} else {
+			out = append(out, strconv.Itoa(d.Port)+"-"+d.SandboxID+"."+old)
+		}
+	}
+	return out
+}
+
 // StartDomainVerifier runs the DNS verifier until ctx is cancelled. Every
 // replica runs it: the checks are idempotent, and a leader-only job would stop
 // verifying whenever the lease moved. Without a sandbox domain there is no
@@ -57,7 +77,7 @@ func (s *Server) StartDomainVerifier(ctx context.Context, st *store.Store) {
 		return
 	}
 	v := cron.NewDomainVerifier(st, s.domainTarget)
-	v.Now, v.Log = s.now, s.log()
+	v.Now, v.Log, v.LegacyTargets = s.now, s.log(), s.domainLegacyTargets
 	go v.Run(ctx)
 }
 
@@ -98,16 +118,28 @@ func validDomainHost(raw string) (host string, wildcard bool, err error) {
 	return host, wildcard, nil
 }
 
-// underPlatformDomain reports whether host is the platform's own wildcard or
-// sits under it. Those hosts already route; a row for one would let an org
-// claim another org's sandbox host.
-func (s *Server) underPlatformDomain(host string) bool {
-	d := strings.ToLower(strings.TrimSpace(s.sandboxDomain))
-	if d == "" {
-		return false
-	}
+// platformParent returns the platform domain host is, or sits under: the
+// sandbox domain and, once previews moved, a legacy one or the dashboard's
+// registrable domain. Those hosts are ours: a row for one would let an org
+// claim another org's sandbox host, or a name like login.<dashboard domain>
+// while old wildcard DNS still points here. "" when host is none of them.
+func (s *Server) platformParent(host string) string {
 	host = strings.TrimPrefix(host, "*.")
-	return host == d || strings.HasSuffix(host, "."+d)
+	parents := []string{strings.ToLower(strings.TrimSpace(s.sandboxDomain))}
+	if s.legacy != nil {
+		parents = append(parents, s.legacy.Domains...)
+		if u, err := url.Parse(s.portalOrigin); err == nil && u.Hostname() != "" {
+			if reg, err := publicsuffix.EffectiveTLDPlusOne(strings.ToLower(u.Hostname())); err == nil {
+				parents = append(parents, reg)
+			}
+		}
+	}
+	for _, d := range parents {
+		if d != "" && (host == d || strings.HasSuffix(host, "."+d)) {
+			return d
+		}
+	}
+	return ""
 }
 
 func (s *Server) handleDomainCreate(w http.ResponseWriter, r *http.Request) {
@@ -135,8 +167,8 @@ func (s *Server) handleDomainCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if s.underPlatformDomain(host) {
-		writeErr(w, http.StatusBadRequest, "hosts under "+s.sandboxDomain+" are served by the platform already")
+	if parent := s.platformParent(host); parent != "" {
+		writeErr(w, http.StatusBadRequest, "hosts under "+parent+" belong to the platform and cannot be attached")
 		return
 	}
 
@@ -239,6 +271,8 @@ func (s *Server) domainJSON(d store.Domain) map[string]any {
 		"status": d.Status, "error": d.Error, "created_at": d.CreatedAt,
 		"cname_target": target,
 		"record":       cnameRecord(d.Host, target),
+		// The row's DNS still names a legacy sandbox domain: record is the one to create.
+		"legacy_target": d.LegacyTargetSeenAt != 0,
 	}
 }
 

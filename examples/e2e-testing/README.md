@@ -11,7 +11,7 @@ nothing to install.
 ./run-e2e.sh https://your-app.example.com ./tests
 ```
 
-It prints a report URL like `https://8000-<sandbox-id>.pilldrops.com/`.
+It prints a report URL like `https://8000-<sandbox-id>.pilldrops.app/`.
 
 ## Or step by step
 
@@ -32,7 +32,7 @@ pilldrops exec $ID --timeout 300 -- \
 # 4. serve the HTML report (survives idle/resume)
 pilldrops start $ID -- \
   sh -c 'cd /workspace/e2e && npx playwright show-report playwright-report --host 0.0.0.0 --port $PORT'
-# → open  https://8000-$ID.pilldrops.com/
+# → open  https://8000-$ID.pilldrops.app/
 ```
 
 ## What you get

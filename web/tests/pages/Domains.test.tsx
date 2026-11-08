@@ -108,4 +108,21 @@ describe('Domains', () => {
     expect(await screen.findByText(/at least two labels/i)).toBeInTheDocument()
     expect(api.addDomain).not.toHaveBeenCalled()
   })
+
+  it('asks the owner to update a host still on the old domain', async () => {
+    vi.mocked(api.listDomains).mockResolvedValue([
+      row({ status: 'active', legacy_target: true, record: 'app.example.com CNAME 8000-sb1.pilldrops.app' }),
+    ])
+    renderDomains()
+
+    expect(await screen.findByText(/Update your DNS record to/)).toBeInTheDocument()
+  })
+
+  it('says nothing about DNS for a host on the current domain', async () => {
+    vi.mocked(api.listDomains).mockResolvedValue([row({ status: 'active' })])
+    renderDomains()
+
+    expect(await screen.findByText('active')).toBeInTheDocument()
+    expect(screen.queryByText(/Update your DNS record/)).not.toBeInTheDocument()
+  })
 })

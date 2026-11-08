@@ -114,6 +114,68 @@ on-demand TLS and let it ask the platform which hosts are real.
   proxy and point it at the platform host over plain HTTP; the row still has to
   verify before anything routes.
 
+### Moving previews to a new domain
+
+Previews belong on a domain of their own, not under the one that serves the
+dashboard and sign-in. Sandbox code on `x.example.com` can set cookies the
+dashboard on `example.com` receives, and a page at a slug such as
+`login.example.com` can get the whole domain flagged. To move previews from
+`example.com` to `example.app`:
+
+1. Point `example.app` and `*.example.app` where `*.example.com` points, with a
+   wildcard certificate.
+2. On the control plane and every edge replica, set
+   `PORTAL_SANDBOX_DOMAIN=example.app`, `PORTAL_LEGACY_SANDBOX_DOMAINS=example.com`
+   and `PORTAL_ORIGIN=https://example.com`, and restart them. The `PORTAL_ORIGIN`
+   host must be the apex or a reserved label such as `www` or `app`: startup
+   refuses one the redirect would take for a preview.
+3. Set the same three on the portal last, and restart it. The portal also
+   refuses a `PORTAL_ORCHESTRATOR_URL` the redirect would take.
+4. Set `SANDBOXD_SANDBOX_DOMAIN=example.app` on each node and restart it, any
+   time after the control plane: links a node still mints on the old domain are
+   rewritten to the new one.
+5. Leave `*.example.com` DNS in place. It now only redirects.
+6. Update webhook URLs and API clients that call preview hosts to the new
+   domain. The redirect does not carry them, as below.
+
+What changes once it runs:
+
+- A sandbox paused before the switch keeps the old `PD_SANDBOX_DOMAIN` until it
+  is recreated; resuming does not change it. Old preview URLs it builds still
+  redirect while the legacy redirect lives.
+- Old preview links answer `308` to the new host with path and query kept, so
+  browsers, and links that carry their token in the URL such as `?token=`, keep
+  working. Webhook senders such as GitHub, Stripe and Slack do not follow
+  redirects, and HTTP clients drop `Authorization` when a redirect changes
+  domain, so webhook URLs and API clients that authenticate with a header must
+  be updated to the new domain. Cookies set on the old host do not carry over.
+  The redirect sets no cookie, and the legacy domain's preview hosts only
+  redirect and serve no content. Redirects last as long as they are used: each
+  replica records a use at most once per 10 minutes, and after 90 days with no
+  use old links answer `410` with a "this link has moved" page; a visit after
+  that does not bring them back.
+- When the `PORTAL_ORIGIN` host is outside `example.app`, `example.app` and
+  `www.example.app` redirect to `PORTAL_ORIGIN`, and any other host under
+  `example.app` that names no sandbox is a 404: the preview domain never serves
+  the dashboard. A `PORTAL_ORIGIN` on `example.app` or under it moves the
+  previews but leaves the dashboard beside them, and startup logs a warning. A
+  load balancer health check must probe the orchestrator's own host, not the
+  preview apex.
+- A browser opening the path form `/preview/<id>/<port>/` is sent to the host
+  form with `302`. API clients, the CLI's terminal and WebSockets keep the path form.
+- A customer domain is accepted on its old target only by an exact CNAME to the
+  legacy host, not by matching addresses, and only while it gets traffic; it
+  stops being accepted 90 days after its last request. Customers with a
+  flattened apex or an A record must update to the new target. The Domains page
+  asks the owner to create the new record. New hosts under `example.app`,
+  `example.com` or the dashboard's registrable domain are refused.
+- With the dashboard off the preview domain, preview cookies are `SameSite=None;
+  Secure; Partitioned`, so a private preview keeps its access inside the
+  dashboard's iframe. A browser that blocks third-party cookies shows only the
+  first page there; "Open in new tab" works everywhere.
+- `FORWARD_PUBLIC_HOST` defaults to the new domain. Set it explicitly to keep
+  raw port forwards on the old one.
+
 ## Volumes
 
 A volume is a disk that outlives the sandbox it is attached to (Firecracker
@@ -273,7 +335,8 @@ port filters nothing. `network_advisories` says so on a domain-only allow list.
 | `NODE_BOOTSTRAP_SECRET` | recommended in a fleet | handed to every node at join as its `SANDBOXD_SECRET_KEY`, which encrypts stored env at rest. Must equal the control plane's `SANDBOXD_SECRET_KEY` when that is set, or the control plane cannot read rows nodes write |
 | `SANDBOXD_DATABASE_URL` | **yes** in a fleet | Postgres. Without it the orchestrator still boots but serves **no** projects, threads, vault or launch stats, and **admission is disabled** — see the warning below |
 | `PORTAL_SANDBOX_DOMAIN` | for previews | the wildcard domain. Unset disables host ingress entirely, and with it custom domains (`GET /v1/capabilities` reports `custom_domains: false`) |
-| `PORTAL_ORIGIN` | when the portal is off `PORTAL_SANDBOX_DOMAIN` | the portal's origin, such as `https://app.example.com`. Previews allow being embedded only by the sandbox domain and this origin, so without it the dashboard's Preview tab shows "refused to connect" on a portal elsewhere. Anything but one origin refuses to start |
+| `PORTAL_ORIGIN` | when the portal is off `PORTAL_SANDBOX_DOMAIN`; **required** with `PORTAL_LEGACY_SANDBOX_DOMAINS` | the portal's origin, such as `https://app.example.com`. Previews allow being embedded only by the sandbox domain and this origin, so without it the dashboard's Preview tab shows "refused to connect" on a portal elsewhere. When its host is outside `PORTAL_SANDBOX_DOMAIN`, the sandbox domain's apex and `www` redirect here, any other host under it that names no sandbox is a 404, and preview error pages link here. Anything but one origin refuses to start. Set the same value on the portal |
+| `PORTAL_LEGACY_SANDBOX_DOMAINS` | when previews moved domain | comma-separated domains previews used to live on, such as `example.com`. Their `<port>-<id>` and `<slug>` hosts answer `308` to the same label under `PORTAL_SANDBOX_DOMAIN` and are never served; a `<port>-<id>` host or a valid sandbox slug under a legacy domain is a preview link, so any single-label host that is a valid sandbox slug, such as `blog` or `staging`, that reaches the control plane or portal is redirected. Left alone are the apex, the reserved labels (`www`, `api`, `app`, `dashboard`, `portal`, `mail`), the labels reserved for new sandbox names only (`login`, `auth`, `accounts`, `clerk`, `admin`, `docs`, `help`, `support`, `status`, `billing`, `share`, `agent`), which the redirect skips as well, so a sandbox that already holds one keeps it but is not redirected on the legacy domain, and any label that is neither a `<port>-<id>` host nor a valid slug (such as `agent-*`, one starting with a digit that is not a `<port>-<id>` host, one containing an underscore, one over 63 characters, or a multi-label host). Hosts whose own DNS points elsewhere never reach it and are unaffected; before setting this, check which hosts on the old domain are routed to the platform. Redirects last as long as they are used and stop 90 days after the last use. Needs `PORTAL_ORIGIN`. Set the same value on the control plane, edge replicas and the portal. See *Moving previews to a new domain* |
 | `POSTHOG_PROJECT_KEY` | no | turns on dashboard product analytics for this deployment; unset sends nothing. |
 | `POSTHOG_HOST` | when the PostHog project is not on the US cloud | where those events go, such as `https://eu.i.posthog.com`. Default `https://us.i.posthog.com`; a key sent to the wrong region is rejected and its events are lost. |
 | `TRUSTED_PROXY_CIDRS` | with a TLS terminator | comma-separated CIDRs whose `X-Forwarded-For` is believed. Unset means the header is ignored everywhere |

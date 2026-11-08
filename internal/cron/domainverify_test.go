@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
@@ -26,6 +27,13 @@ func (f *fakeDomains) DomainsDue(_ context.Context, _ int64, _ int) ([]store.Dom
 func (f *fakeDomains) SetDomainStatus(_ context.Context, host, status, errText string, checkedAt int64) error {
 	d := f.rows[host]
 	d.Status, d.Error, d.CheckedAt = status, errText, checkedAt
+	f.rows[host] = d
+	return nil
+}
+
+func (f *fakeDomains) SetDomainLegacySeen(_ context.Context, host string, at int64) error {
+	d := f.rows[host]
+	d.LegacyTargetSeenAt = at
 	f.rows[host] = d
 	return nil
 }
@@ -163,5 +171,109 @@ func TestVerifierResolvesALabelUnderAWildcard(t *testing.T) {
 	}
 	if len(asked) == 0 || strings.HasPrefix(asked[0], "*") || !strings.HasSuffix(asked[0], ".vms.example.com") {
 		t.Errorf("resolved %q, want a label under the wildcard", asked)
+	}
+}
+
+// movedVerifier is verifierOver after the sandbox domain moved from
+// pilldrops.com to pilldrops.app, at a fixed now.
+func movedVerifier(f *fakeDomains, cnames map[string]string, hosts map[string][]string, now time.Time) *DomainVerifier {
+	v := verifierOver(f, cnames, hosts)
+	v.Target = func(d store.Domain) string {
+		if d.Wildcard {
+			return "pilldrops.app"
+		}
+		return strconv.Itoa(d.Port) + "-" + d.SandboxID + ".pilldrops.app"
+	}
+	v.LegacyTargets = func(d store.Domain) []string {
+		if d.Wildcard {
+			return []string{"pilldrops.com"}
+		}
+		return []string{strconv.Itoa(d.Port) + "-" + d.SandboxID + ".pilldrops.com"}
+	}
+	v.Now = func() time.Time { return now }
+	return v
+}
+
+func TestVerifierAcceptsALegacyCNAMEAndStartsItsClock(t *testing.T) {
+	now := time.Unix(1_000_000_000, 0)
+	f := &fakeDomains{rows: map[string]store.Domain{
+		"app.example.com": {Host: "app.example.com", SandboxID: "sb1", Port: 8000, Status: "active"},
+	}}
+	movedVerifier(f,
+		map[string]string{"app.example.com": "8000-sb1.pilldrops.com."},
+		map[string][]string{"8000-sb1.pilldrops.com": {"192.0.2.9"}}, now).Sweep(t.Context())
+
+	got := f.rows["app.example.com"]
+	if got.Status != "active" || got.LegacyTargetSeenAt != now.Unix() {
+		t.Fatalf("row = %+v, want active with the legacy clock started now", got)
+	}
+}
+
+func TestVerifierLapsesALegacyCNAMEAfterNinetyDaysWithoutTraffic(t *testing.T) {
+	now := time.Unix(1_000_000_000, 0)
+	for _, tc := range []struct {
+		idle   time.Duration
+		status string
+	}{
+		{89 * 24 * time.Hour, "active"},
+		{91 * 24 * time.Hour, "pending"},
+	} {
+		seen := now.Add(-tc.idle).Unix()
+		f := &fakeDomains{rows: map[string]store.Domain{
+			"app.example.com": {Host: "app.example.com", SandboxID: "sb1", Port: 8000, Status: "active", LegacyTargetSeenAt: seen},
+		}}
+		movedVerifier(f,
+			map[string]string{"app.example.com": "8000-sb1.pilldrops.com."},
+			map[string][]string{"8000-sb1.pilldrops.com": {"192.0.2.9"}}, now).Sweep(t.Context())
+
+		got := f.rows["app.example.com"]
+		if got.Status != tc.status || got.LegacyTargetSeenAt != seen {
+			t.Errorf("idle %s: row = %+v, want %s with the marker kept", tc.idle, got, tc.status)
+		}
+		if tc.status == "pending" && !strings.Contains(got.Error, "app.example.com CNAME 8000-sb1.pilldrops.app") {
+			t.Errorf("idle %s: error %q does not name the record to create", tc.idle, got.Error)
+		}
+	}
+}
+
+func TestVerifierClearsTheMarkerOnceDNSMoves(t *testing.T) {
+	now := time.Unix(1_000_000_000, 0)
+	f := &fakeDomains{rows: map[string]store.Domain{
+		"*.vms.example.com": {Host: "*.vms.example.com", Wildcard: true, Status: "active", LegacyTargetSeenAt: 5},
+	}}
+	v := movedVerifier(f, nil, map[string][]string{"pilldrops.app": {"192.0.2.9"}}, now)
+	inner := v.LookupHost
+	v.LookupHost = func(ctx context.Context, host string) ([]string, error) {
+		if strings.HasSuffix(host, ".vms.example.com") {
+			return []string{"192.0.2.9"}, nil
+		}
+		return inner(ctx, host)
+	}
+	v.Sweep(t.Context())
+
+	got := f.rows["*.vms.example.com"]
+	if got.Status != "active" || got.LegacyTargetSeenAt != 0 {
+		t.Fatalf("row = %+v, want active and no longer marked legacy", got)
+	}
+}
+
+// The old domain's addresses are a shared proxy's, so matching them proves
+// nothing: only its exact CNAME may keep a row alive.
+func TestVerifierRefusesALegacyAddressMatchWithoutItsCNAME(t *testing.T) {
+	now := time.Unix(1_000_000_000, 0)
+	f := &fakeDomains{rows: map[string]store.Domain{
+		"shop.other.com": {Host: "shop.other.com", SandboxID: "sb1", Port: 8000, Status: "pending"},
+	}}
+	movedVerifier(f,
+		map[string]string{"shop.other.com": "edge.other.net."},
+		map[string][]string{
+			"8000-sb1.pilldrops.com": {"104.21.16.5"},
+			"8000-sb1.pilldrops.app": {"192.0.2.9"},
+			"shop.other.com":         {"104.21.16.5"},
+		}, now).Sweep(t.Context())
+
+	got := f.rows["shop.other.com"]
+	if got.Status != "pending" || got.LegacyTargetSeenAt != 0 {
+		t.Fatalf("row = %+v, want pending and unmarked", got)
 	}
 }

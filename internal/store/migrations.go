@@ -2006,4 +2006,37 @@ BEGIN SELECT RAISE(ABORT, 'sandboxes_state_known'); END`,
 			`CREATE INDEX IF NOT EXISTS volumes_org ON volumes (org_id)`,
 		},
 	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 73,
+		name:    "legacy_domain_uses",
+		// When each legacy sandbox domain last redirected anyone. Its preview
+		// hosts keep redirecting until store.LegacyUseWindow passes with no use.
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS legacy_domain_uses (
+				domain       TEXT PRIMARY KEY,
+				last_used_at INTEGER NOT NULL
+			)`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS legacy_domain_uses (
+				domain       TEXT PRIMARY KEY,
+				last_used_at BIGINT NOT NULL
+			)`,
+		},
+	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 74,
+		name:    "custom_domain_legacy_target",
+		// Nonzero while the row's DNS still names a legacy sandbox domain: when
+		// it last served traffic that way. The verifier stops accepting the old
+		// target store.LegacyUseWindow after it.
+		sqlite: []string{
+			`ALTER TABLE custom_domains ADD COLUMN legacy_target_seen_at INTEGER NOT NULL DEFAULT 0`,
+		},
+		postgres: []string{
+			`ALTER TABLE custom_domains ADD COLUMN IF NOT EXISTS legacy_target_seen_at BIGINT NOT NULL DEFAULT 0`,
+		},
+	},
 }

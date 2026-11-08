@@ -1173,6 +1173,32 @@
         }
       }
     },
+    "/v1/domains": {
+      "get": {
+        "summary": "List the org's custom domains",
+        "description": "Control plane only. Each row is a customer hostname in front of one public sandbox, or a `*.` wildcard in front of all of the org's. `record` is the DNS record to create. `legacy_target` is true while the row's DNS still names a sandbox domain the platform has moved off: that record keeps working while the host gets traffic, and stops being accepted 90 days after the last request.",
+        "responses": {
+          "200": {
+            "description": "The org's rows, host-ordered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "domains": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CustomDomain"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/capabilities": {
       "get": {
         "summary": "What this node \u2014 or this fleet \u2014 can actually do",
@@ -1230,6 +1256,51 @@
       }
     },
     "schemas": {
+      "CustomDomain": {
+        "type": "object",
+        "description": "A customer hostname pointed at the platform. Only `active` rows route.",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "description": "Empty for a wildcard row, whose label names the sandbox."
+          },
+          "port": {
+            "type": "integer"
+          },
+          "wildcard": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active"
+            ]
+          },
+          "error": {
+            "type": "string",
+            "description": "Why the host is not active yet; empty when it is."
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "cname_target": {
+            "type": "string",
+            "description": "What the CNAME must point at, under the current sandbox domain."
+          },
+          "record": {
+            "type": "string",
+            "description": "The DNS record to create, as one line."
+          },
+          "legacy_target": {
+            "type": "boolean",
+            "description": "True while the row's DNS names a sandbox domain the platform moved off. Create `record` to keep the host."
+          }
+        }
+      },
       "Error": {
         "type": "object",
         "description": "Every error carries a human-readable message and a stable machine-readable code.",

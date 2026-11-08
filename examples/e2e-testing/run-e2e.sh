@@ -34,6 +34,6 @@ sleep 4
 
 echo
 echo "════════════════════════════════════════════════════════════"
-echo "  Report:  https://8000-$ID.pilldrops.com/"
+echo "  Report:  https://8000-$ID.pilldrops.app/"
 echo "  (screenshots, screen recordings, traces, network logs)"
 echo "════════════════════════════════════════════════════════════"
