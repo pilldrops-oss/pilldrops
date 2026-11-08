@@ -284,6 +284,31 @@ func TestAMoveCapturesCreatesElsewhereAndEvicts(t *testing.T) {
 	}
 }
 
+// A plain create must be movable. The node writes the row the move reads, but
+// only best-effort, and a sandbox whose row write failed was reachable and
+// running yet answered every move with 404. This node writes no row at all.
+func TestAPlainCreateIsMovable(t *testing.T) {
+	f := newSnapshotCreateFleet(t)
+	f.s.reg.SetCordon("node-fc", false)
+	f.s.reg.SetCordon("node-create-fc", true)
+	f.s.reg.SetCordon("node-create-dk", true)
+	status, out := f.do(t, "POST", "/v1/sandboxes", "apikey", `{"template":"base"}`)
+	if status != http.StatusCreated || out["id"] != "sb-made-here" {
+		t.Fatalf("create answered %d %v, want 201 sb-made-here", status, out["_raw"])
+	}
+	rec, found, err := f.st.SandboxByID(t.Context(), "sb-made-here")
+	if err != nil || !found || rec.NodeID != "node-fc" || rec.OrgID != "default" || rec.State != "running" {
+		t.Fatalf("row after create = %+v found=%v err=%v, want running on node-fc in org default", rec, found, err)
+	}
+
+	f.s.reg.SetCordon("node-fc", true)
+	f.s.reg.SetCordon("node-create-fc", false)
+	status, out = f.do(t, "POST", "/v1/sandboxes/sb-made-here/move", "apikey", "")
+	if status != http.StatusOK || out["to"] != "node-create-fc" {
+		t.Fatalf("move answered %d %v, want 200 to node-create-fc", status, out["_raw"])
+	}
+}
+
 // Every move of a sandbox captured under move-<id>, one template id: a move
 // back to a node replaced, under a fork still running on it, the capture an
 // earlier move had left there.

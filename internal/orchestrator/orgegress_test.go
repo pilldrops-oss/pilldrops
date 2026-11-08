@@ -28,6 +28,9 @@ func TestOrgEgressAdminRoundTrip(t *testing.T) {
 	if w := opReq("PUT", "/v1/admin/orgs/u:one/egress", `{"network":{"allow":["10.0.0.0/8"]}}`); w.Code != http.StatusBadRequest {
 		t.Errorf("a private range in allow = %d %q, want 400: the allow list is public-only", w.Code, w.Body.String())
 	}
+	if w := opReq("PUT", "/v1/admin/orgs/u:one/egress", `{"network":{"allow":["*.github.io"]}}`); w.Code != http.StatusBadRequest {
+		t.Errorf("PUT of a wildcard over a public suffix = %d %q, want 400", w.Code, w.Body.String())
+	}
 	if w := opReq("PUT", "/v1/admin/orgs/u:one/egress", `{"network":{"allow":["api.stripe.com"]}}`); w.Code != http.StatusNotImplemented {
 		t.Errorf("a domain rule = %d %q, want 501: stored, it would fail every later create in the org", w.Code, w.Body.String())
 	}

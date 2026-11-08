@@ -611,7 +611,7 @@ func (m *Manager) recoverOrphanProcs(procs []*OrphanProcess) {
 			m.log.Info("vm_held_for_adoption", zap.String("vm_id", proc.SandboxID), zap.String("owner", rec.Owner))
 			continue
 		}
-		if !m.knowsSandbox(proc.SandboxID) {
+		if !m.knowsSandbox(proc.SandboxID) && !m.isOrphanedGolden(proc.SandboxID) {
 			pid := 0
 			if proc.Machine != nil {
 				pid = proc.Machine.Pid()

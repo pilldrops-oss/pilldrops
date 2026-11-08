@@ -146,6 +146,13 @@ func (m *Manager) AdoptOwned(owner string) (*Sandbox, bool) {
 		// MemBase stays empty: without a lineage the next snapshot is a full one.
 		stopTimer: func() {},
 	}
+	// The name layer ran in the dead daemon, and the namespace still diverts
+	// 80/443 to it: without a new one every allowed domain is refused.
+	if rec.NetNS != "" {
+		if err := startNameLayer(rec.NetNS, netnsRunDir+"/"+rec.NetNS, rec.VMID, rec.Egress, m.log); err != nil {
+			m.log.Error("adopt_name_layer_failed", zap.String("vm_id", rec.VMID), zap.Error(err))
+		}
+	}
 	m.mu.Lock()
 	m.active[rec.VMID] = sb
 	m.mu.Unlock()

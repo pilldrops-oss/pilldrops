@@ -256,14 +256,36 @@ func (s *Server) setNodeFlag(w http.ResponseWriter, r *http.Request, fn func(str
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+// handleRemoveNode revokes a node permanently. A node's credentials are
+// derived from NODE_KEY_SECRET (nodeKeyFor, nodeHeartbeatToken), never
+// stored, so dropping the registry entry alone does not revoke anything: the
+// same id's next heartbeat re-derives the same key and re-registers. The
+// removed_nodes record is what every credential check refuses against
+// (heartbeat, artifact auth, join name allocation), so it is written before
+// the registry entry is dropped, and written even when the node is not
+// currently registered — offline, or gone after a restart — because an
+// offline node must still be revocable.
 func (s *Server) handleRemoveNode(w http.ResponseWriter, r *http.Request) {
 	if !s.requireFleetOperator(w, r) {
 		return
 	}
-	if !s.reg.Remove(r.PathValue("id")) {
-		writeErr(w, 404, "node not found")
+	st := s.st.Load()
+	if st == nil {
+		writeErr(w, 503, "orchestrator not configured: no database (SANDBOXD_DATABASE_URL) — "+
+			"refusing to remove a node without a durable record of the removal, which would not "+
+			"survive a restart and let the node re-register")
 		return
 	}
+	id := r.PathValue("id")
+	zone := ""
+	if n, ok := s.reg.Node(id); ok {
+		zone = n.Zone
+	}
+	if err := st.MarkNodeRemoved(r.Context(), id, zone, s.now().Unix()); err != nil {
+		writeErr(w, 500, "removing node: "+err.Error())
+		return
+	}
+	s.reg.Remove(id)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -294,6 +316,27 @@ func (s *Server) nodeHeartbeatToken(id, zone string) string {
 // secret is refused at boot and in handleHeartbeat.
 func (s *Server) nodeKeyDerivationSecret() []byte {
 	return []byte(s.nodeKeySecret)
+}
+
+// nodeRemoved reports whether id was revoked by handleRemoveNode. A node's
+// key is derived, not rotated by removal, so this record is the only thing
+// that actually revokes it — every credential check must consult it. With no
+// store configured there is nothing to consult: handleRemoveNode already
+// refuses to remove a node without one, so nothing can be in removed_nodes.
+// A read error fails closed: a check that cannot confirm a node has NOT been
+// removed must not treat that as "not removed".
+func (s *Server) nodeRemoved(ctx context.Context, id string) bool {
+	st := s.st.Load()
+	if st == nil {
+		return false
+	}
+	removed, err := st.NodeRemoved(ctx, id)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "removed-node check failed; refusing",
+			"component", "orchestrator", "node_id", id, "err", err)
+		return true
+	}
+	return removed
 }
 
 // firstHealthy returns any healthy node to proxy shared endpoints to.

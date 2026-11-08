@@ -226,6 +226,8 @@ func RebuildSnapshots(template string, cfg Config, log *zap.Logger) (err error) 
 
 func createOneSnapshot(template, snapDir string, cfg Config, log *zap.Logger) error {
 	goldenID := goldenVMID(template, randomHex(4))
+	goldenBuildStarted(goldenID)
+	defer goldenBuildFinished(goldenID)
 	gvcpu, gmem := defaultResources(cfg, template)
 	gstorage := goldenStorageMB(cfg, template)
 	// Read before the boot: an image swapped during it is then recorded stale.

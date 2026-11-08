@@ -79,7 +79,9 @@ const (
 	// measurement: it covers a sandbox up to about a quarter of an hour old and
 	// bounds how long a restored VM may hold its memory waiting. Nothing covers
 	// an older one but fixing the stall, which is what makes it a ceiling worth
-	// having rather than a number worth growing.
+	// having rather than a number worth growing. Not reproduced on Firecracker
+	// v1.17.0 with host kernel 7.0 (0 of 22, see docs/deployment.md), so it is
+	// kept as a safety net that logs when it fires.
 	credPushStalledDeadline = 15 * time.Minute
 
 	credPushRetryInterval = 100 * time.Millisecond

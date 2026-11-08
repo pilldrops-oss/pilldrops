@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
@@ -188,5 +189,56 @@ func TestForwardProxiesToTarget(t *testing.T) {
 
 	if rec.Code != 201 || rec.Body.String() != "path=/hi method=POST" {
 		t.Fatalf("got %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+// An upstream may answer while the request body is still arriving. Unless
+// Forward keeps the inbound request full duplex, the server consumes and
+// closes that body as the response headers go out: here the proxy stalls,
+// and on a short body the upstream conn is torn down mid-response.
+func TestForwardKeepsRequestBodyOpenAfterResponseStarts(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = http.NewResponseController(w).EnableFullDuplex()
+		w.WriteHeader(http.StatusOK)
+		buf := make([]byte, 1)
+		for {
+			n, err := r.Body.Read(buf)
+			if n > 0 {
+				_, _ = w.Write(buf[:n])
+				w.(http.Flusher).Flush()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}))
+	defer upstream.Close()
+	target := strings.TrimPrefix(upstream.URL, "http://")
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Forward(w, r, target, "/", "upstream down")
+	}))
+	defer front.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	body, send := io.Pipe()
+	// The client's write loop blocks on the pipe, not the context.
+	context.AfterFunc(ctx, func() { _ = send.CloseWithError(ctx.Err()) })
+	req, _ := http.NewRequestWithContext(ctx, "POST", front.URL, body)
+	req.ContentLength = 2
+	go func() { _, _ = send.Write([]byte("a")) }()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("no response while the request body was still open: %v", err)
+	}
+	defer resp.Body.Close()
+	first := make([]byte, 1)
+	if _, err := io.ReadFull(resp.Body, first); err != nil || string(first) != "a" {
+		t.Fatalf("first echoed byte = %q, %v", first, err)
+	}
+	_, _ = send.Write([]byte("b"))
+	_ = send.Close()
+	if rest, err := io.ReadAll(resp.Body); err != nil || string(rest) != "b" {
+		t.Fatalf("rest = %q, %v", rest, err)
 	}
 }

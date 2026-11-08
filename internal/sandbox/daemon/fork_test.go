@@ -7,6 +7,7 @@ import (
 	"time"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
 // A fork is a copy: same org, same size, same disk, and the parent keeps running.
@@ -133,5 +134,18 @@ func TestForkOwnershipAndVisibility(t *testing.T) {
 	}
 	if shared.Child.Visibility != "org" {
 		t.Errorf("fork asked for org = %q", shared.Child.Visibility)
+	}
+
+	// The portal forks for an org without naming a key. A private child with
+	// no creator was visible to nobody: running, billed, and impossible to
+	// read, exec in or destroy.
+	unowned, err := d.Fork(ctx, parent.ID, ForkSpec{})
+	if err != nil {
+		t.Fatalf("unowned fork: %v", err)
+	}
+	if unowned.Child.Visibility != "org" ||
+		!sandbox.Visible(unowned.Child.ID, unowned.Child.Visibility, unowned.Child.CreatedBy, "", false) {
+		t.Errorf("fork by an unnamed caller = (created_by=%q, visibility=%q), want org-visible",
+			unowned.Child.CreatedBy, unowned.Child.Visibility)
 	}
 }

@@ -1929,4 +1929,50 @@ BEGIN SELECT RAISE(ABORT, 'sandboxes_state_known'); END`,
 			`ALTER TABLE sandboxes ADD COLUMN IF NOT EXISTS pause_archive TEXT NOT NULL DEFAULT ''`,
 		},
 	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 70,
+		name:    "node_flags",
+		// Cordon and drain for a control plane with no Redis, whose node table is
+		// in memory. A node with neither flag has no row.
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS node_flags (
+				node_id  TEXT PRIMARY KEY,
+				cordoned INTEGER NOT NULL DEFAULT 0,
+				draining INTEGER NOT NULL DEFAULT 0
+			)`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS node_flags (
+				node_id  TEXT PRIMARY KEY,
+				cordoned BOOLEAN NOT NULL DEFAULT FALSE,
+				draining BOOLEAN NOT NULL DEFAULT FALSE
+			)`,
+		},
+	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 71,
+		name:    "removed_nodes",
+		// A node's credentials are derived from NODE_KEY_SECRET (nodeKeyFor,
+		// nodeHeartbeatToken), not stored, so there is nothing to delete that
+		// revokes them — the derivation still works forever. This table is what
+		// actually revokes a removed node: every credential check also refuses
+		// an id found here, and a re-join picks a fresh id rather than reusing
+		// (and un-revoking) one that is.
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS removed_nodes (
+				node_id    TEXT PRIMARY KEY,
+				zone       TEXT NOT NULL DEFAULT '',
+				removed_at INTEGER NOT NULL
+			)`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS removed_nodes (
+				node_id    TEXT PRIMARY KEY,
+				zone       TEXT NOT NULL DEFAULT '',
+				removed_at BIGINT NOT NULL
+			)`,
+		},
+	},
 }

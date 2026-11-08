@@ -18,6 +18,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -89,7 +90,9 @@ func run(ctx context.Context, stop func()) error {
 			if st := openStoreWithRetry(ctx, dsn, store.Open, storeOpenRetry); st != nil {
 				// VAULT_SECRET_KEY is deliberately not in the node join bundle, so a
 				// node cannot read a tenant's provider credential from the shared DB.
-				if err := st.SetSecretKey(os.Getenv("SANDBOXD_SECRET_KEY")); err != nil {
+				// Nodes are handed NODE_BOOTSTRAP_SECRET as their key at join; without it here
+				// every row a node encrypted fails to read, and move/rehome/routing answer 404.
+				if err := st.SetSecretKey(cmp.Or(os.Getenv("SANDBOXD_SECRET_KEY"), os.Getenv("NODE_BOOTSTRAP_SECRET"))); err != nil {
 					slog.Error("SANDBOXD_SECRET_KEY unusable", "component", "orchestrator", "err", err)
 				}
 				if err := st.SetVaultKey(os.Getenv("VAULT_SECRET_KEY")); err != nil {

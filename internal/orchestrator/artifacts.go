@@ -326,7 +326,13 @@ func newBuildID() string {
 // compromised node replace what every other node boots.
 func (s *Server) registerArtifactReadRoutes(mux *http.ServeMux) {
 	serve := func(w http.ResponseWriter, r *http.Request) {
-		if !s.authNodeKey(r) {
+		ok, removed := s.authNodeKey(r)
+		if removed {
+			writeErr(w, http.StatusForbidden,
+				"node removed: this id was revoked by an operator and will not be re-registered")
+			return
+		}
+		if !ok {
 			writeErr(w, http.StatusUnauthorized,
 				"a node credential is required to read the shared artifact store")
 			return
@@ -345,21 +351,29 @@ func (s *Server) registerArtifactReadRoutes(mux *http.ServeMux) {
 }
 
 // authNodeKey reports whether the request carries a registered node's key or
-// the operator key. A fetch carries no node id, so every node is compared,
-// in constant time and without short-circuiting.
-func (s *Server) authNodeKey(r *http.Request) bool {
+// the operator key. A fetch carries no node id, so
+// every node is compared, in constant time and without short-circuiting.
+// removed is reported separately from ok so the caller can answer 403
+// (revoked) rather than 401 (no valid credential) — a removed node's key is
+// still cryptographically valid, derived from NODE_KEY_SECRET and never
+// rotated by removal, so removed_nodes is the only thing that revokes it.
+func (s *Server) authNodeKey(r *http.Request) (ok, removed bool) {
 	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if got == "" {
-		return false
+		return false, false
 	}
-	ok := false
+	matchedID := ""
 	for _, n := range s.reg.Nodes() {
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.nodeKeyFor(n.ID, n.Zone))) == 1 {
 			ok = true
+			matchedID = n.ID
 		}
 	}
-	if s.apiKey != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.apiKey)) == 1 {
-		ok = true
+	if ok && s.nodeRemoved(r.Context(), matchedID) {
+		ok, removed = false, true
 	}
-	return ok
+	if s.apiKey != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.apiKey)) == 1 {
+		ok, removed = true, false
+	}
+	return ok, removed
 }

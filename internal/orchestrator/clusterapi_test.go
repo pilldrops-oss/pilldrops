@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
+	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
 // registerNode drives a heartbeat through the public endpoint.
@@ -112,6 +113,7 @@ func TestClusterStatsFullZoneCritical(t *testing.T) {
 
 func TestNodeManagementEndpoints(t *testing.T) {
 	s := fleetServer("apikey", "nodetoken")
+	s.SetStore(store.OpenForTest(t)) // removal is store-backed
 	srv := httptest.NewServer(s.Routes())
 	defer srv.Close()
 	registerNode(t, srv, `{"id":"n1","url":"http://n1","zone":"fsn1","capacity":{"mem_total_mb":64000,"mem_available_mb":40000}}`)
@@ -147,8 +149,10 @@ func TestNodeManagementEndpoints(t *testing.T) {
 	if code, _ := getJSON(t, srv, "DELETE", "/v1/nodes/n1"); code != 200 {
 		t.Fatalf("remove = %d, want 200", code)
 	}
-	if code, _ := getJSON(t, srv, "DELETE", "/v1/nodes/n1"); code != 404 {
-		t.Fatalf("remove missing = %d, want 404", code)
+	// Removing an already-removed (now offline) node is idempotent, not 404:
+	// an offline node must still be revocable.
+	if code, _ := getJSON(t, srv, "DELETE", "/v1/nodes/n1"); code != 200 {
+		t.Fatalf("remove already-removed = %d, want 200", code)
 	}
 	if code, _ := getJSON(t, srv, "POST", "/v1/nodes/ghost/cordon"); code != 404 {
 		t.Fatalf("cordon missing = %d, want 404", code)
@@ -234,6 +238,7 @@ func TestImagesProxyForwardsToHealthyNode(t *testing.T) {
 
 func TestUnreachableThenRemove(t *testing.T) {
 	s := fleetServer("apikey", "nodetoken")
+	s.SetStore(store.OpenForTest(t)) // removal is store-backed
 	base := time.Now()
 	s.now = func() time.Time { return base }
 	srv := httptest.NewServer(s.Routes())

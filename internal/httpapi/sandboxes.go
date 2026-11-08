@@ -169,6 +169,10 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			body = mergePilldropsConfig(body, cfg)
 		}
 	}
+	if err := egress.CheckWildcards(body.Network); err != nil {
+		writeErr(w, http.StatusBadRequest, "network: "+err.Error())
+		return
+	}
 	// Here as well as in daemon.Create, which every boot path passes through:
 	// this one runs before the idempotency claim, so a refused create leaves no
 	// key behind. Driven by the runtime's capability rather than being static,

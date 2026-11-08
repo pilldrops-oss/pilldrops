@@ -263,6 +263,31 @@ func NewServer(apiKey, nodeToken string) *Server {
 	return s
 }
 
+// keepNodeFlags stores cordon and drain in the database when no Redis holds them,
+// so a restart does not put a node an operator took out back into service.
+func (s *Server) keepNodeFlags(st *store.Store) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := st.NodeFlags(ctx)
+	if err != nil {
+		slog.Error("could not read cordoned and draining nodes; they return to service",
+			"component", "orchestrator", "err", err)
+	}
+	saved := make([]cluster.SavedNodeFlags, 0, len(rows))
+	for _, row := range rows {
+		saved = append(saved, cluster.SavedNodeFlags{NodeID: row.NodeID, Cordoned: row.Cordoned, Draining: row.Draining})
+	}
+	s.reg.KeepFlags(saved, func(f cluster.SavedNodeFlags) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		row := store.NodeFlagsRow{NodeID: f.NodeID, Cordoned: f.Cordoned, Draining: f.Draining}
+		if err := st.SaveNodeFlags(ctx, row); err != nil {
+			slog.Error("node flags not saved; a restart would lose this change",
+				"component", "orchestrator", "node", f.NodeID, "err", err)
+		}
+	})
+}
+
 // SetStore wires the shared Postgres; nil falls back to proxying a node. It
 // also switches the console from the API-key prompt to its own accounts.
 func (s *Server) SetStore(st *store.Store) {
@@ -277,6 +302,7 @@ func (s *Server) SetStore(st *store.Store) {
 			}
 			return rec.NodeID, true
 		})
+		s.keepNodeFlags(st)
 	}
 	if s.ui != nil && st != nil {
 		s.ui.SetAdminStore(store.AccountsOf(st))

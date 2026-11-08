@@ -109,6 +109,14 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	for _, n := range s.reg.Nodes() {
 		taken = append(taken, n.ID)
 	}
+	if st := s.st.Load(); st != nil {
+		if removedIDs, err := st.RemovedNodeIDs(r.Context()); err == nil {
+			taken = append(taken, removedIDs...)
+		} else {
+			s.logger.ErrorContext(r.Context(), "listing removed node ids failed; a re-joined machine "+
+				"could be allocated one by coincidence", "component", "orchestrator", "err", err)
+		}
+	}
 	id := s.join.AllocateName(body.SuggestedID, taken)
 
 	writeJSON(w, 200, map[string]any{
