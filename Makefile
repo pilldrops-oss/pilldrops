@@ -60,7 +60,7 @@ dev: dev-build
 # ─── Production Build ────────────────────────────────────────
 # Cross-compiles for Linux. Requires Go installed locally.
 
-.PHONY: build sandboxd-linux envd proto
+.PHONY: build sandboxd-linux envd proto node-bin
 
 proto:
 	protoc --go_out=. --go-grpc_out=. proto/envd.proto
@@ -95,6 +95,32 @@ sandboxd-linux: web
 
 build: envd sandboxd-linux
 	@echo "── All binaries ready in bin/"
+
+# node-bin publishes NODE_BIN_DIR: what install.sh and the host-prep bundle
+# fetch to onboard a fleet node. sandboxd-linux here is cmd/sandboxd-fleet —
+# the minimal node agent — NOT cmd/sandboxd (the self-hosted server with a
+# dashboard, built by the sandboxd-linux target above); a fleet node must run
+# the fleet binary from day one, same as a later `sandboxd-update`. VERSION
+# stamps internal/nodeboot.Version exactly as release.yml's LDFLAGS does;
+# leave it unset for an unstamped ("dev") build.
+VERSION ?=
+NODE_BIN_LDFLAGS = -s -w $(if $(VERSION),-X github.com/pilldrops-oss/pilldrops/internal/nodeboot.Version=$(VERSION))
+node-bin:
+	@test -d "$(CLI_REPO)" || { echo "✗ CLI_REPO=$(CLI_REPO) not found — set CLI_REPO to a pilldrops-cli checkout" >&2; exit 1; }
+	@echo "── Building node-bin (dist/node-bin/)..."
+	@mkdir -p dist/node-bin
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(NODE_BIN_LDFLAGS)" -o dist/node-bin/sandboxd-linux ./cmd/sandboxd-fleet/
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/node-bin/envd ./cmd/envd/
+	@GOOS=linux GOARCH=amd64 go build -o dist/node-bin/pilldrops-join-linux ./cmd/pilldrops-join/
+	@echo "── Building node-prep.tgz (git archive HEAD + guest CLI from $(CLI_REPO))..."
+	@rm -rf dist/node-prep
+	@mkdir -p dist/node-prep/bin
+	@git archive HEAD | tar -x -C dist/node-prep
+	@cd $(CLI_REPO) && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o $(CURDIR)/dist/node-prep/bin/pilldrops-linux ./cmd/pilldrops
+	@tar -C dist/node-prep -czf dist/node-bin/node-prep.tgz .
+	@rm -rf dist/node-prep
+	@(cd dist/node-bin && sha256sum sandboxd-linux envd pilldrops-join-linux node-prep.tgz > SHA256SUMS)
+	@echo "── Built: dist/node-bin/{sandboxd-linux,envd,pilldrops-join-linux,node-prep.tgz,SHA256SUMS}"
 
 # ─── Database ────────────────────────────────────────────────
 

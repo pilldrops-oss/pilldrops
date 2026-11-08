@@ -240,7 +240,8 @@ port filters nothing. `network_advisories` says so on a domain-only allow list.
 | `ORG_ASSERT_KEY` | **yes** in a fleet | Ed25519 seed (`openssl rand -hex 32`) that signs `X-Org-Override`; nodes get only the public half at join. The orchestrator **refuses to start** without it when `ORCHESTRATOR_TOKEN` is set. See *The two secrets that stop one node compromising the fleet* |
 | `VAULT_SECRET_KEY` | **yes** in a fleet | encrypts tenants' provider API keys (`vault_secrets`); control plane only, **never** on a node (`openssl rand -hex 32`). The orchestrator **refuses to start** without it when `ORCHESTRATOR_TOKEN` is set, unless `ALLOW_PLAINTEXT_VAULT=1` (dev only). See *At-rest keys* |
 | `NODE_BOOTSTRAP_DSN` | **yes** to join nodes | the Postgres DSN a joining node is handed, ideally the node role from *Give nodes their own database role*. Unset refuses to mint join tokens |
-| `NODE_BIN_DIR` | **yes** to join nodes | directory holding `sandboxd-linux`, `envd`, `pilldrops-join-linux` and their `SHA256SUMS`, served to `install.sh` under `/bin/` |
+| `NODE_BIN_DIR` | **yes** to join nodes | directory holding `sandboxd-linux`, `envd`, `pilldrops-join-linux` and their `SHA256SUMS`, served to `install.sh` under `/bin/`. `make node-bin` builds it, see *Publishing node binaries* |
+| `NODE_BOOTSTRAP_SECRET` | recommended in a fleet | handed to every node at join as its `SANDBOXD_SECRET_KEY`, which encrypts stored env at rest. Must equal the control plane's `SANDBOXD_SECRET_KEY` when that is set, or the control plane cannot read rows nodes write |
 | `SANDBOXD_DATABASE_URL` | **yes** in a fleet | Postgres. Without it the orchestrator still boots but serves **no** projects, threads, vault or launch stats, and **admission is disabled** — see the warning below |
 | `PORTAL_SANDBOX_DOMAIN` | for previews | the wildcard domain. Unset disables host ingress entirely, and with it custom domains (`GET /v1/capabilities` reports `custom_domains: false`) |
 | `PORTAL_ORIGIN` | when the portal is off `PORTAL_SANDBOX_DOMAIN` | the portal's origin, such as `https://app.example.com`. Previews allow being embedded only by the sandbox domain and this origin, so without it the dashboard's Preview tab shows "refused to connect" on a portal elsewhere. Anything but one origin refuses to start |
@@ -348,6 +349,31 @@ curl -X POST https://<domain>/v1/join \
 ```
 
 ---
+
+### Publishing node binaries
+
+`install.sh` and a host-prep flow fetch their binaries from `NODE_BIN_DIR`
+over `/bin/<name>`, served by `handleNodeBinary`. `make node-bin` builds the
+exact layout that directory must hold: `sandboxd-linux` (built from
+`./cmd/sandboxd-fleet` — the fleet node agent, **not** `./cmd/sandboxd`, the
+self-hosted server with a dashboard — a fleet node runs this from day one),
+`envd`, `pilldrops-join-linux`, `node-prep.tgz`, and a `SHA256SUMS` covering
+all four. Point `NODE_BIN_DIR` at `dist/node-bin/` and restart the
+orchestrator to publish a new set. `VERSION=<tag>` stamps
+`internal/nodeboot.Version` the same way `release.yml` does; unset, the
+binaries report `dev`.
+
+`node-prep.tgz` is `git archive HEAD` plus a guest CLI built from `CLI_REPO`
+(default `../pilldrops-cli`, the same convention as the Makefile's
+`cli-linux`), so an operator console can prepare a bare KVM host before join:
+fetch the tarball and `SHA256SUMS`, verify, extract, and run
+`scripts/provision-node.sh` with `BUILD_DIR` set to the extract directory —
+the tarball's top level is the repo root, so `scripts/provision-node.sh` is
+right there. `provision-node.sh` needed no change to run from such an
+extract: it never assumes a `.git` directory, and the bundled
+`bin/pilldrops-linux` satisfies the check that would otherwise require
+`CLI_REPO` on the host itself.
+
 
 ## Host setup, per node
 
