@@ -36,6 +36,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/artifact"
 	"github.com/pilldrops-oss/pilldrops/internal/config"
 	"github.com/pilldrops-oss/pilldrops/internal/orchestrator"
+	"github.com/pilldrops-oss/pilldrops/internal/proxy"
 	"github.com/pilldrops-oss/pilldrops/internal/retention"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
@@ -68,6 +69,10 @@ func run(ctx context.Context, stop func()) error {
 		return err
 	}
 	if err := orchestrator.PortalOriginGuardError(os.Getenv("PORTAL_ORIGIN")); err != nil {
+		return err
+	}
+	if _, err := proxy.ParseLegacyDomains(os.Getenv("PORTAL_LEGACY_SANDBOX_DOMAINS"),
+		os.Getenv("PORTAL_SANDBOX_DOMAIN"), os.Getenv("PORTAL_ORIGIN")); err != nil {
 		return err
 	}
 	if err := orchestrator.VaultKeyGuardError(clustered, devInsecure,

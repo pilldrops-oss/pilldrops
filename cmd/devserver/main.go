@@ -322,6 +322,41 @@ func firstPort(raw []byte) int {
 // Empty means path-form /preview/... on the portal host.
 var portalSandboxDomain = strings.ToLower(os.Getenv("PORTAL_SANDBOX_DOMAIN"))
 
+// dashboardOrigin is PORTAL_ORIGIN, the dashboard's own origin when it is not
+// on portalSandboxDomain; "" when unset. main refuses anything but one origin.
+var dashboardOrigin = strings.TrimRight(os.Getenv("PORTAL_ORIGIN"), "/")
+
+// dashboardOriginError refuses a PORTAL_ORIGIN that is not one bare http(s)
+// origin: it becomes link targets and redirect locations.
+func dashboardOriginError(origin string) error {
+	if origin == "" {
+		return nil
+	}
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" ||
+		u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return fmt.Errorf("PORTAL_ORIGIN %q must be one origin such as https://app.example.com", origin)
+	}
+	return nil
+}
+
+// portalLegacyDomains reads PORTAL_LEGACY_SANDBOX_DOMAINS, refusing settings
+// that would redirect the dashboard, or the portal's own calls to orchURL, to
+// the preview domain.
+func portalLegacyDomains(raw, orchURL string) ([]string, error) {
+	if err := dashboardOriginError(dashboardOrigin); err != nil {
+		return nil, err
+	}
+	legacy, err := proxy.ParseLegacyDomains(raw, portalSandboxDomain, dashboardOrigin)
+	if err != nil {
+		return nil, err
+	}
+	if err := proxy.LegacyHostError(legacy, "PORTAL_ORCHESTRATOR_URL", orchURL); err != nil {
+		return nil, err
+	}
+	return legacy, nil
+}
+
 // previewURL builds the browser-reachable URL for a sandbox's app port: the
 // subdomain form when a sandbox domain is configured (always https, TLS
 // terminates at the CDN), otherwise the request's own scheme and host.
@@ -517,6 +552,12 @@ func hostPreview(domain string, rp http.Handler, next http.Handler, bySlug slugL
 		req2.URL.RawPath = ""
 		rp.ServeHTTP(w, req2)
 	})
+}
+
+// portalHandler is the portal's host routing: legacy preview hosts redirect,
+// preview hosts go to the orchestrator, and everything else to the site.
+func portalHandler(legacy *proxy.LegacyDomains, rp, site http.Handler, bySlug slugLookup) http.Handler {
+	return legacy.Wrap(hostPreview(portalSandboxDomain, rp, site, bySlug))
 }
 
 // isInfraPreviewErr reports whether a preview error body came from the
@@ -2247,6 +2288,10 @@ func main() {
 		log.Fatalf("zap.NewProduction: %v", err)
 	}
 	log, logBroadcaster := newDashLogger(baseLog)
+	legacyDomains, err := portalLegacyDomains(os.Getenv("PORTAL_LEGACY_SANDBOX_DOMAINS"), os.Getenv("PORTAL_ORCHESTRATOR_URL"))
+	if err != nil {
+		log.Fatal("invalid preview domain settings", zap.Error(err))
+	}
 
 	listenAddr := ":" + config.Str("PORT", "8080")
 	maxSandboxes := 50
@@ -3111,7 +3156,10 @@ func main() {
 		Addr: addr,
 		// <port>-<id>.<domain> hosts serve the sandbox app; everything else
 		// falls through to the site router.
-		Handler: hostPreview(portalSandboxDomain, previewRP, r, storeSlugLookup(projectStore)),
+		Handler: portalHandler(&proxy.LegacyDomains{
+			Current: portalSandboxDomain, Domains: legacyDomains,
+			Store: func() *pdstore.Store { return projectStore },
+		}, previewRP, r, storeSlugLookup(projectStore)),
 		// No WriteTimeout: it would cap every SSE stream (log feed, streaming
 		// exec). IdleTimeout and per-handler contexts bound the rest.
 		IdleTimeout: 60 * time.Second,

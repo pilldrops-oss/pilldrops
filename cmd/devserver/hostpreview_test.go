@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/pilldrops-oss/pilldrops/internal/proxy"
 )
 
 // The portal rewrites <port>-<id>.<domain> and, when the store knows the slug,
@@ -46,5 +48,34 @@ func TestHostPreviewSlugAndIDForms(t *testing.T) {
 	get("myapp.pilldrops.com", "/c")
 	if sitePath != "/c" || rpPath != "" {
 		t.Fatalf("no lookup: site %q rp %q", sitePath, rpPath)
+	}
+}
+
+// An old preview link reaching the portal is redirected before any routing:
+// it reaches neither the orchestrator nor the site.
+func TestPortalRedirectsLegacyPreviewHosts(t *testing.T) {
+	withDomain(t, "pilldrops.app")
+	var rpHits, siteHits int
+	rp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { rpHits++ })
+	site := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { siteHits++ })
+	h := portalHandler(&proxy.LegacyDomains{Current: "pilldrops.app", Domains: []string{"pilldrops.com"}}, rp, site, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "http://x/a?token=t", nil)
+	req.Host = "8000-sb1.pilldrops.com"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusPermanentRedirect || w.Header().Get("Location") != "https://8000-sb1.pilldrops.app/a?token=t" {
+		t.Fatalf("legacy host = %d %q, want 308 to pilldrops.app", w.Code, w.Header().Get("Location"))
+	}
+	if rpHits+siteHits != 0 {
+		t.Fatalf("a legacy preview host was routed: rp %d site %d", rpHits, siteHits)
+	}
+
+	// The dashboard on the legacy domain still reaches the site.
+	req = httptest.NewRequest(http.MethodGet, "http://x/dashboard", nil)
+	req.Host = "pilldrops.com"
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if siteHits != 1 {
+		t.Fatalf("site hits = %d, want 1", siteHits)
 	}
 }
