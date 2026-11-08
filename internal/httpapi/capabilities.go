@@ -180,7 +180,7 @@ func buildNodeCapabilities(rd runtimeDescriber, local func() []string, plan enti
 		WarmRestoreStorageMB: caps.WarmRestoreStorageMB,
 		Templates:            tmpl,
 		TemplatesEnumerated:  enumerated,
-		Features:             []string{"volume"},
+		Features:             nodeFeatures(caps),
 		Limits: nodeLimits{
 			MaxVCPU:       plan.MaxVCPU,
 			MaxMemMB:      plan.MaxMemMB,
@@ -190,4 +190,13 @@ func buildNodeCapabilities(rd runtimeDescriber, local func() []string, plan enti
 			NodeMaxActive: maxActive,
 		},
 	}, true
+}
+
+// nodeFeatures lists the optional groups this node serves: volumes need a
+// runtime that can attach them, so a Docker node does not offer the commands.
+func nodeFeatures(caps rt.Caps) []string {
+	if caps.Volumes {
+		return []string{"volume"}
+	}
+	return []string{}
 }

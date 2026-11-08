@@ -333,8 +333,10 @@ func baseFilterChain() string {
 // so it survives a reboot through the daemon, not through the restore unit.
 func allowNetNSPastBaseChains() {
 	for _, r := range netnsBaseChainRules(baseFilterChain()) {
-		if exec.CommandContext(context.Background(), "iptables", append([]string{"-C"}, r...)...).Run() == nil {
-			continue
+		// Moved to the top on every start, not just added once: a later
+		// setup-docker-egress.sh inserts its 10.0.0.0/8 drop above them, and
+		// tagged sandboxes then cannot reach each other.
+		for exec.CommandContext(context.Background(), "iptables", append([]string{"-D"}, r...)...).Run() == nil {
 		}
 		_ = exec.CommandContext(context.Background(), "iptables", append([]string{"-I"}, r...)...).Run()
 	}

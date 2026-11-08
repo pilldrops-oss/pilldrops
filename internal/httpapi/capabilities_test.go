@@ -169,8 +169,8 @@ func TestCapabilitiesEndpoint(t *testing.T) {
 	if got.Scope != "node" {
 		t.Errorf("scope = %q, want \"node\"", got.Scope)
 	}
-	if len(got.Features) != 1 || got.Features[0] != "volume" {
-		t.Errorf("features = %#v, want [volume]: a node serves volumes and no cloud groups, and absent would read as a server too old to say", got.Features)
+	if got.Features == nil || len(got.Features) != 0 {
+		t.Errorf("features = %#v, want [] on the wire: this runtime attaches no volumes, and absent would read as a server too old to say", got.Features)
 	}
 	if got.Runtime != "process" {
 		t.Errorf("runtime = %q, want \"process\" — the test server boots the process runtime, "+
@@ -362,5 +362,14 @@ func TestWhoamiNamesTheKeyOnANode(t *testing.T) {
 	defer anonymous.Body.Close()
 	if anonymous.StatusCode != http.StatusUnauthorized {
 		t.Errorf("no key: code %d, want 401", anonymous.StatusCode)
+	}
+}
+
+func TestNodeFeaturesOfferVolumesOnlyWhereTheyAttach(t *testing.T) {
+	if got := nodeFeatures(rt.Caps{Volumes: true}); len(got) != 1 || got[0] != "volume" {
+		t.Errorf("a runtime with volumes: %v, want [volume]", got)
+	}
+	if got := nodeFeatures(rt.Caps{}); got == nil || len(got) != 0 {
+		t.Errorf("a runtime without volumes: %#v, want an empty list", got)
 	}
 }
