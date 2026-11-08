@@ -22,6 +22,9 @@ import (
 type DomainStore interface {
 	DomainsDue(ctx context.Context, staleBefore int64, limit int) ([]store.Domain, error)
 	SetDomainStatus(ctx context.Context, host, status, errText string, checkedAt int64) error
+	// SetDomainLegacySeen records which target a row's DNS names: 0 for the
+	// current one, else when a legacy one was first seen.
+	SetDomainLegacySeen(ctx context.Context, host string, at int64) error
 }
 
 const (
@@ -46,6 +49,10 @@ type DomainVerifier struct {
 	// Target is the CNAME the customer was told to create for a row. Supplied
 	// by the control plane, which owns the platform host format.
 	Target func(store.Domain) string
+	// LegacyTargets are the records a row was told to create before the
+	// sandbox domain moved. One is accepted while the row keeps serving
+	// traffic, until store.LegacyUseWindow after the last. Nil accepts none.
+	LegacyTargets func(store.Domain) []string
 	// LookupCNAME and LookupHost default to the process resolver. They are
 	// fields, not a *net.Resolver, so a test can answer without a DNS server
 	// and an operator can still point them at a custom net.Resolver's methods.
@@ -117,7 +124,8 @@ func (v *DomainVerifier) Sweep(ctx context.Context) int {
 			return 0
 		}
 		status, detail := "pending", ""
-		if err := v.check(ctx, d); err == nil {
+		legacy, err := v.check(ctx, d)
+		if err == nil {
 			status = "active"
 		} else {
 			detail = err.Error()
@@ -130,18 +138,45 @@ func (v *DomainVerifier) Sweep(ctx context.Context) int {
 			v.log().WarnContext(ctx, "could not record a domain verification",
 				"component", "domains", "host", d.Host, "err", err)
 		}
+		v.recordTarget(ctx, d, legacy, err)
 	}
 	return len(rows)
+}
+
+// recordTarget keeps a row's legacy marker in step with its DNS: set when a
+// legacy target is first seen, which starts the clock traffic then extends,
+// and cleared once the row names the current target.
+func (v *DomainVerifier) recordTarget(ctx context.Context, d store.Domain, legacy bool, checkErr error) {
+	at := d.LegacyTargetSeenAt
+	switch {
+	case legacy && at == 0:
+		at = v.now().Unix()
+	case !legacy && checkErr == nil && at != 0:
+		at = 0
+	default:
+		return
+	}
+	if err := v.st.SetDomainLegacySeen(ctx, d.Host, at); err != nil {
+		v.log().WarnContext(ctx, "could not record which target a domain names",
+			"component", "domains", "host", d.Host, "err", err)
+	}
 }
 
 // check resolves one row. nil means the customer's record points at us: either
 // the CNAME is the exact target we handed out, or the name resolves to the same
 // addresses that target does (CNAME flattening at the DNS provider, and the
-// A-record form, both land here). Anything else is the text the customer sees.
-func (v *DomainVerifier) check(ctx context.Context, d store.Domain) error {
+// A-record form, both land here). legacy means its CNAME is exactly a target under a
+// legacy sandbox domain instead (never by shared address: the old domain sits
+// behind a proxy whose addresses other zones share), which is accepted until legacyLapsed says no.
+// Anything else is the text the customer sees.
+func (v *DomainVerifier) check(ctx context.Context, d store.Domain) (legacy bool, err error) {
 	target := v.Target(d)
 	if target == "" {
-		return fmt.Errorf("this deployment has no sandbox domain configured, so there is no record to verify")
+		return false, fmt.Errorf("this deployment has no sandbox domain configured, so there is no record to verify")
+	}
+	var old []string
+	if v.LegacyTargets != nil {
+		old = v.LegacyTargets(d)
 	}
 	name := d.Host
 	if d.Wildcard {
@@ -156,19 +191,22 @@ func (v *DomainVerifier) check(ctx context.Context, d store.Domain) error {
 
 	cname, cnameErr := v.lookupCNAME(ctx, name)
 	if cnameErr == nil && sameHost(cname, target) {
-		return nil
+		return false, nil
+	}
+	if cnameErr == nil {
+		for _, o := range old {
+			if sameHost(cname, o) {
+				return true, v.legacyLapsed(d, target)
+			}
+		}
 	}
 	want, wantErr := v.lookupHost(ctx, target)
 	got, gotErr := v.lookupHost(ctx, name)
 	if gotErr != nil {
-		return fmt.Errorf("%s does not resolve: %w%s", name, gotErr, dnsHint)
+		return false, fmt.Errorf("%s does not resolve: %w%s", name, gotErr, dnsHint)
 	}
-	if wantErr == nil {
-		for _, a := range got {
-			if slices.Contains(want, a) {
-				return nil
-			}
-		}
+	if wantErr == nil && sharesAddress(got, want) {
+		return false, nil
 	}
 	// Name what the customer's DNS actually says: the CNAME when there is one,
 	// the addresses when the name is an A record (a resolver answers a
@@ -177,8 +215,30 @@ func (v *DomainVerifier) check(ctx context.Context, d store.Domain) error {
 	if cnameErr != nil || found == "" || sameHost(found, name) {
 		found = strings.Join(got, ", ")
 	}
-	return fmt.Errorf("%s points at %s, not at %s: create the record %q%s",
+	return false, fmt.Errorf("%s points at %s, not at %s: create the record %q%s",
 		name, found, target, name+" CNAME "+target, dnsHint)
+}
+
+// legacyLapsed refuses a row still on a legacy target store.LegacyUseWindow
+// after it last served traffic; nil while that target is still accepted.
+func (v *DomainVerifier) legacyLapsed(d store.Domain, target string) error {
+	seen := d.LegacyTargetSeenAt
+	if seen == 0 || v.now().Sub(time.Unix(seen, 0)) <= store.LegacyUseWindow {
+		return nil
+	}
+	return fmt.Errorf("%s still points at the platform's old domain, which stopped being accepted %d days after "+
+		"the host last served traffic: create the record %q%s",
+		d.Host, int(store.LegacyUseWindow.Hours()/24), d.Host+" CNAME "+target, dnsHint)
+}
+
+// sharesAddress reports whether any address in got is also in want.
+func sharesAddress(got, want []string) bool {
+	for _, a := range got {
+		if slices.Contains(want, a) {
+			return true
+		}
+	}
+	return false
 }
 
 // sameHost compares two DNS names ignoring case and the root dot.

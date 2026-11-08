@@ -53,11 +53,12 @@ func (s *Store) SetDomainLegacySeen(ctx context.Context, host string, at int64) 
 }
 
 // TouchDomainLegacySeen records traffic on a row still on a legacy target. A
-// row on the current target (0) is left alone, as is a later stamp.
+// row on the current target (0) is left alone, as is a later stamp, and so is
+// a marker already older than LegacyUseWindow: a lapsed CNAME stays lapsed.
 func (s *Store) TouchDomainLegacySeen(ctx context.Context, host string, at int64) error {
 	_, err := s.exec(ctx,
 		`UPDATE custom_domains SET legacy_target_seen_at = ?
-		 WHERE host = ? AND legacy_target_seen_at > 0 AND legacy_target_seen_at < ?`,
-		at, strings.ToLower(host), at)
+		 WHERE host = ? AND legacy_target_seen_at > 0 AND legacy_target_seen_at >= ? AND legacy_target_seen_at < ?`,
+		at, strings.ToLower(host), at-int64(LegacyUseWindow/time.Second), at)
 	return err
 }

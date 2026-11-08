@@ -194,6 +194,8 @@ export interface CustomDomain {
   error: string
   record: string
   cname_target: string
+  /** True while the host's DNS still names the sandbox domain the platform moved off; `record` is the one to create. Absent on older servers. */
+  legacy_target?: boolean
   created_at: number
 }
 

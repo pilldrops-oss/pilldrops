@@ -134,6 +134,11 @@ export default function Domains() {
                 <td>
                   <span className={d.status === 'active' ? 'pill run' : 'pill pau'}><span className="pd" />{d.status}</span>
                   {d.error && <div className="lm-error">{d.error}</div>}
+                  {d.legacy_target && (
+                    <div className="lm-error">
+                      Update your DNS record to <code>{d.record}</code>. The old one keeps working only while this host gets traffic.
+                    </div>
+                  )}
                 </td>
                 <td><code>{d.record}</code></td>
                 <td><button className="btn ghost" onClick={() => remove(d)}>Remove</button></td>

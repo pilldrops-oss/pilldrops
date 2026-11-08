@@ -10,6 +10,7 @@ import (
 
 	"github.com/pilldrops-oss/pilldrops/internal/proxy"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
+	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
 // Wildcard-host ingress serves <port>-<id>.<domain> (the sandbox app).
@@ -127,7 +128,11 @@ type hostRoute struct {
 	id    string
 	port  int
 	owned bool
-	exp   time.Time
+	// row is the custom_domains host the route came from; legacy says its DNS
+	// still names a legacy sandbox domain, so serving it is recorded.
+	row    string
+	legacy bool
+	exp    time.Time
 }
 
 // routeCache is the per-process custom-domain cache, negative entries included.
@@ -185,6 +190,9 @@ func (s *Server) customDomainOrigin(next http.Handler) http.Handler {
 			http.Error(w, "sandbox not found", http.StatusNotFound)
 			return
 		}
+		if route.legacy {
+			s.noteLegacyTarget(r.Context(), route.row)
+		}
 		next.ServeHTTP(w, previewRewrite(withCustomHost(r.Context()), r, route.id, route.port))
 	})
 }
@@ -218,7 +226,7 @@ func (s *Server) lookupCustomRoute(r *http.Request, host string) hostRoute {
 			// Attached but unverified: not ours to serve yet.
 			return hostRoute{owned: true}
 		}
-		return hostRoute{id: d.SandboxID, port: d.Port, owned: true}
+		return hostRoute{id: d.SandboxID, port: d.Port, owned: true, row: d.Host, legacy: d.LegacyTargetSeenAt != 0}
 	}
 	wilds, err := st.ActiveWildcardDomains(ctx)
 	if err != nil {
@@ -245,9 +253,44 @@ func (s *Server) lookupCustomRoute(r *http.Request, host string) hostRoute {
 		if !ok || !s.sandboxInOrg(ctx, id, w.OrgID) || !s.isPublicPreview(ctx, id) {
 			return hostRoute{owned: true}
 		}
-		return hostRoute{id: id, port: port, owned: true}
+		return hostRoute{id: id, port: port, owned: true, row: w.Host, legacy: w.LegacyTargetSeenAt != 0}
 	}
 	return hostRoute{}
+}
+
+// noteLegacyTarget records that a row still on a legacy CNAME served traffic,
+// which is what keeps the verifier accepting that CNAME.
+func (s *Server) noteLegacyTarget(ctx context.Context, row string) {
+	st, now := s.st.Load(), s.now()
+	if st == nil || !s.legacyStamps.due(row, now) {
+		return
+	}
+	if err := st.TouchDomainLegacySeen(ctx, row, now.Unix()); err != nil {
+		s.log().WarnContext(ctx, "could not record traffic on a legacy custom domain",
+			"component", "domains", "host", row, "err", err)
+	}
+}
+
+// stampThrottle lets each key through at most once per
+// store.LegacyWriteEvery on this replica. Zero value ready.
+type stampThrottle struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+func (t *stampThrottle) due(key string, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if at, ok := t.last[key]; ok && now.Sub(at) < store.LegacyWriteEvery {
+		return false
+	}
+	// The same bound as routeCache: keys are custom-domain rows, but a map
+	// fed by traffic must never grow without limit.
+	if t.last == nil || len(t.last) > 10000 {
+		t.last = map[string]time.Time{}
+	}
+	t.last[key] = now
+	return true
 }
 
 // sandboxInOrg reports whether the sandbox is live and owned by org. A wildcard

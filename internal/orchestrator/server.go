@@ -107,6 +107,10 @@ type Server struct {
 	// negative answers included. Zero value ready.
 	domains routeCache
 
+	// legacyStamps throttles recording traffic on custom domains still on a
+	// legacy CNAME. Zero value ready.
+	legacyStamps stampThrottle
+
 	// maxBodyBytes (MAX_REQUEST_BYTES) bounds only the buffered-JSON endpoints,
 	// not the streamed proxies, which the node caps itself. See capBody.
 	maxBodyBytes         int64

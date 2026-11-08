@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLegacyDomainUseNeverMovesBack(t *testing.T) {
 	st, ctx := openTemp(t), t.Context()
@@ -59,6 +62,15 @@ func TestDomainLegacyTargetSeen(t *testing.T) {
 	rows, err := st.ListDomainsByOrg(ctx, "org1")
 	if err != nil || len(rows) != 1 || rows[0].LegacyTargetSeenAt != 500 {
 		t.Fatalf("listed rows = %+v err=%v, want the stamp on the list too", rows, err)
+	}
+
+	// A marker older than the window has lapsed, and traffic must not revive it.
+	lapsed := int64(500 + LegacyUseWindow/time.Second + 1)
+	if err := st.TouchDomainLegacySeen(ctx, "app.example.com", lapsed); err != nil {
+		t.Fatalf("touch lapsed: %v", err)
+	}
+	if got := seen(); got != 500 {
+		t.Fatalf("seen = %d after traffic past the window, want 500: a lapsed marker was revived", got)
 	}
 
 	if err := st.SetDomainLegacySeen(ctx, "app.example.com", 0); err != nil {
