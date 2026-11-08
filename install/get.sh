@@ -137,7 +137,7 @@ until curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:$PORT/health"; do
   if [ "$i" -ge 60 ]; then
     journalctl -u sandboxd -n 25 --no-pager >&2
     if journalctl -u sandboxd -n 50 --no-pager | grep -q "disk caps"; then
-      die "Docker on this disk cannot cap each sandbox's storage. Use a machine with KVM, or put /var/lib/docker on XFS mounted with pquota, then run this again"
+      die "Docker on this disk cannot cap each sandbox's storage. Use a machine with KVM, or put /var/lib/docker on XFS mounted with pquota and set {\"storage-driver\":\"overlay2\",\"features\":{\"containerd-snapshotter\":false}} in /etc/docker/daemon.json, then run this again"
     fi
     die "the server did not start; its log is above"
   fi
