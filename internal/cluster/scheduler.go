@@ -44,6 +44,8 @@ type Node struct {
 	// EgressDomains reports that this node runs the name layer that makes a
 	// domain egress rule enforceable.
 	EgressDomains bool `json:"egress_domains,omitempty"`
+	// Volumes reports that this node can create and attach standalone volumes.
+	Volumes bool `json:"volumes,omitempty"`
 	// Checkpoint, NamedSnapshot and Standby are the capture-plane bits, carried
 	// so the fleet capability answer can report them and placement can filter
 	// on NamedSnapshot. On firecracker NamedSnapshot needs snapshots AND
@@ -79,6 +81,9 @@ type Request struct {
 	VCPU  int
 	MemMB int
 	Zone  string
+	// MostRoom prefers the emptiest node over the best fit, for placing something
+	// later creates are pinned to.
+	MostRoom bool
 	// Avoid are node ids placement must not choose: the node a move is
 	// leaving, and nodes that already refused this create as busy.
 	Avoid []string
@@ -99,6 +104,11 @@ type Request struct {
 	// TagNetworks, and the node would otherwise take the sandbox and refuse the
 	// rules with a 501.
 	EgressDomains bool
+	// Volumes restricts placement to nodes that can hold standalone volumes.
+	Volumes bool
+	// Node pins placement to one node: a sandbox attaching a volume must run
+	// where the volume's image is. "" places anywhere.
+	Node string
 	// NamedSnapshot restricts placement to nodes that can boot a sandbox from a
 	// published capture. Set it when the create names a snapshot: the same
 	// argument as TagNetworks, and a sharper one, because on firecracker the
@@ -242,6 +252,10 @@ func Pick(nodes []*Node, req Request, now time.Time, ttl time.Duration) *Node {
 
 func pick(nodes []*Node, req Request, now time.Time, ttl time.Duration) *Node {
 	var holdsInZone, holdsAnyZone, fetchInZone, fetchAnyZone *Node
+	betterFit := betterFit
+	if req.MostRoom {
+		betterFit = moreRoom
+	}
 
 	for _, n := range nodes {
 		if !n.Schedulable(now, ttl) || !n.fits(req) || slices.Contains(req.Avoid, n.ID) {
@@ -256,6 +270,12 @@ func pick(nodes []*Node, req Request, now time.Time, ttl time.Duration) *Node {
 			continue
 		}
 		if req.EgressDomains && !n.EgressDomains {
+			continue
+		}
+		if req.Volumes && !n.Volumes {
+			continue
+		}
+		if req.Node != "" && n.ID != req.Node {
 			continue
 		}
 		if req.NamedSnapshot && !n.NamedSnapshot {
@@ -307,6 +327,13 @@ func betterFit(best, n *Node) *Node {
 	if best == nil ||
 		n.Cap.MemAvailMB < best.Cap.MemAvailMB ||
 		(n.Cap.MemAvailMB == best.Cap.MemAvailMB && n.Cap.Load1 < best.Cap.Load1) {
+		return n
+	}
+	return best
+}
+
+func moreRoom(best, n *Node) *Node {
+	if best == nil || n.Cap.MemAvailMB > best.Cap.MemAvailMB {
 		return n
 	}
 	return best

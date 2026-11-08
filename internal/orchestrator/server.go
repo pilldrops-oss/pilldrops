@@ -345,6 +345,7 @@ func (s *Server) Routes() http.Handler {
 	// Explicit: a fork registers a new sandbox id, which the proxy cannot place.
 	mux.HandleFunc("POST /v1/sandboxes/{id}/fork", s.auth(s.bySlug(s.handleFork)))
 	mux.HandleFunc("POST /v1/sandboxes/{id}/preview-access", s.auth(s.bySlug(s.handlePreviewAccess)))
+	s.registerVolumeRoutes(mux)
 	mux.HandleFunc("GET /v1/sandboxes/{id}/preview-status", s.auth(s.bySlug(s.handlePreviewStatus)))
 	mux.HandleFunc("GET /v1/sandboxes/{id}/metrics", s.auth(s.bySlug(s.handleSandboxMetrics)))
 	mux.HandleFunc("GET /v1/sandboxes/{id}/ports", s.auth(s.bySlug(s.handleSandboxPorts)))

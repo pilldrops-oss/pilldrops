@@ -269,6 +269,7 @@ const (
 	CapTagNetworks   Capability = "tag_networks"
 	CapEgressDomains Capability = "egress_domains"
 	CapNamedSnapshot Capability = "named_snapshot"
+	CapVolumes       Capability = "volumes"
 )
 
 // AnyWithCapability reports whether any schedulable node has the capability.
@@ -289,6 +290,10 @@ func (r *Registry) AnyWithCapability(c Capability, now time.Time, ttl time.Durat
 			}
 		case CapNamedSnapshot:
 			if n.NamedSnapshot {
+				return true
+			}
+		case CapVolumes:
+			if n.Volumes {
 				return true
 			}
 		}

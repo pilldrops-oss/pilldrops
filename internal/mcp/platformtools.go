@@ -362,6 +362,41 @@ func platformTools() []tool {
 			},
 		},
 		{
+			name: "create_volume",
+			desc: "Create a standalone volume: a disk that outlives the sandbox it is attached to. Attach it " +
+				"with create_sandbox's volumes [{id, path}]; destroying that sandbox releases it with its data " +
+				"for the next one. One sandbox holds a volume at a time, and a sandbox holding one cannot be " +
+				"forked, backed up or moved. Firecracker nodes only.",
+			schema: obj(map[string]any{
+				"name":    prop("string", "a label for the volume"),
+				"size_mb": prop("integer", "256 to 102400"),
+			}, "size_mb"),
+			run: func(a map[string]any, be Backend) map[string]any {
+				return call(be, "POST", "/v1/volumes", map[string]any{"name": str(a, "name"), "size_mb": num(a, "size_mb")})
+			},
+		},
+		{
+			name:   "list_volumes",
+			desc:   "The org's volumes: id, name, size, and attached_to when a sandbox holds one.",
+			schema: obj(map[string]any{}),
+			run: func(a map[string]any, be Backend) map[string]any {
+				return call(be, "GET", "/v1/volumes", nil)
+			},
+		},
+		{
+			name: "delete_volume",
+			desc: "Delete a volume and everything on it. Refused while a sandbox holds it; destroy that " +
+				"sandbox first. There is no undo.",
+			schema: obj(map[string]any{"volume_id": prop("string", "volume id (see list_volumes)")}, "volume_id"),
+			run: func(a map[string]any, be Backend) map[string]any {
+				id := strings.TrimSpace(str(a, "volume_id"))
+				if id == "" {
+					return toolError(`delete_volume requires a "volume_id" — list_volumes shows them`)
+				}
+				return call(be, "DELETE", "/v1/volumes/"+url.PathEscape(id), nil)
+			},
+		},
+		{
 			name: "forward_port",
 			desc: "Publish a sandbox port on a raw public TCP port, for anything that is not HTTP — a " +
 				"database, an SSH daemon, a game server. The reply carries the public host:port to connect " +

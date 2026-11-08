@@ -89,6 +89,11 @@ func tenantMayBoot(org, tmpl, snapshot string) bool {
 // node-only fields.
 type createReq struct {
 	sandbox.Spec
+	// Volumes attach standalone volumes at boot: [{"id": "vol-…", "path": "/data"}].
+	Volumes []struct {
+		ID   string `json:"id"`
+		Path string `json:"path"`
+	} `json:"volumes,omitempty"`
 }
 
 // persistentCount counts an org's persistent sandboxes. A zero ExpiresAt is the
@@ -365,6 +370,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		Network: res.Network,
 		// Validated by Spec.Validate; empty is the default and reaches no peer.
 		Networks: res.Networks,
+		Volumes:  volumeMounts(body),
 		// Set by the control plane's create-from-snapshot rewrite, which has
 		// already resolved the name to this node's template id and fixed the
 		// size; the node never resolves a snapshot name itself.
@@ -395,6 +401,16 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, daemon.ErrBadMoveID) {
 			writeErr(w, http.StatusConflict, err.Error())
+			return
+		}
+		if code := volumeStatus(err); code != 0 {
+			writeErr(w, code, err.Error())
+			return
+		}
+		// Checks the daemon makes at create, such as a volume's mount path.
+		var inv *sandbox.InvalidError
+		if errors.As(err, &inv) {
+			writeErr(w, http.StatusBadRequest, inv.Reason)
 			return
 		}
 		// A path-traversal-shaped id gets a bare 400, never the template inventory.
@@ -1317,6 +1333,8 @@ func statusForErr(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, rt.ErrUnresumable):
 		return http.StatusGone
+	case volumeStatus(err) != 0:
+		return volumeStatus(err)
 	default:
 		return http.StatusServiceUnavailable
 	}

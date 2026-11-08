@@ -133,6 +133,10 @@ func (s *Server) handleSnapshotExport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "sandbox not found")
 		return
 	}
+	if err := s.d.RefuseIfVolumes(r.Context(), id); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
 	c, err := s.d.Checkpoint(r.Context(), id, snapshotExportName(body.BuildID))
 	if err != nil {
 		checkpointErr(w, err)

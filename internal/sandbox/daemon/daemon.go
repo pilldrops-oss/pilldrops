@@ -56,6 +56,8 @@ type CreateSpec struct {
 	// non-empty list rather than booting a sandbox that is on no network it
 	// was told it would be on.
 	Networks []string
+	// Volumes are standalone volumes to attach at boot; see volumes.go.
+	Volumes []rt.VolumeMount
 	// Snapshot names a published named snapshot to wake from instead of booting
 	// the template. Template still carries the snapshot's own template id, which
 	// is what the node fetched and what SnapshotDir holds it under.
@@ -319,6 +321,15 @@ func (d *Daemon) Create(ctx context.Context, spec CreateSpec) (info SandboxInfo,
 		}
 		id = spec.ID
 	}
+	if err := d.attachVolumes(ctx, id, spec.OrgID, spec.Volumes); err != nil {
+		return SandboxInfo{}, err
+	}
+	// A failed create must hand its volumes back.
+	defer func() {
+		if err != nil {
+			d.detachVolumes(ctx, id)
+		}
+	}()
 	// Pin the template's artifacts before boot and hold until destroy; cache
 	// eviction cannot see which files a running VM has open.
 	unpin := func() {}
@@ -338,6 +349,7 @@ func (d *Daemon) Create(ctx context.Context, spec CreateSpec) (info SandboxInfo,
 		MemMiB:    memMiB,
 		StorageMB: spec.StorageMB,
 		Egress:    spec.Network,
+		Volumes:   spec.Volumes,
 		Identity:  ident,
 	}
 	bootCtx, bootSpan := observability.StartInternal(ctx, "runtime.Boot",

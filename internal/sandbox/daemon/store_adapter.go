@@ -208,3 +208,26 @@ func (a StoreAdapter) RevokeConsoleAgentTokens(ctx context.Context, sandboxID st
 func (a StoreAdapter) RevokeAllAgentTokens(ctx context.Context, sandboxID string) (int, error) {
 	return a.S.RevokeAgentTokensForSandbox(ctx, sandboxID)
 }
+
+// Volume records, for the daemon's volumeStore.
+func (a StoreAdapter) CreateVolume(ctx context.Context, v store.Volume) error {
+	return a.S.CreateVolume(ctx, v)
+}
+func (a StoreAdapter) ListVolumes(ctx context.Context, org string) ([]store.Volume, error) {
+	return a.S.ListVolumes(ctx, org)
+}
+func (a StoreAdapter) DeleteVolume(ctx context.Context, id string) error {
+	return a.S.DeleteVolume(ctx, id)
+}
+func (a StoreAdapter) GetVolume(ctx context.Context, id string) (store.Volume, bool, error) {
+	return a.S.GetVolume(ctx, id)
+}
+func (a StoreAdapter) AttachVolume(ctx context.Context, id, sandboxID string) error {
+	return a.S.AttachVolume(ctx, id, sandboxID)
+}
+func (a StoreAdapter) DetachVolumes(ctx context.Context, sandboxID string) error {
+	return a.S.DetachVolumes(ctx, sandboxID)
+}
+func (a StoreAdapter) VolumesAttachedTo(ctx context.Context, sandboxID string) ([]string, error) {
+	return a.S.VolumesAttachedTo(ctx, sandboxID)
+}

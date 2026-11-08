@@ -24,6 +24,9 @@ var ErrNotRehomable = errors.New("sandbox cannot be rehomed here")
 // when its node died has moved on since its last pause, and booting the older
 // snapshot would hand its owner a machine silently rolled back.
 func (d *Daemon) Rehome(ctx context.Context, id, org string) error {
+	if err := d.refuseIfVolumes(ctx, id); err != nil {
+		return err
+	}
 	if d.cfg.SnapshotArchive == nil {
 		return fmt.Errorf("%w: this node archives no pause snapshots (SNAPSHOT_ARCHIVE)", ErrNotRehomable)
 	}

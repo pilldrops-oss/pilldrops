@@ -14,6 +14,29 @@ func TestPlatformToolsCallTheRouteTheyClaim(t *testing.T) {
 		args               map[string]any
 		method, path, body string
 	}{
+		"create_volume": {
+			tool: "create_volume", args: map[string]any{"name": "data", "size_mb": float64(1024)},
+			method: "POST", path: "/v1/volumes", body: `{"name":"data","size_mb":1024}`,
+		},
+		"list_volumes": {
+			tool: "list_volumes", args: map[string]any{},
+			method: "GET", path: "/v1/volumes", body: "",
+		},
+		"delete_volume": {
+			tool: "delete_volume", args: map[string]any{"volume_id": "vol-1"},
+			method: "DELETE", path: "/v1/volumes/vol-1", body: "",
+		},
+		"create_sandbox with a volume and a proxied secret": {
+			tool: "create_sandbox",
+			args: map[string]any{
+				"volumes":         []any{map[string]any{"id": "vol-1", "path": "/data"}},
+				"secret_refs":     []any{"GITHUB_TOKEN"},
+				"proxied_secrets": []any{map[string]any{"name": "OPENAI_API_KEY", "host": "api.openai.com"}},
+			},
+			method: "POST", path: "/v1/sandboxes",
+			body: `{"client":"mcp","secret_refs":["GITHUB_TOKEN",{"name":"OPENAI_API_KEY","proxy":{"host":"api.openai.com"}}],` +
+				`"template":"python-3.11","volumes":[{"id":"vol-1","path":"/data"}]}`,
+		},
 		"save_checkpoint": {
 			tool: "save_checkpoint", args: map[string]any{"sandbox_id": "sb_1", "name": "before-migration"},
 			method: "POST", path: "/v1/sandboxes/sb_1/checkpoints", body: `{"name":"before-migration"}`,

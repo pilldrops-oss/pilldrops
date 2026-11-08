@@ -1975,4 +1975,35 @@ BEGIN SELECT RAISE(ABORT, 'sandboxes_state_known'); END`,
 			)`,
 		},
 	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 72,
+		name:    "volumes",
+		// A disk that outlives the sandbox it is attached to. It lives on one
+		// node, and attached_to is "" while no sandbox holds it.
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS volumes (
+				id          TEXT PRIMARY KEY,
+				org_id      TEXT NOT NULL,
+				name        TEXT NOT NULL DEFAULT '',
+				size_mb     INTEGER NOT NULL,
+				node_id     TEXT NOT NULL DEFAULT '',
+				attached_to TEXT NOT NULL DEFAULT '',
+				created_at  INTEGER NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS volumes_org ON volumes (org_id)`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS volumes (
+				id          TEXT PRIMARY KEY,
+				org_id      TEXT NOT NULL,
+				name        TEXT NOT NULL DEFAULT '',
+				size_mb     INTEGER NOT NULL,
+				node_id     TEXT NOT NULL DEFAULT '',
+				attached_to TEXT NOT NULL DEFAULT '',
+				created_at  BIGINT NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS volumes_org ON volumes (org_id)`,
+		},
+	},
 }

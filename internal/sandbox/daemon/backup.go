@@ -180,6 +180,9 @@ func (d *Daemon) Backup(ctx context.Context, id string) (b BackupStarted, err er
 	if err := d.backupsReady(); err != nil {
 		return BackupStarted{}, err
 	}
+	if err := d.refuseIfVolumes(ctx, id); err != nil {
+		return BackupStarted{}, err
+	}
 	engine, err := d.checkpointer()
 	if err != nil {
 		return BackupStarted{}, err

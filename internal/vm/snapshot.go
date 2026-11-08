@@ -235,7 +235,7 @@ func createOneSnapshot(template, snapDir string, cfg Config, log *zap.Logger) er
 	if err != nil {
 		return fmt.Errorf("digest the root image: %w", err)
 	}
-	vm, err := ColdBoot(template, goldenID, cfg, log, gvcpu, gmem, gstorage, "", nil) // the golden VM holds no token and no tenant policy
+	vm, err := ColdBoot(template, goldenID, cfg, log, gvcpu, gmem, gstorage, "", nil, nil) // the golden VM holds no token and no tenant policy
 	if err != nil {
 		return fmt.Errorf("cold boot: %w", err)
 	}

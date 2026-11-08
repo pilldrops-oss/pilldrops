@@ -148,6 +148,9 @@ type Caps struct {
 	// the host's netns table. False is the shipped default everywhere and means
 	// a create naming tags is refused, never accepted and ignored.
 	TagNetworks bool
+	// Volumes is true when a boot can attach standalone volumes (Volumer).
+	// False refuses a create naming one rather than booting without it.
+	Volumes bool
 	// L4Forward is true when a raw TCP/UDP stream can be spliced to a guest
 	// port, which needs ListenTarget to resolve a port the runtime actually
 	// serves. Docker reports it true but honours only the ports declared at
@@ -199,6 +202,8 @@ type BootSpec struct {
 	// that cannot enforce one must refuse the boot rather than ignore it: a
 	// sandbox that reads as confined and is not is worse than a failed create.
 	Egress *egress.Rules
+	// Volumes are standalone disks to attach at boot and mount in the guest.
+	Volumes []VolumeMount
 	// Identity is the sandbox's own platform credential, delivered into the
 	// guest after boot (vsock credential channel on Firecracker, docker cp on
 	// Docker). Zero on a resume: the guest already holds it. A delivery that
@@ -574,4 +579,17 @@ type SnapshotBooter interface {
 	// the filesystem did. The engine is the only thing that knows, so it says
 	// so rather than leaving the daemon to infer it from the runtime's name.
 	BootFromSnapshot(ctx context.Context, src SnapshotRef, spec BootSpec) (Instance, string, error)
+}
+
+// VolumeMount attaches the volume ID at Path inside the guest.
+type VolumeMount struct {
+	ID   string
+	Path string
+}
+
+// Volumer is an optional Runtime capability: create and delete the images of
+// standalone volumes on this node.
+type Volumer interface {
+	CreateVolume(id string, sizeMB int) error
+	DeleteVolume(id string) error
 }
