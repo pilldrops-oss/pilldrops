@@ -61,28 +61,27 @@ repository's release workflow.
 verify that *somebody* signed the file and tell you nothing about who. That is
 the most common way this check gets run and gets nothing.
 
-## On a node: `sandboxd-update` verifies for you
+## Releases signed outside GitHub Actions
 
-`sandboxd-update` runs the same check before it replaces the running binary, and
-**refuses the update if it does not pass** — including when `cosign` is not
-installed. There is no `--skip-verify`. Install cosign on every node:
+While the release workflow cannot run, `scripts/release-local.sh` builds the
+same assets on a maintainer's machine, runs the same tests and tier guard, and
+signs `SHA256SUMS` with a cosign key instead of the workflow's identity. Such a
+release has `SHA256SUMS.sig` and no `SHA256SUMS.pem`; its public key is
+`release.pub` in this repository. `scripts/verify-release.sh` tells the two
+apart and checks either.
 
 ```bash
-# https://docs.sigstore.dev/cosign/installation/
-cosign version
+cosign generate-key-pair                     # once; keep cosign.key and its password private
+git add release.pub && git commit -m "build(release): add the release signing key"
+COSIGN_KEY=cosign.key scripts/release-local.sh sandboxd/v1.2.0            # build and sign into dist/release
+COSIGN_KEY=cosign.key scripts/release-local.sh sandboxd/v1.2.0 --publish  # push the tag, create the release
 ```
 
-The expected signer identity is pinned *in the updater on the node*, not
-downloaded with the release. That is deliberate: a key or an identity fetched
-from the same place as the artifact is the same circularity as the checksum, one
-level up. Forks that sign under a different workflow set
-`SANDBOXD_SIGNER_IDENTITY_RE` / `SANDBOXD_SIGNER_ISSUER` in
-`/etc/sandboxd-update.env` (root-owned, 0600).
+## Upgrading a node
 
-The `sandboxd-update` tool and the test that exercised this refusal end-to-end
-(valid checksums plus an attacker-supplied signature must not install) were part
-of the node-update kit deleted with `deploy/` in `c93be7a`. `scripts/verify-release.sh`
-is the half that survived, and it is the one you run by hand.
+Run the installer again: `curl -fsSL https://get.pilldrops.com | sudo sh`. It
+checks the downloads against `SHA256SUMS` and keeps the node's settings; verify
+the signature yourself first with `scripts/verify-release.sh`.
 
 ## What the signature does and does not tell you
 

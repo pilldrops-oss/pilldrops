@@ -2,8 +2,9 @@
 
 **Open-source, self-hosted sandboxes for AI agents and untrusted code.**
 
-PillDrops gives every piece of code its own disposable Linux machine: a
-Firecracker microVM with its own kernel, created in one API call. Run
+PillDrops gives every piece of code its own disposable Linux machine, created
+in one API call: a microVM with its own kernel on a machine with KVM, or a
+container where KVM is not available. Run
 AI-generated code, host an app on a preview URL, give a coding agent a real
 computer, then pause it, copy it, roll it back or throw it away. It runs on
 your own hardware, from one laptop to a fleet.
@@ -20,9 +21,10 @@ with Sandbox.create(template="python-3.11") as sb:
 
 ## What you can do with it
 
-- **Run untrusted code safely.** Each sandbox is a microVM with its own kernel,
-  network namespace and resource limits, isolated from the host and from
-  other sandboxes.
+- **Run untrusted code safely.** On a KVM machine each sandbox is a microVM with
+  its own kernel, network namespace and resource limits, isolated from the host
+  and from other sandboxes. Without KVM it is a container, a weaker boundary;
+  [`docs/runtimes.md`](docs/runtimes.md) compares them.
 - **Run commands, code and files.** Execute shell commands or code snippets,
   read and write files, upload whole directories, open an interactive terminal.
 - **Host apps on a URL.** Start a server in a sandbox and get a preview URL for
