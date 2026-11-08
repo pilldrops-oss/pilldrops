@@ -38,6 +38,21 @@ func (f *fakeDomains) SetDomainLegacySeen(_ context.Context, host string, at int
 	return nil
 }
 
+func (f *fakeDomains) GetDomain(_ context.Context, host string) (store.Domain, bool, error) {
+	d, ok := f.rows[host]
+	return d, ok, nil
+}
+
+func (f *fakeDomains) SetDomainTXT(_ context.Context, host, token string, requiredAt int64) error {
+	d := f.rows[host]
+	if d.TXTToken == "" {
+		d.TXTToken = token
+	}
+	d.TXTRequiredAt = requiredAt
+	f.rows[host] = d
+	return nil
+}
+
 // verifierOver builds a verifier answering from fixed DNS tables.
 func verifierOver(f *fakeDomains, cnames map[string]string, hosts map[string][]string) *DomainVerifier {
 	v := NewDomainVerifier(f, func(d store.Domain) string {
@@ -66,7 +81,23 @@ func verifierOver(f *fakeDomains, cnames map[string]string, hosts map[string][]s
 		}
 		return nil, errors.New("lookup " + host + ": no such host")
 	}
+	v.LookupTXT = func(_ context.Context, host string) ([]string, error) {
+		return nil, errors.New("lookup " + host + ": no such host")
+	}
 	return v
+}
+
+// withTXT answers TXT lookups from a fixed table and records what was asked.
+func withTXT(v *DomainVerifier, txts map[string][]string) *[]string {
+	var asked []string
+	v.LookupTXT = func(_ context.Context, host string) ([]string, error) {
+		asked = append(asked, host)
+		if t, ok := txts[host]; ok {
+			return t, nil
+		}
+		return nil, errors.New("lookup " + host + ": no such host")
+	}
+	return &asked
 }
 
 func TestVerifierActivatesAMatchingCNAME(t *testing.T) {
@@ -85,21 +116,222 @@ func TestVerifierActivatesAMatchingCNAME(t *testing.T) {
 	}
 }
 
-// The A-record form and CNAME flattening both land on the address comparison.
-func TestVerifierActivatesOnMatchingAddresses(t *testing.T) {
+// flatHosts is DNS where flat.example.com shares the target's address, as an
+// A record, a flattened apex, or any other zone behind the same proxy does.
+var flatHosts = map[string][]string{
+	"flat.example.com":       {"192.0.2.9"},
+	"8000-sb1.pilldrops.com": {"192.0.2.9"},
+	"other.pilldrops.com":    {"198.51.100.1"},
+}
+
+// The A-record form and CNAME flattening both land on the address comparison,
+// which a shared proxy address satisfies for anyone, so it also needs the TXT.
+func TestVerifierActivatesOnMatchingAddressesWithTheTXTRecord(t *testing.T) {
 	f := &fakeDomains{rows: map[string]store.Domain{
-		"flat.example.com": {Host: "flat.example.com", SandboxID: "sb1", Port: 8000, Status: "pending"},
+		"flat.example.com": {Host: "flat.example.com", SandboxID: "sb1", Port: 8000, Status: "pending", TXTToken: "tok1", TXTRequiredAt: 5},
 	}}
-	v := verifierOver(f, nil, map[string][]string{
-		"flat.example.com":       {"192.0.2.9"},
-		"8000-sb1.pilldrops.com": {"192.0.2.9"},
-		"other.pilldrops.com":    {"198.51.100.1"},
-	})
+	v := verifierOver(f, nil, flatHosts)
+	withTXT(v, map[string][]string{"_pilldrops-challenge.flat.example.com": {"unrelated", "tok1"}})
+
+	v.Sweep(t.Context())
+
+	if got := f.rows["flat.example.com"]; got.Status != "active" || got.TXTRequiredAt != 0 {
+		t.Fatalf("row = %+v, want active with no TXT deadline", got)
+	}
+}
+
+// A row created after the TXT proof shipped gets no grace: a new row, or one
+// that was active by CNAME and moved to an A record, waits for the TXT.
+func TestVerifierWantsTheTXTRecordForAnAddressMatch(t *testing.T) {
+	now := time.Unix(1_000_000_000, 0)
+	for _, status := range []string{"pending", "active"} {
+		f := &fakeDomains{rows: map[string]store.Domain{
+			"flat.example.com": {Host: "flat.example.com", SandboxID: "sb1", Port: 8000, Status: status, TXTToken: "tok1"},
+		}}
+		v := verifierOver(f, nil, flatHosts)
+		v.Now = func() time.Time { return now }
+		v.Sweep(t.Context())
+
+		got := f.rows["flat.example.com"]
+		if got.Status != "pending" || got.TXTRequiredAt != now.Unix() {
+			t.Fatalf("was %s: row = %+v, want pending, the TXT required from now", status, got)
+		}
+		if !strings.Contains(got.Error, `"_pilldrops-challenge.flat.example.com TXT tok1"`) {
+			t.Errorf("was %s: error %q does not name the record to create", status, got.Error)
+		}
+	}
+}
+
+func TestVerifierRefusesAWrongTXTToken(t *testing.T) {
+	f := &fakeDomains{rows: map[string]store.Domain{
+		"flat.example.com": {Host: "flat.example.com", SandboxID: "sb1", Port: 8000, Status: "pending", TXTToken: "tok1"},
+	}}
+	v := verifierOver(f, nil, flatHosts)
+	withTXT(v, map[string][]string{"_pilldrops-challenge.flat.example.com": {"tok2"}})
+
+	v.Sweep(t.Context())
+
+	if got := f.rows["flat.example.com"]; got.Status != "pending" || got.TXTToken != "tok1" {
+		t.Fatalf("row = %+v, want pending with its token unchanged", got)
+	}
+}
+
+// Only the DNS owner can create the exact CNAME, so it needs no TXT, and it
+// ends any TXT clock an earlier address match started. It still gets a token,
+// so a later move to an address match is a new requirement, not a grace.
+func TestVerifierNeedsNoTXTForTheCNAME(t *testing.T) {
+	f := &fakeDomains{rows: map[string]store.Domain{
+		"app.example.com": {Host: "app.example.com", SandboxID: "sb1", Port: 8000, Status: "pending", TXTRequiredAt: 5},
+	}}
+	v := verifierOver(f,
+		map[string]string{"app.example.com": "8000-sb1.pilldrops.com."},
+		map[string][]string{"8000-sb1.pilldrops.com": {"192.0.2.9"}})
+	asked := withTXT(v, nil)
+
+	v.Sweep(t.Context())
+
+	got := f.rows["app.example.com"]
+	if got.Status != "active" || got.TXTRequiredAt != 0 || len(got.TXTToken) < 26 {
+		t.Fatalf("row = %+v, want active, no TXT deadline and a token minted", got)
+	}
+	if len(*asked) != 0 {
+		t.Errorf("looked up TXT %q for a CNAME row", *asked)
+	}
+}
+
+// A row that was active by address before the TXT proof shipped has no token.
+// It gets one, once, and keeps routing for TXTGrace while it shows the record.
+func TestVerifierGivesAnExistingAddressRowItsGrace(t *testing.T) {
+	start := time.Unix(1_000_000_000, 0)
+	now := start
+	f := &fakeDomains{rows: map[string]store.Domain{
+		"flat.example.com": {Host: "flat.example.com", SandboxID: "sb1", Port: 8000, Status: "active"},
+	}}
+	v := verifierOver(f, nil, flatHosts)
+	v.Now = func() time.Time { return now }
+
+	v.Sweep(t.Context())
+	got := f.rows["flat.example.com"]
+	token := got.TXTToken
+	if got.Status != "active" || got.TXTRequiredAt != start.Add(TXTGrace).Unix() {
+		t.Fatalf("first ask: row = %+v, want active with the TXT required %s from now", got, TXTGrace)
+	}
+	if len(token) < 26 || token != strings.ToLower(token) {
+		t.Fatalf("token %q, want at least 128 random bits in lower case", token)
+	}
+
+	now = start.Add(TXTGrace - time.Hour)
+	v.Sweep(t.Context())
+	if got := f.rows["flat.example.com"]; got.Status != "active" || got.TXTToken != token {
+		t.Fatalf("inside the grace: row = %+v, want active with token %q kept", got, token)
+	}
+
+	now = start.Add(TXTGrace + time.Second)
+	v.Sweep(t.Context())
+	got = f.rows["flat.example.com"]
+	if got.Status != "pending" || got.TXTToken != token || got.TXTRequiredAt != start.Add(TXTGrace).Unix() {
+		t.Fatalf("after the grace: row = %+v, want pending with token and deadline kept", got)
+	}
+	if !strings.Contains(got.Error, `"_pilldrops-challenge.flat.example.com TXT `+token+`"`) {
+		t.Errorf("error %q does not name the record to create", got.Error)
+	}
+}
+
+// A row seen once by CNAME after the deploy is not a pre-deploy address row:
+// if it later matches only by address, say after the domain changed hands, it
+// waits for the TXT at once.
+func TestVerifierGivesNoGraceToARowFirstSeenByCNAME(t *testing.T) {
+	now := time.Unix(1_000_000_000, 0)
+	f := &fakeDomains{rows: map[string]store.Domain{
+		"flat.example.com": {Host: "flat.example.com", SandboxID: "sb1", Port: 8000, Status: "active"},
+	}}
+	cname := verifierOver(f, map[string]string{"flat.example.com": "8000-sb1.pilldrops.com."}, flatHosts)
+	cname.Now = func() time.Time { return now }
+	cname.Sweep(t.Context())
+
+	now = now.Add(90 * 24 * time.Hour)
+	addr := verifierOver(f, nil, flatHosts)
+	addr.Now = func() time.Time { return now }
+	addr.Sweep(t.Context())
+
+	if got := f.rows["flat.example.com"]; got.Status != "pending" || got.TXTRequiredAt != now.Unix() {
+		t.Fatalf("row = %+v, want pending with the TXT required from now", got)
+	}
+}
+
+// Replicas racing on a token-less row mint different tokens; the store keeps
+// the first, and the error must name that one.
+func TestVerifierNamesTheStoredTokenAfterARace(t *testing.T) {
+	f := &racingDomains{fakeDomains{rows: map[string]store.Domain{
+		"flat.example.com": {Host: "flat.example.com", SandboxID: "sb1", Port: 8000, Status: "pending"},
+	}}}
+	v := verifierOver(&f.fakeDomains, nil, flatHosts)
+	v.st = f
+	v.Sweep(t.Context())
+
+	if got := f.rows["flat.example.com"]; got.TXTToken != "winner" || !strings.Contains(got.Error, "TXT winner") {
+		t.Fatalf("row = %+v, want the stored token named", got)
+	}
+}
+
+// racingDomains is a store where another replica wrote its token first.
+type racingDomains struct{ fakeDomains }
+
+func (r *racingDomains) SetDomainTXT(ctx context.Context, host, _ string, requiredAt int64) error {
+	return r.fakeDomains.SetDomainTXT(ctx, host, "winner", requiredAt)
+}
+
+// DNS consoles differ on whether the quotes are part of the value.
+func TestVerifierToleratesQuotesAndSpacesAroundTheTXTValue(t *testing.T) {
+	f := &fakeDomains{rows: map[string]store.Domain{
+		"flat.example.com": {Host: "flat.example.com", SandboxID: "sb1", Port: 8000, Status: "pending", TXTToken: "tok1"},
+	}}
+	v := verifierOver(f, nil, flatHosts)
+	withTXT(v, map[string][]string{"_pilldrops-challenge.flat.example.com": {` "tok1" `}})
 
 	v.Sweep(t.Context())
 
 	if got := f.rows["flat.example.com"]; got.Status != "active" {
 		t.Fatalf("row = %+v, want active", got)
+	}
+}
+
+func TestVerifierEndsTheGraceOnceTheTXTExists(t *testing.T) {
+	now := time.Unix(1_000_000_000, 0)
+	f := &fakeDomains{rows: map[string]store.Domain{
+		"flat.example.com": {Host: "flat.example.com", SandboxID: "sb1", Port: 8000, Status: "active",
+			TXTToken: "tok1", TXTRequiredAt: now.Add(time.Hour).Unix()},
+	}}
+	v := verifierOver(f, nil, flatHosts)
+	v.Now = func() time.Time { return now }
+	withTXT(v, map[string][]string{"_pilldrops-challenge.flat.example.com": {"tok1"}})
+
+	v.Sweep(t.Context())
+
+	if got := f.rows["flat.example.com"]; got.Status != "active" || got.TXTRequiredAt != 0 {
+		t.Fatalf("row = %+v, want active with the deadline cleared", got)
+	}
+}
+
+// A wildcard has no single name to hold the TXT, so it sits at the base domain.
+func TestVerifierReadsAWildcardTXTAtItsBaseDomain(t *testing.T) {
+	f := &fakeDomains{rows: map[string]store.Domain{
+		"*.vms.example.com": {Host: "*.vms.example.com", Wildcard: true, Status: "pending", TXTToken: "tok1"},
+	}}
+	v := verifierOver(f, nil, map[string][]string{"pilldrops.com": {"192.0.2.9"}})
+	inner := v.LookupHost
+	v.LookupHost = func(ctx context.Context, host string) ([]string, error) {
+		if strings.HasSuffix(host, ".vms.example.com") {
+			return []string{"192.0.2.9"}, nil
+		}
+		return inner(ctx, host)
+	}
+	asked := withTXT(v, map[string][]string{"_pilldrops-challenge.vms.example.com": {"tok1"}})
+
+	v.Sweep(t.Context())
+
+	if got := f.rows["*.vms.example.com"]; got.Status != "active" || len(*asked) != 1 || (*asked)[0] != "_pilldrops-challenge.vms.example.com" {
+		t.Fatalf("row = %+v with TXT asked at %q, want active from the base domain's record", got, *asked)
 	}
 }
 

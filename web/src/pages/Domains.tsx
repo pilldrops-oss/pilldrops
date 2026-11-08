@@ -139,8 +139,20 @@ export default function Domains() {
                       Update your DNS record to <code>{d.record}</code>. The old one keeps working only while this host gets traffic.
                     </div>
                   )}
+                  {d.txt_required && d.txt_record && (
+                    <div className="lm-error">
+                      This host points here by address, which other sites behind the same proxy share. Add the
+                      record <code>{d.txt_record}</code> to prove it is yours, or use the CNAME.
+                      {d.txt_grace_ends_at && <> It keeps working until {new Date(d.txt_grace_ends_at * 1000).toLocaleDateString()}.</>}
+                    </div>
+                  )}
                 </td>
-                <td><code>{d.record}</code></td>
+                <td>
+                  <code>{d.record}</code>
+                  {d.txt_record && !d.txt_required && (
+                    <div className="hint">For an apex or A record instead: <code>{d.txt_record}</code></div>
+                  )}
+                </td>
                 <td><button className="btn ghost" onClick={() => remove(d)}>Remove</button></td>
               </tr>
             ))}

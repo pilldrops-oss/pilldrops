@@ -196,6 +196,12 @@ export interface CustomDomain {
   cname_target: string
   /** True while the host's DNS still names the sandbox domain the platform moved off; `record` is the one to create. Absent on older servers. */
   legacy_target?: boolean
+  /** The TXT record an A record or flattened apex needs beside the address match, as one line. Not needed with the CNAME in `record`. */
+  txt_record?: string
+  /** True once the host matches the platform only by address and lacks txt_record, so the record is needed now. */
+  txt_required?: boolean
+  /** Unix seconds until which the host keeps routing without txt_record; absent once it no longer does. */
+  txt_grace_ends_at?: number
   created_at: number
 }
 

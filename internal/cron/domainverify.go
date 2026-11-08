@@ -22,9 +22,13 @@ import (
 type DomainStore interface {
 	DomainsDue(ctx context.Context, staleBefore int64, limit int) ([]store.Domain, error)
 	SetDomainStatus(ctx context.Context, host, status, errText string, checkedAt int64) error
+	GetDomain(ctx context.Context, host string) (store.Domain, bool, error)
 	// SetDomainLegacySeen records which target a row's DNS names: 0 for the
 	// current one, else when a legacy one was first seen.
 	SetDomainLegacySeen(ctx context.Context, host string, at int64) error
+	// SetDomainTXT stores a row's TXT token, only if it has none, and when
+	// its TXT record is required: 0 when it is not.
+	SetDomainTXT(ctx context.Context, host, token string, requiredAt int64) error
 }
 
 const (
@@ -37,6 +41,9 @@ const (
 	domainsPerSweep = 200
 	// dnsTimeout bounds one lookup; a slow resolver must not stall the sweep.
 	dnsTimeout = 5 * time.Second
+	// TXTGrace is how long a row that was routing by address match before the
+	// TXT proof existed keeps routing without the record, from the first ask.
+	TXTGrace = 14 * 24 * time.Hour
 )
 
 // dnsHint is appended to every failure: the most common support question is
@@ -53,11 +60,13 @@ type DomainVerifier struct {
 	// sandbox domain moved. One is accepted while the row keeps serving
 	// traffic, until store.LegacyUseWindow after the last. Nil accepts none.
 	LegacyTargets func(store.Domain) []string
-	// LookupCNAME and LookupHost default to the process resolver. They are
-	// fields, not a *net.Resolver, so a test can answer without a DNS server
-	// and an operator can still point them at a custom net.Resolver's methods.
+	// LookupCNAME, LookupHost and LookupTXT default to the process resolver.
+	// They are fields, not a *net.Resolver, so a test can answer without a DNS
+	// server and an operator can still point them at a custom net.Resolver's
+	// methods.
 	LookupCNAME func(ctx context.Context, host string) (string, error)
 	LookupHost  func(ctx context.Context, host string) ([]string, error)
+	LookupTXT   func(ctx context.Context, name string) ([]string, error)
 	Now         func() time.Time
 	Log         *slog.Logger
 }
@@ -94,6 +103,23 @@ func (v *DomainVerifier) lookupHost(ctx context.Context, host string) ([]string,
 	return net.DefaultResolver.LookupHost(ctx, host)
 }
 
+func (v *DomainVerifier) lookupTXT(ctx context.Context, name string) ([]string, error) {
+	if v.LookupTXT != nil {
+		return v.LookupTXT(ctx, name)
+	}
+	return net.DefaultResolver.LookupTXT(ctx, name)
+}
+
+// TXTRecord is the record that proves a host matching only by address is the
+// customer's. A wildcard's sits at its base domain.
+func TXTRecord(d store.Domain) string {
+	return txtName(d) + " TXT " + d.TXTToken
+}
+
+func txtName(d store.Domain) string {
+	return "_pilldrops-challenge." + strings.TrimPrefix(d.Host, "*.")
+}
+
 // Run verifies due rows every DomainCheckInterval until ctx is cancelled.
 // Idempotent, so every replica may run it: two replicas writing the same
 // status is the same row either way.
@@ -124,7 +150,9 @@ func (v *DomainVerifier) Sweep(ctx context.Context) int {
 			return 0
 		}
 		status, detail := "pending", ""
-		legacy, err := v.check(ctx, d)
+		checked := d
+		legacy, err := v.check(ctx, &checked)
+		v.recordTXT(ctx, d, checked)
 		if err == nil {
 			status = "active"
 		} else {
@@ -162,21 +190,34 @@ func (v *DomainVerifier) recordTarget(ctx context.Context, d store.Domain, legac
 	}
 }
 
+// recordTXT saves the TXT token and deadline check settled on, when they changed.
+func (v *DomainVerifier) recordTXT(ctx context.Context, before, after store.Domain) {
+	if before.TXTToken == after.TXTToken && before.TXTRequiredAt == after.TXTRequiredAt {
+		return
+	}
+	if err := v.st.SetDomainTXT(ctx, after.Host, after.TXTToken, after.TXTRequiredAt); err != nil {
+		v.log().WarnContext(ctx, "could not record a domain's TXT requirement",
+			"component", "domains", "host", after.Host, "err", err)
+	}
+}
+
 // check resolves one row. nil means the customer's record points at us: either
 // the CNAME is the exact target we handed out, or the name resolves to the same
 // addresses that target does (CNAME flattening at the DNS provider, and the
-// A-record form, both land here). legacy means its CNAME is exactly a target under a
-// legacy sandbox domain instead (never by shared address: the old domain sits
-// behind a proxy whose addresses other zones share), which is accepted until legacyLapsed says no.
-// Anything else is the text the customer sees.
-func (v *DomainVerifier) check(ctx context.Context, d store.Domain) (legacy bool, err error) {
-	target := v.Target(d)
+// A-record form, both land here) and txtProof accepts it. legacy means its
+// CNAME is exactly a target under a legacy sandbox domain instead (never by
+// shared address: the old domain sits behind a proxy whose addresses other
+// zones share), which is accepted until legacyLapsed says no. Anything else is
+// the text the customer sees. check updates d's TXT fields.
+func (v *DomainVerifier) check(ctx context.Context, d *store.Domain) (legacy bool, err error) {
+	target := v.Target(*d)
 	if target == "" {
 		return false, fmt.Errorf("this deployment has no sandbox domain configured, so there is no record to verify")
 	}
+	predatesToken := v.ensureToken(ctx, d)
 	var old []string
 	if v.LegacyTargets != nil {
-		old = v.LegacyTargets(d)
+		old = v.LegacyTargets(*d)
 	}
 	name := d.Host
 	if d.Wildcard {
@@ -191,12 +232,14 @@ func (v *DomainVerifier) check(ctx context.Context, d store.Domain) (legacy bool
 
 	cname, cnameErr := v.lookupCNAME(ctx, name)
 	if cnameErr == nil && sameHost(cname, target) {
+		d.TXTRequiredAt = 0
 		return false, nil
 	}
 	if cnameErr == nil {
 		for _, o := range old {
 			if sameHost(cname, o) {
-				return true, v.legacyLapsed(d, target)
+				d.TXTRequiredAt = 0
+				return true, v.legacyLapsed(*d, target)
 			}
 		}
 	}
@@ -206,7 +249,7 @@ func (v *DomainVerifier) check(ctx context.Context, d store.Domain) (legacy bool
 		return false, fmt.Errorf("%s does not resolve: %w%s", name, gotErr, dnsHint)
 	}
 	if wantErr == nil && sharesAddress(got, want) {
-		return false, nil
+		return false, v.txtProof(ctx, d, predatesToken)
 	}
 	// Name what the customer's DNS actually says: the CNAME when there is one,
 	// the addresses when the name is an A record (a resolver answers a
@@ -217,6 +260,52 @@ func (v *DomainVerifier) check(ctx context.Context, d store.Domain) (legacy bool
 	}
 	return false, fmt.Errorf("%s points at %s, not at %s: create the record %q%s",
 		name, found, target, name+" CNAME "+target, dnsHint)
+}
+
+// ensureToken gives a row from before TXT tokens its token on its first check,
+// whatever its DNS, and reports whether it had to. Stored before use and read
+// back, so when replicas race every one names the token the store kept.
+func (v *DomainVerifier) ensureToken(ctx context.Context, d *store.Domain) (minted bool) {
+	if d.TXTToken != "" {
+		return false
+	}
+	token := store.NewDomainToken()
+	if err := v.st.SetDomainTXT(ctx, d.Host, token, d.TXTRequiredAt); err != nil {
+		v.log().WarnContext(ctx, "could not store a domain's TXT token",
+			"component", "domains", "host", d.Host, "err", err)
+	} else if stored, ok, err := v.st.GetDomain(ctx, d.Host); err == nil && ok && stored.TXTToken != "" {
+		token = stored.TXTToken
+	}
+	d.TXTToken = token
+	return true
+}
+
+// txtProof decides a host that matches only by address. A proxy's addresses
+// are shared by every zone behind it, so the match alone proves nothing: the
+// row's token must also be in its TXT record. A row that was routing before
+// tokens existed, seen by address on its first check, keeps routing for
+// TXTGrace; that first check is the only one where predatesToken is true.
+func (v *DomainVerifier) txtProof(ctx context.Context, d *store.Domain, predatesToken bool) error {
+	now := v.now().Unix()
+	if predatesToken {
+		if d.Status == "active" {
+			d.TXTRequiredAt = now + int64(TXTGrace/time.Second)
+		}
+	} else if found, err := v.lookupTXT(ctx, txtName(*d)); err == nil && slices.ContainsFunc(found, func(txt string) bool {
+		return strings.Trim(txt, ` "`) == d.TXTToken
+	}) {
+		d.TXTRequiredAt = 0
+		return nil
+	}
+	if d.TXTRequiredAt == 0 {
+		d.TXTRequiredAt = now
+	}
+	if now < d.TXTRequiredAt {
+		return nil
+	}
+	return fmt.Errorf("%s matches the platform only by address, which other sites behind the same proxy share: "+
+		"create the record %q to prove the host is yours, or point it at the CNAME target%s",
+		d.Host, TXTRecord(*d), dnsHint)
 }
 
 // legacyLapsed refuses a row still on a legacy target store.LegacyUseWindow
