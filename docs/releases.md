@@ -10,7 +10,8 @@ This page is how you satisfy yourself it is the binary this repository built.
 | `sandboxd-fleet-linux-amd64` | the node agent — what you run on a fleet node |
 | `sandboxd-linux-amd64` | the full standalone node (node + API + dashboard on one box) |
 | `envd-linux-amd64` | the in-guest agent. Shipped alongside so the pair stays in sync — a node and a guest agent from different releases is a supported-but-untested combination |
-| `SHA256SUMS` | hashes of the three binaries |
+| `pilldrops-linux-amd64` | the CLI, built from pilldrops-cli at the time of the release. `install/get.sh` installs it on the host and inside sandboxes |
+| `SHA256SUMS` | hashes of the four binaries |
 | `SHA256SUMS.sig`, `SHA256SUMS.pem` | Sigstore signature and certificate over `SHA256SUMS` |
 | `sbom.spdx.json` | SPDX SBOM of the source tree the binaries were built from |
 

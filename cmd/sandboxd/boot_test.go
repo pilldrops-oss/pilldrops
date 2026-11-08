@@ -14,7 +14,7 @@ func bootEnv(t *testing.T, kv map[string]string) {
 	t.Helper()
 	for _, k := range []string{
 		"SANDBOXD_DATA", "SANDBOXD_DATABASE_URL", "SANDBOXD_PRODUCTION",
-		"SANDBOXD_DEV", "DEV_INSECURE", "PORT", "OTEL_EXPORTER_OTLP_ENDPOINT",
+		"SANDBOXD_DEV", "DEV_INSECURE", "PORT", "OTEL_EXPORTER_OTLP_ENDPOINT", "ORCHESTRATOR_URL",
 	} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
@@ -24,10 +24,12 @@ func bootEnv(t *testing.T, kv map[string]string) {
 	}
 }
 
-func TestRunRefusesProductionOnSQLite(t *testing.T) {
+// A single box may keep SQLite; one that other nodes share a database with may not.
+func TestRunRefusesAClusteredProductionNodeOnSQLite(t *testing.T) {
 	bootEnv(t, map[string]string{
 		"SANDBOXD_DATA":       t.TempDir(),
 		"SANDBOXD_PRODUCTION": "1",
+		"ORCHESTRATOR_URL":    "https://cp.example.com",
 		// SANDBOXD_DATABASE_URL unset, so the DSN falls back to the SQLite file.
 	})
 
