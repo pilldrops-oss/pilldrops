@@ -35,3 +35,25 @@ func TestValidSlug(t *testing.T) {
 		}
 	}
 }
+
+// The newer platform labels are refused only for a new assignment: they stay
+// valid slugs, so a sandbox that already holds one keeps routing.
+func TestNewlyReservedSlugsAreRefusedOnlyForNewAssignments(t *testing.T) {
+	for _, s := range []string{"login", "auth", "accounts", "clerk", "admin", "docs", "help", "support", "status", "billing", "share", "agent"} {
+		if err := ValidSlug(s); err != nil {
+			t.Errorf("ValidSlug(%q) = %v: an existing holder would stop routing", s, err)
+		}
+		if err := AssignableSlug(s); err == nil || !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("AssignableSlug(%q) = %v, want reserved", s, err)
+		}
+		if !ReservedForNewSlugs(s) {
+			t.Errorf("ReservedForNewSlugs(%q) = false", s)
+		}
+	}
+	if err := AssignableSlug("myapp"); err != nil {
+		t.Errorf("AssignableSlug(myapp) = %v", err)
+	}
+	if err := AssignableSlug("www"); err == nil {
+		t.Error("AssignableSlug(www) = nil: the older reserved labels must still be refused")
+	}
+}

@@ -159,3 +159,11 @@ func TestUnknownSlugFallsThrough(t *testing.T) {
 		t.Fatalf("no SlugResolver: status = %d, want 404", rec.Code)
 	}
 }
+
+// A slug reserved after a sandbox took it still parses, so its holder keeps
+// its host.
+func TestNewlyReservedSlugStillRoutes(t *testing.T) {
+	if slug, ok := ParseSlugHost("docs.pilldrops.app", "pilldrops.app"); !ok || slug != "docs" {
+		t.Fatalf("ParseSlugHost(docs) = %q %v, want docs true", slug, ok)
+	}
+}

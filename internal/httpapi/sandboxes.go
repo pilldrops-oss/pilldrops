@@ -1096,7 +1096,12 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 	}
 	audit := map[string]any{}
 	if body.Slug != nil {
-		if err := sandbox.ValidSlug(*body.Slug); err != nil {
+		check := sandbox.AssignableSlug
+		// Re-sending the slug the sandbox already holds is not a new claim.
+		if cur, ok := s.d.Get(id); ok && cur.Slug == *body.Slug {
+			check = sandbox.ValidSlug
+		}
+		if err := check(*body.Slug); err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
