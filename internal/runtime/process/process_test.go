@@ -54,6 +54,20 @@ func TestFSRejectsTraversal(t *testing.T) {
 	_ = filepath.Separator
 }
 
+func TestFSTakesAnAbsolutePathInsideRoot(t *testing.T) {
+	root := t.TempDir()
+	fs := &workdirFS{root: root}
+	if err := fs.Write(t.Context(), filepath.Join(root, "abs.txt"), []byte("x")); err != nil {
+		t.Fatalf("write by absolute path: %v", err)
+	}
+	if got, err := fs.Read(t.Context(), "abs.txt"); err != nil || string(got) != "x" {
+		t.Fatalf("read back = %q, %v, want the file written at root", got, err)
+	}
+	if _, err := fs.Read(t.Context(), "/etc/passwd"); err == nil {
+		t.Fatal("an absolute path outside root was read")
+	}
+}
+
 func TestFSErrorsHideHostRoot(t *testing.T) {
 	root := t.TempDir()
 	fs := &workdirFS{root: root}

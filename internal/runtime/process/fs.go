@@ -18,9 +18,13 @@ var errTraversal = fmt.Errorf("%w: path escapes sandbox root", rt.ErrPathRefused
 // confining every path to root.
 type workdirFS struct{ root string }
 
-// resolve joins p to root; a path that would escape root is rejected, not redirected.
+// resolve joins a relative p to root and takes an absolute one as given, as
+// envd does; a path outside root is rejected, not redirected under it.
 func (f *workdirFS) resolve(p string) (string, error) {
-	full := filepath.Clean(filepath.Join(f.root, p))
+	full := filepath.Clean(p)
+	if !filepath.IsAbs(p) {
+		full = filepath.Join(f.root, full)
+	}
 	rel, err := filepath.Rel(f.root, full)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", errTraversal
