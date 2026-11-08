@@ -418,6 +418,9 @@ func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState s
 			d.log().Debug("destroy: app-log capture skipped", "sandbox_id", id, "error", err)
 		}
 		cancelLog()
+		if dead == nil {
+			d.flushVolumes(ctx, id, inst)
+		}
 		if err := inst.Stop(ctx); err != nil {
 			d.log().Warn("destroy: instance would not stop", "sandbox_id", id, "error", err)
 		}

@@ -110,6 +110,23 @@ func (d *Daemon) detachVolumes(ctx context.Context, id string) {
 	}
 }
 
+// volumeFlushTimeout bounds the guest sync before a sandbox with volumes stops.
+var volumeFlushTimeout = 10 * time.Second
+
+// flushVolumes asks the guest to write its dirty pages before the VM is
+// stopped. A stop is a power cut, so without it up to the guest kernel's
+// writeback window of volume data was lost with the sandbox.
+func (d *Daemon) flushVolumes(ctx context.Context, id string, inst rt.Instance) {
+	if d.refuseIfVolumes(ctx, id) == nil {
+		return
+	}
+	flushCtx, cancel := context.WithTimeout(ctx, volumeFlushTimeout)
+	defer cancel()
+	if _, err := inst.Exec(flushCtx, rt.ExecSpec{Cmd: "sync", Timeout: volumeFlushTimeout}); err != nil {
+		d.log().Warn("destroy: guest sync failed; writes since the last flush may be lost", "sandbox_id", id, "error", err)
+	}
+}
+
 // refuseIfVolumes is the guard for fork, backup, move and rehome.
 func (d *Daemon) refuseIfVolumes(ctx context.Context, id string) error {
 	vs, ok := d.cfg.Store.(volumeStore)

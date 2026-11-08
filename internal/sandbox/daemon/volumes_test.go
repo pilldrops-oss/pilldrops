@@ -109,3 +109,36 @@ func TestVolumeRefusals(t *testing.T) {
 		t.Errorf("runtime without volumes: err = %v, want ErrVolumesUnsupported", err)
 	}
 }
+
+// A destroy stops the VM like a power cut, so the guest is told to sync first:
+// on a real node, data written less than ~30 s before the destroy was lost.
+func TestDestroyFlushesASandboxWithAVolume(t *testing.T) {
+	d, fake, _ := newVolumeDaemon(t)
+	ctx := context.Background()
+	vol, err := d.CreateVolume(ctx, "acme", "data", 1024)
+	if err != nil {
+		t.Fatalf("create volume: %v", err)
+	}
+	withVolume, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "acme",
+		Volumes: []rt.VolumeMount{{ID: vol.ID, Path: "/data"}}})
+	if err != nil {
+		t.Fatalf("create with volume: %v", err)
+	}
+	plain, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "acme"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, id := range []string{withVolume.ID, plain.ID} {
+		if err := d.Destroy(ctx, id); err != nil {
+			t.Fatalf("destroy %s: %v", id, err)
+		}
+	}
+	if log := fake.ExecLog(withVolume.ID); len(log) == 0 || log[len(log)-1] != "sync" {
+		t.Errorf("sandbox with a volume: exec log %v, want a final sync before stop", log)
+	}
+	for _, cmd := range fake.ExecLog(plain.ID) {
+		if cmd == "sync" {
+			t.Error("a sandbox without volumes was synced; only volume sandboxes pay for it")
+		}
+	}
+}
