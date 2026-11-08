@@ -94,3 +94,4 @@ capability/
 # "user@:path" with an empty host as a LOCAL directory).
 ubuntu@*/
 *@*:*/
+cosign.key
