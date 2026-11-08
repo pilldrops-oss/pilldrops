@@ -216,6 +216,26 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// Unconditional, unlike the bits above: the refusal higher up already
 	// established that some node advertises it, so this can only narrow.
 	place.EgressDomains = wantsDomains
+	// A volume's image is on one node, so a create attaching one runs there or nowhere.
+	var volPeek struct {
+		Volumes []struct {
+			ID string `json:"id"`
+		} `json:"volumes"`
+	}
+	if json.Unmarshal(body, &volPeek) == nil && len(volPeek.Volumes) > 0 {
+		ids := make([]string, 0, len(volPeek.Volumes))
+		for _, v := range volPeek.Volumes {
+			ids = append(ids, v.ID)
+		}
+		vnode, err := s.volumeNode(r.Context(), fastOrg(r), ids)
+		if err != nil {
+			volumeNodeErr(w, err)
+			return
+		}
+		if vnode != nil {
+			place.Node, place.Volumes = vnode.ID, true
+		}
+	}
 	// A node can refuse for a reason of its own that its last heartbeat did not
 	// show yet: full, no boot slot, disk pressure. It says so with X-Node-Busy,
 	// and the create goes to the next node rather than back to the caller.
@@ -229,6 +249,10 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		node = next
 		if node == nil {
+			if place.Node != "" {
+				writeErr(w, http.StatusServiceUnavailable, "the node holding this sandbox's volumes has no room for it right now; retry shortly")
+				return
+			}
 			if req.Image != "" && !s.reg.AnyByRuntime("docker", s.now(), cluster.NodeTTL) {
 				// On an fc-only fleet the docker pin makes this a capability miss, not capacity.
 				s.metrics.recordSchedule(schedNoRuntime)

@@ -15,7 +15,7 @@ import (
 
 // ColdBoot starts a fresh VM from the squashfs rootfs. vcpu/mem of 0 fall back
 // to the config default.
-func ColdBoot(template, sandboxID string, cfg Config, log *zap.Logger, vcpu, mem, storageMB int, tokenHash string, rules *egress.Rules) (*RestoredVM, error) {
+func ColdBoot(template, sandboxID string, cfg Config, log *zap.Logger, vcpu, mem, storageMB int, tokenHash string, rules *egress.Rules, volumes []string) (*RestoredVM, error) {
 	log.Info("cold_boot",
 		zap.String("template", template),
 		zap.String("sandbox_id", sandboxID),
@@ -26,10 +26,13 @@ func ColdBoot(template, sandboxID string, cfg Config, log *zap.Logger, vcpu, mem
 	// The overlay owner, the tap owner, and the jailer uid must all be this
 	// one uid or the dropped-privilege VMM cannot open them.
 	uid := vmUID(cfg.NonRootVMM, sandboxID)
+	if err := ownVolumes(volumes, uid); err != nil {
+		return nil, err
+	}
 
 	// FC_NETNS: each sandbox in its own netns with a fixed tap/MAC/guest IP.
 	if cfg.NetNS {
-		return coldBootNetNS(template, sandboxID, cfg, log, uid, vcpu, mem, storageMB, tokenHash, rules)
+		return coldBootNetNS(template, sandboxID, cfg, log, uid, vcpu, mem, storageMB, tokenHash, rules, volumes)
 	}
 
 	// Shared-bridge mode has nowhere to put a per-sandbox rule: the host chains
@@ -60,6 +63,7 @@ func ColdBoot(template, sandboxID string, cfg Config, log *zap.Logger, vcpu, mem
 		VCPUs:       vcpu,
 		MemoryMB:    mem,
 		TokenHash:   tokenHash, // "" unless envd auth is enabled
+		Volumes:     volumes,
 		// StatePath empty = full kernel boot, not snapshot restore
 		Config: cfg,
 	})
@@ -78,12 +82,13 @@ func ColdBoot(template, sandboxID string, cfg Config, log *zap.Logger, vcpu, mem
 		TapName:     net.TapName,
 		VMIP:        net.VMIP.String(),
 		BootType:    "cold",
+		Volumes:     volumes,
 	}, nil
 }
 
 // coldBootNetNS is ColdBoot with a per-sandbox network namespace. The node
 // reaches envd at ns.NodeAddr, which the netns DNATs onto the fixed guest IP.
-func coldBootNetNS(template, sandboxID string, cfg Config, log *zap.Logger, uid, vcpu, mem, storageMB int, tokenHash string, rules *egress.Rules) (*RestoredVM, error) {
+func coldBootNetNS(template, sandboxID string, cfg Config, log *zap.Logger, uid, vcpu, mem, storageMB int, tokenHash string, rules *egress.Rules, volumes []string) (*RestoredVM, error) {
 	ns, err := setupNetNS(sandboxID, uid, netnsTapName, stdnet.ParseIP(netnsGuestIP), rules, log)
 	if err != nil {
 		return nil, fmt.Errorf("netns: %w", err)
@@ -105,6 +110,7 @@ func coldBootNetNS(template, sandboxID string, cfg Config, log *zap.Logger, uid,
 		MemoryMB:    mem,
 		TokenHash:   tokenHash,
 		NetNS:       ns.NetNSPath,
+		Volumes:     volumes,
 		Config:      cfg,
 	})
 	if err != nil {
@@ -121,5 +127,6 @@ func coldBootNetNS(template, sandboxID string, cfg Config, log *zap.Logger, uid,
 		VMIP:        ns.VMIP.String(),
 		BootType:    "cold",
 		NetNS:       ns.Name,
+		Volumes:     volumes,
 	}, nil
 }

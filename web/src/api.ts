@@ -1,4 +1,5 @@
 import type {
+  Volume,
   CreateSandboxReq,
   CreateSandboxResp,
   ExecResp,
@@ -529,3 +530,8 @@ export const recordRun = (id: string, body: { plan_snapshot?: string; services?:
 
 export const endRun = (projectID: string, runID: string) =>
   request<void>('PATCH', `/v1/projects/${encodeURIComponent(projectID)}/runs/${encodeURIComponent(runID)}`)
+
+// Standalone volumes: disks that outlive the sandbox they are attached to.
+export const listVolumes = () => request<{ volumes: Volume[] | null }>('GET', '/v1/volumes', undefined).then(r => r.volumes ?? [])
+export const createVolume = (name: string, sizeMB: number) => request<Volume>('POST', '/v1/volumes', { name, size_mb: sizeMB })
+export const deleteVolume = (id: string) => request<void>('DELETE', `/v1/volumes/${encodeURIComponent(id)}`, undefined)

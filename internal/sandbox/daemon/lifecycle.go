@@ -345,6 +345,11 @@ func (d *Daemon) Evict(ctx context.Context, id string) error {
 // still dead, since a pause or a checkpoint restore may have run in between.
 func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState string, dead rt.Liveness) (err error) {
 	ctx, span := observability.StartInternal(ctx, "daemon.Destroy", attribute.String("sandbox_id", id))
+	defer func() {
+		if err == nil && !evict {
+			d.detachVolumes(ctx, id)
+		}
+	}()
 	defer func() { observability.End(span, err) }()
 
 	sb, release, err := d.acquireOp(id)

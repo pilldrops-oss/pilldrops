@@ -680,3 +680,13 @@ export interface ProjectRun {
   started_at: number
   ended_at?: number
 }
+
+export interface Volume {
+  id: string
+  name: string
+  size_mb: number
+  node_id?: string
+  /** The sandbox holding it; absent while detached. */
+  attached_to?: string
+  created_at: number
+}

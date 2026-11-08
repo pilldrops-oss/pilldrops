@@ -83,6 +83,8 @@ type NodeMeta struct {
 	// only on such a node. Narrower than "enforces an egress policy": address
 	// and CIDR rules need only the kernel chain, which every netns node has.
 	EgressDomains bool
+	// Volumes reports that the node can create and attach standalone volumes.
+	Volumes bool
 	// Checkpoint, NamedSnapshot and Standby are the capture-plane capabilities.
 	// NamedSnapshot is the narrowest on firecracker — snapshots and per-sandbox
 	// namespaces both — and is what a create from a snapshot is placed on.
@@ -145,6 +147,7 @@ type nodeRecord struct {
 	AutoPause       bool      `json:"auto_pause,omitempty"`
 	TagNetworks     bool      `json:"tag_networks,omitempty"`
 	EgressDomains   bool      `json:"egress_domains,omitempty"`
+	Volumes         bool      `json:"volumes,omitempty"`
 	Checkpoint      bool      `json:"checkpoint,omitempty"`
 	NamedSnapshot   bool      `json:"named_snapshot,omitempty"`
 	Standby         bool      `json:"standby,omitempty"`
@@ -170,8 +173,8 @@ type nodeRecord struct {
 func (r nodeRecord) meta() NodeMeta {
 	return NodeMeta{Runtime: r.Runtime, Isolation: r.Isolation, Templates: r.Templates,
 		CanFetch: r.CanFetch, AutoPause: r.AutoPause, TagNetworks: r.TagNetworks,
-		EgressDomains: r.EgressDomains,
-		Checkpoint:    r.Checkpoint, NamedSnapshot: r.NamedSnapshot, Standby: r.Standby,
+		EgressDomains: r.EgressDomains, Volumes: r.Volumes,
+		Checkpoint: r.Checkpoint, NamedSnapshot: r.NamedSnapshot, Standby: r.Standby,
 		MultiPort: r.MultiPort, L4Forward: r.L4Forward, NestedDocker: r.NestedDocker,
 		CPUFeatures: r.CPUFeatures}
 }
@@ -179,7 +182,7 @@ func (r nodeRecord) meta() NodeMeta {
 func (r *nodeRecord) setMeta(m NodeMeta) {
 	r.Runtime, r.Isolation, r.Templates = m.Runtime, m.Isolation, m.Templates
 	r.CanFetch, r.AutoPause, r.TagNetworks = m.CanFetch, m.AutoPause, m.TagNetworks
-	r.EgressDomains = m.EgressDomains
+	r.EgressDomains, r.Volumes = m.EgressDomains, m.Volumes
 	r.Checkpoint, r.NamedSnapshot, r.Standby = m.Checkpoint, m.NamedSnapshot, m.Standby
 	r.MultiPort, r.L4Forward, r.NestedDocker = m.MultiPort, m.L4Forward, m.NestedDocker
 	r.CPUFeatures = m.CPUFeatures
@@ -190,7 +193,7 @@ func (r nodeRecord) node(flags nodeFlags) *Node {
 		ID: r.ID, URL: r.URL, Key: r.Key, Zone: r.Zone, Labels: r.Labels,
 		Version: r.Version, Runtime: r.Runtime, Isolation: r.Isolation,
 		Templates: r.Templates, CanFetchTemplates: r.CanFetch, AutoPause: r.AutoPause,
-		TagNetworks: r.TagNetworks, EgressDomains: r.EgressDomains, Checkpoint: r.Checkpoint,
+		TagNetworks: r.TagNetworks, EgressDomains: r.EgressDomains, Volumes: r.Volumes, Checkpoint: r.Checkpoint,
 		NamedSnapshot: r.NamedSnapshot, Standby: r.Standby,
 		MultiPort: r.MultiPort, L4Forward: r.L4Forward, NestedDocker: r.NestedDocker,
 		CPUFeatures: r.CPUFeatures,

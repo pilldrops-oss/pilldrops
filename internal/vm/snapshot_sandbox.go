@@ -51,6 +51,9 @@ type sandboxSnapMeta struct {
 	Token string `json:"token,omitempty"`
 	// Egress is the sandbox's network policy, rebuilt into the fresh namespace on resume.
 	Egress *egress.Rules `json:"egress,omitempty"`
+	// Volumes are the extra disks the memory image was taken with; a resume
+	// must present exactly these again.
+	Volumes []string `json:"volumes,omitempty"`
 	// Kind, SizeBytes and CreatedAt describe a named checkpoint and are unset on
 	// the pause path, whose one snapshot needs no description.
 	Kind      string    `json:"kind,omitempty"`
@@ -65,7 +68,7 @@ func (m *Manager) snapMetaOf(sandboxID string, sb *Sandbox) sandboxSnapMeta {
 	meta := sandboxSnapMeta{
 		ID: sandboxID, OverlayPath: sb.OverlayPath,
 		VMIP: sb.VMIP, TapName: sb.TapName, Template: sb.Template,
-		Token: sb.Token, Egress: sb.Egress,
+		Token: sb.Token, Egress: sb.Egress, Volumes: sb.Volumes,
 		CPUFeatures: hoststats.CPUFeatures(),
 		RootfsPath:  sb.RootfsPath,
 	}
@@ -222,6 +225,9 @@ func (m *Manager) RestoreSandbox(ctx context.Context, sandboxID, srcDir string, 
 			return nil, fmt.Errorf("chown %s for resume: %w", filepath.Base(p), err)
 		}
 	}
+	if err := ownVolumes(meta.Volumes, uid); err != nil {
+		return nil, err
+	}
 
 	// Network: a fresh namespace around the baked identity, or on the bridge the
 	// kept-alive tap with a fresh same-IP tap as fallback.
@@ -257,7 +263,7 @@ func (m *Manager) RestoreSandbox(ctx context.Context, sandboxID, srcDir string, 
 		VCPU: vcpu, MemMB: memMB,
 		NetNSPath: nsPath, NetNSName: nsName,
 		Token: meta.Token, BootType: "snapshot",
-		LazyMem: lazyMemEnabled(), Egress: meta.Egress,
+		LazyMem: lazyMemEnabled(), Egress: meta.Egress, Volumes: meta.Volumes,
 	}
 	t0 := time.Now()
 	machine, err := m.bootSnapshot(p)
@@ -344,6 +350,7 @@ type restoreParams struct {
 	Token       string // "" only when envd auth is off
 	BootType    string
 	Egress      *egress.Rules
+	Volumes     []string
 }
 
 // bootSnapshot starts the VMM on the image p names. The caller owns the network
@@ -363,6 +370,7 @@ func (m *Manager) bootSnapshot(p restoreParams) (FirecrackerMachine, error) {
 		VCPUs:       p.VCPU,
 		MemoryMB:    p.MemMB,
 		NetNS:       p.NetNSPath,
+		Volumes:     p.Volumes,
 		Config:      m.config,
 	})
 }
@@ -395,6 +403,7 @@ func (m *Manager) attachRestored(p restoreParams, machine FirecrackerMachine, bo
 		CreatedAt:   time.Now(),
 		Token:       p.Token,
 		Egress:      p.Egress,
+		Volumes:     p.Volumes,
 		stopTimer:   cancel, // the daemon owns TTL
 	}
 	// Take our own link to the image straight away. p.MemPath is inside a

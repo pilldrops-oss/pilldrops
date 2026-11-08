@@ -176,6 +176,20 @@
         }
       }
     },
+    "/v1/volumes": {
+      "post": {
+        "summary": "Create a volume",
+        "description": "A disk that outlives the sandbox it is attached to. Attach it at create with `volumes: [{id, path}]`. Firecracker nodes only.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["size_mb"], "properties": { "name": { "type": "string" }, "size_mb": { "type": "integer", "minimum": 256, "maximum": 102400 } } } } } },
+        "responses": { "201": { "description": "The volume." }, "400": { "description": "Bad size or name." }, "501": { "description": "This node's runtime cannot attach volumes." } }
+      },
+      "get": { "summary": "List volumes", "responses": { "200": { "description": "`{\"volumes\": [...]}`" } } }
+    },
+    "/v1/volumes/{id}": {
+      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+      "get": { "summary": "Get a volume", "responses": { "200": { "description": "The volume; `attached_to` names the sandbox holding it." }, "404": { "description": "No such volume in the caller's org." } } },
+      "delete": { "summary": "Delete a volume and its data", "responses": { "204": { "description": "Deleted." }, "409": { "description": "A sandbox holds it." } } }
+    },
     "/v1/sandboxes/{id}": {
       "parameters": [
         {

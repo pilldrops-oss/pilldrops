@@ -36,6 +36,9 @@ type heartbeatBody struct {
 	// egress rule enforceable. Older nodes omit it, which reads as false: a
 	// create whose rules name a domain is not placed there.
 	EgressDomains bool `json:"egress_domains"`
+	// Volumes means the node can create and attach standalone volumes. Older
+	// nodes omit it: no volume is placed there.
+	Volumes bool `json:"volumes"`
 	// Checkpoint, NamedSnapshot and Standby are the capture-plane bits. Older
 	// nodes omit them, which reads as false: a create from a snapshot is not
 	// placed there and the fleet answer does not claim the verb.
@@ -153,8 +156,8 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	s.reg.SetNodeMeta(b.ID, cluster.NodeMeta{
 		Runtime: b.Runtime, Isolation: b.Isolation, Templates: b.Templates,
 		CanFetch: b.CanFetch, AutoPause: b.AutoPause, TagNetworks: b.TagNetworks,
-		EgressDomains: b.EgressDomains,
-		Checkpoint:    b.Checkpoint, NamedSnapshot: b.NamedSnapshot, Standby: b.Standby,
+		EgressDomains: b.EgressDomains, Volumes: b.Volumes,
+		Checkpoint: b.Checkpoint, NamedSnapshot: b.NamedSnapshot, Standby: b.Standby,
 		MultiPort: b.MultiPort, L4Forward: b.L4Forward, NestedDocker: b.NestedDocker,
 		CPUFeatures: b.CPUFeatures,
 	})

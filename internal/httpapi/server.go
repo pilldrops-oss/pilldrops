@@ -286,6 +286,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.registerBackupRoutes(route)
 	s.registerSnapshotExportRoutes(route)
 	s.registerOpsRoutes(route)
+	s.registerVolumeRoutes(route)
 	s.registerIntegrationRoutes(route)
 	s.registerChatRoutes(route)
 	s.registerForwardRoutes(raw)

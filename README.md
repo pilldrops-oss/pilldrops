@@ -34,6 +34,8 @@ with Sandbox.create(template="python-3.11") as sb:
 - **Checkpoints.** Save a sandbox and roll it back to that point in place.
 - **Snapshots.** Set a machine up once, save it, and start new sandboxes from it
   with everything already installed.
+- **Volumes.** Keep data on a disk that outlives the sandbox and attach it to
+  the next one.
 - **Control the network.** Allow or deny outbound traffic by domain or address,
   per sandbox.
 - **Bring your own image.** Use a template (Python, Node, Go, browsers,

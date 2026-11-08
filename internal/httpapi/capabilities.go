@@ -53,6 +53,8 @@ type nodeCapabilities struct {
 	// TagNetworks means two sandboxes that named the same network tag can reach
 	// each other on this node. False means a create naming tags is refused here.
 	TagNetworks bool `json:"tag_networks"`
+	// Volumes means a create may attach standalone volumes (POST /v1/volumes).
+	Volumes bool `json:"volumes"`
 	// EgressDomains means a sandbox's egress rules may name a DOMAIN on this
 	// node, matched by TLS SNI on 443 and the HTTP Host header on 80. False
 	// means only addresses and CIDRs are enforceable here and a rule set naming
@@ -169,6 +171,7 @@ func buildNodeCapabilities(rd runtimeDescriber, local func() []string, plan enti
 		NestedDocker:         caps.NestedDocker,
 		Desktop:              caps.Desktop,
 		TagNetworks:          caps.TagNetworks,
+		Volumes:              caps.Volumes,
 		EgressDomains:        caps.EgressDomains,
 		Checkpoint:           caps.Checkpoint,
 		NamedSnapshot:        caps.NamedSnapshot,
@@ -177,7 +180,7 @@ func buildNodeCapabilities(rd runtimeDescriber, local func() []string, plan enti
 		WarmRestoreStorageMB: caps.WarmRestoreStorageMB,
 		Templates:            tmpl,
 		TemplatesEnumerated:  enumerated,
-		Features:             []string{},
+		Features:             []string{"volume"},
 		Limits: nodeLimits{
 			MaxVCPU:       plan.MaxVCPU,
 			MaxMemMB:      plan.MaxMemMB,

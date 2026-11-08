@@ -16,6 +16,7 @@ const Docs = lazy(() => import('./pages/Docs'))
 const Templates = lazy(() => import('./pages/Templates'))
 const Vault = lazy(() => import('./pages/Vault'))
 const Domains = lazy(() => import('./pages/Domains'))
+const Volumes = lazy(() => import('./pages/Volumes'))
 const Overview = lazy(() => import('./pages/Overview'))
 const Sessions = lazy(() => import('./pages/Sessions'))
 const Errors = lazy(() => import('./pages/Errors'))
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="sandbox/:id" element={<SandboxDetail />} />
           <Route path="deploy" element={<Deploy />} />
           <Route path="domains" element={<Domains />} />
+          <Route path="volumes" element={<Volumes />} />
           <Route path="t/:id" element={<TemplateDetail />} />
           <Route path="templates" element={<Templates />} />
           <Route path="vault" element={<Vault />} />

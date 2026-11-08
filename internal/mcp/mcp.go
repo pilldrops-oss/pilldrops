@@ -281,6 +281,23 @@ func toolList() []tool {
 				"networks": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
 					"description": "opt-in network tags. Sandboxes cannot reach each other by default; two in the same org " +
 						"on the same node reach each other only if they share a tag, and resolve each other as <slug>.pd"},
+				"volumes": map[string]any{"type": "array", "description": "standalone volumes to attach (see create_volume)",
+					"items": obj(map[string]any{
+						"id":   prop("string", "volume id"),
+						"path": prop("string", "where to mount it, e.g. /data"),
+					}, "id", "path")},
+				"secret_refs": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+					"description": "vault secrets (see list_secrets) to put in the sandbox's environment by name"},
+				"proxied_secrets": map[string]any{"type": "array",
+					"description": "vault secrets the sandbox may use but never sees: it gets NAME=pd-proxied and " +
+						"NAME_PROXY_URL, and the node adds the secret to calls made through that URL to host. Point " +
+						"the SDK's base URL at it, e.g. OPENAI_BASE_URL=$OPENAI_API_KEY_PROXY_URL/v1",
+					"items": obj(map[string]any{
+						"name":   prop("string", "vault secret name"),
+						"host":   prop("string", "the API host the secret is for, e.g. api.openai.com"),
+						"header": prop("string", "header to set (default Authorization)"),
+						"format": prop("string", "value with {} for the secret (default \"Bearer {}\"; Anthropic: \"{}\")"),
+					}, "name", "host")},
 			}),
 			run: func(a map[string]any, be Backend) map[string]any {
 				req := map[string]any{"client": "mcp"}
@@ -309,6 +326,28 @@ func toolList() []tool {
 				}
 				if v, ok := a["public"].(bool); ok && v {
 					req["public"] = true
+				}
+				if v, ok := a["volumes"].([]any); ok && len(v) > 0 {
+					req["volumes"] = v
+				}
+				var refs []any
+				if v, ok := a["secret_refs"].([]any); ok {
+					refs = append(refs, v...)
+				}
+				if v, ok := a["proxied_secrets"].([]any); ok {
+					for _, p := range v {
+						ps, _ := p.(map[string]any)
+						proxy := map[string]any{"host": str(ps, "host")}
+						for _, k := range []string{"header", "format"} {
+							if s := str(ps, k); s != "" {
+								proxy[k] = s
+							}
+						}
+						refs = append(refs, map[string]any{"name": str(ps, "name"), "proxy": proxy})
+					}
+				}
+				if len(refs) > 0 {
+					req["secret_refs"] = refs
 				}
 				if req["template"] == nil && req["image"] == nil {
 					req["template"] = "python-3.11"

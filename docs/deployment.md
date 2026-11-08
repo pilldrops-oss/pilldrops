@@ -114,6 +114,35 @@ on-demand TLS and let it ask the platform which hosts are real.
   proxy and point it at the platform host over plain HTTP; the row still has to
   verify before anything routes.
 
+## Volumes
+
+A volume is a disk that outlives the sandbox it is attached to (Firecracker
+nodes; `GET /v1/capabilities` reports `volumes`).
+
+```
+POST   /v1/volumes            {"name": "data", "size_mb": 10240}   # 256 MB - 100 GB
+POST   /v1/sandboxes          {"template": "base", "volumes": [{"id": "vol-…", "path": "/data"}]}
+GET    /v1/volumes            GET /v1/volumes/<id>
+DELETE /v1/volumes/<id>       # refused while a sandbox holds it
+```
+
+- The image is `volumes/<id>.ext4` beside the node's overlay directory. It is
+  attached as an extra drive and mounted by the node right after boot; up to
+  four per sandbox, at a plain absolute path outside the guest's system
+  directories.
+- One sandbox holds a volume at a time. Destroying the sandbox releases it, with
+  its data, for the next create.
+- A sandbox with a volume cold-boots (~1 s), and pause/resume keeps the mount.
+- **Refused while a volume is attached** (409): fork, backup, move, rehome and
+  publishing a named snapshot. Each would either have two machines write one
+  disk or leave the disk behind.
+- A checkpoint restore rolls back the sandbox's own disk, not the volume.
+- On a fleet a volume lives on the node that created it. The control plane
+  places a new volume on a node that reports `volumes`, sends its delete there,
+  and pins a create attaching it to that node: a 503 when that node is away or
+  full, a 409 when one create names volumes on two nodes. Listing reads the
+  shared database, so it works while the node is away.
+
 ## Raw port forwarding
 
 `POST /v1/sandboxes/{id}/forwards {"port": 5432}` publishes a guest port on

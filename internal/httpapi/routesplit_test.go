@@ -41,7 +41,7 @@ func registeredRoutes(t *testing.T) []string {
 // TestEveryRouteSurvivedTheSplit pins the total declared in source, ignoring
 // build tags. Exact rather than a floor so an added route forces a decision on where it goes.
 func TestEveryRouteSurvivedTheSplit(t *testing.T) {
-	const want = 82 // -13: functions and the /v1/cron jobs API moved to the cloud product, +1 whoami
+	const want = 86 // -13: functions and the /v1/cron jobs API moved to the cloud product, +1 whoami, +4 volumes
 	got := registeredRoutes(t)
 	if len(got) != want {
 		t.Errorf("the node registers %d routes, expected %d.\n\n"+
@@ -125,6 +125,7 @@ func routesInFile(t *testing.T, name string) []string {
 var featureRegistrars = []string{
 	"imageroutes.go",
 	"opsroutes.go",
+	"volumes.go",
 	"checkpoints.go",
 }
 

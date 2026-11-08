@@ -48,7 +48,8 @@ type CreateRequest struct {
 	StorageMB int
 	// Egress mirrors the linux field; this build boots nothing, so it is only
 	// carried so the runtime adapter compiles off Linux.
-	Egress *egress.Rules
+	Egress  *egress.Rules
+	Volumes []string
 }
 
 // Sandbox mirrors the fields other packages read from a created sandbox.
@@ -164,3 +165,7 @@ func (m *Manager) RestoreCheckpoint(context.Context, string, string, int, int) (
 func (m *Manager) ParkSandbox(context.Context, string) error { return ErrUnsupported }
 func (m *Manager) FreezeVM(context.Context, string) error    { return ErrUnsupported }
 func (m *Manager) ThawVM(context.Context, string) error      { return ErrUnsupported }
+
+// CreateVolume and DeleteVolume mirror the linux signatures; this build has no VMs.
+func (m *Manager) CreateVolume(string, int) error { return ErrUnsupported }
+func (m *Manager) DeleteVolume(string) error      { return ErrUnsupported }

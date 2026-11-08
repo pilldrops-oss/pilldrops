@@ -95,6 +95,8 @@ func registerFleetPassthrough(r chi.Router, passthrough http.HandlerFunc) {
 		"/v1/sandboxes/{id}/preview-status",
 		"/v1/sandboxes/{id}/fork", "/v1/sandboxes/{id}/visibility", "/v1/sandboxes/{id}/preview-access",
 		"/v1/domains", "/v1/domains/{host}",
+		// Volumes live on nodes; the control plane places them and pins creates.
+		"/v1/volumes", "/v1/volumes/{id}",
 		"/v1/capabilities",
 		"/v1/limits",
 		"/v1/launch-stats",
