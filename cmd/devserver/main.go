@@ -354,6 +354,7 @@ func portalLegacyDomains(raw, orchURL string) ([]string, error) {
 	if err := proxy.LegacyHostError(legacy, "PORTAL_ORCHESTRATOR_URL", orchURL); err != nil {
 		return nil, err
 	}
+	proxy.WarnDashboardOnPreviewDomain(legacy, portalSandboxDomain, dashboardOrigin)
 	return legacy, nil
 }
 
@@ -555,9 +556,12 @@ func hostPreview(domain string, rp http.Handler, next http.Handler, bySlug slugL
 }
 
 // portalHandler is the portal's host routing: legacy preview hosts redirect,
-// preview hosts go to the orchestrator, and everything else to the site.
+// preview hosts go to the orchestrator, and everything else to the site,
+// except that with the dashboard elsewhere no other host under the sandbox
+// domain reaches it.
 func portalHandler(legacy *proxy.LegacyDomains, rp, site http.Handler, bySlug slugLookup) http.Handler {
-	return legacy.Wrap(hostPreview(portalSandboxDomain, rp, site, bySlug))
+	return legacy.Wrap(hostPreview(portalSandboxDomain, rp,
+		legacy.SandboxDomainOnly(portalSandboxDomain, dashboardOrigin, site), bySlug))
 }
 
 // isInfraPreviewErr reports whether a preview error body came from the
@@ -580,14 +584,19 @@ func isInfraPreviewErr(body string) bool {
 	return false
 }
 
-// previewErrorLinks builds the footer links from the deployment's own domain
-// (the page is served on a sandbox host, so hrefs must be absolute), or none
-// when the domain is unset: a wrong destination is worse than no button.
+// previewErrorLinks builds the footer links to the dashboard: PORTAL_ORIGIN
+// when set, else the sandbox domain's apex (the page is served on a sandbox
+// host, so hrefs must be absolute), or none when neither is known: a wrong
+// destination is worse than no button.
 func previewErrorLinks() string {
-	if portalSandboxDomain == "" {
+	base := dashboardOrigin
+	if base == "" && portalSandboxDomain != "" {
+		base = "https://" + portalSandboxDomain
+	}
+	if base == "" {
 		return ""
 	}
-	base := "https://" + portalSandboxDomain
+	base = html.EscapeString(base)
 	return `<div class="btns">` +
 		`<a class="b solid" href="` + base + `/dashboard">Open dashboard</a>` +
 		`<a class="b" href="` + base + `/docs">API reference</a>` +

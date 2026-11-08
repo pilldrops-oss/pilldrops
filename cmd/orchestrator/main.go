@@ -71,10 +71,12 @@ func run(ctx context.Context, stop func()) error {
 	if err := orchestrator.PortalOriginGuardError(os.Getenv("PORTAL_ORIGIN")); err != nil {
 		return err
 	}
-	if _, err := proxy.ParseLegacyDomains(os.Getenv("PORTAL_LEGACY_SANDBOX_DOMAINS"),
-		os.Getenv("PORTAL_SANDBOX_DOMAIN"), os.Getenv("PORTAL_ORIGIN")); err != nil {
+	legacy, err := proxy.ParseLegacyDomains(os.Getenv("PORTAL_LEGACY_SANDBOX_DOMAINS"),
+		os.Getenv("PORTAL_SANDBOX_DOMAIN"), os.Getenv("PORTAL_ORIGIN"))
+	if err != nil {
 		return err
 	}
+	proxy.WarnDashboardOnPreviewDomain(legacy, os.Getenv("PORTAL_SANDBOX_DOMAIN"), os.Getenv("PORTAL_ORIGIN"))
 	if err := orchestrator.VaultKeyGuardError(clustered, devInsecure,
 		os.Getenv("ALLOW_PLAINTEXT_VAULT") == "1", os.Getenv("VAULT_SECRET_KEY")); err != nil {
 		return err

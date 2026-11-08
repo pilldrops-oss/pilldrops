@@ -189,3 +189,56 @@ func TestAgentHostFallsThroughToTheDashboard(t *testing.T) {
 		t.Fatal("agent-<id>.<domain> did not fall through to the next handler")
 	}
 }
+
+// With the dashboard elsewhere, the preview domain serves previews only: the
+// apex and www go to the dashboard, any other label is a 404, and a preview
+// host still reaches the router rewritten.
+func TestPreviewDomainServesNoDashboardWhenItLivesElsewhere(t *testing.T) {
+	sink := &ingressSink{}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sink.hits++
+		sink.path = r.URL.Path
+	})
+	s := NewServer("fleet-key", "nodetoken")
+	s.sandboxDomain = "pilldrops.app"
+	s.portalOrigin = "https://pilldrops.com"
+
+	// With no legacy domain configured nothing moved, so the dashboard still answers.
+	for _, host := range []string{"pilldrops.app", "nope.pilldrops.app"} {
+		s.hostIngress(next).ServeHTTP(httptest.NewRecorder(), ingressReq(host, "/dashboard"))
+	}
+	if sink.hits != 2 {
+		t.Fatalf("hits = %d with no legacy domain, want the dashboard served as before", sink.hits)
+	}
+	sink.hits = 0
+
+	s.setLegacyDomains([]string{"pilldrops.com"})
+	h := s.hostIngress(next)
+	for _, tc := range []struct {
+		host string
+		code int
+		loc  string
+	}{
+		{"pilldrops.app", http.StatusFound, "https://pilldrops.com/dashboard"},
+		{"www.pilldrops.app", http.StatusFound, "https://pilldrops.com/dashboard"},
+		{"nope.pilldrops.app", http.StatusNotFound, ""},
+	} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, ingressReq(tc.host, "/dashboard"))
+		if w.Code != tc.code || w.Header().Get("Location") != tc.loc {
+			t.Errorf("%s = %d %q, want %d %q", tc.host, w.Code, w.Header().Get("Location"), tc.code, tc.loc)
+		}
+	}
+	if sink.hits != 0 {
+		t.Fatalf("the dashboard was served under the preview domain %d times", sink.hits)
+	}
+
+	h.ServeHTTP(httptest.NewRecorder(), ingressReq("8080-sb1.pilldrops.app", "/x"))
+	if sink.hits != 1 || sink.path != "/preview/sb1/8080/x" {
+		t.Fatalf("preview host: hits=%d path=%q, want it rewritten through", sink.hits, sink.path)
+	}
+	h.ServeHTTP(httptest.NewRecorder(), ingressReq("pilldrops.com", "/dashboard"))
+	if sink.hits != 2 || sink.path != "/dashboard" {
+		t.Fatalf("dashboard host: hits=%d path=%q, want it untouched", sink.hits, sink.path)
+	}
+}

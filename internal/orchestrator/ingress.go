@@ -25,7 +25,7 @@ func (s *Server) hostIngress(next http.Handler) http.Handler {
 	if domain == "" {
 		return next
 	}
-	return s.legacy.Wrap(s.appPreviewOrigin(domain, s.customDomainOrigin(next)))
+	return s.legacy.Wrap(s.appPreviewOrigin(domain, s.customDomainOrigin(s.legacy.SandboxDomainOnly(domain, s.portalOrigin, next))))
 }
 
 // setLegacyDomains installs the redirect from domains to sandboxDomain.
@@ -59,7 +59,7 @@ func (s *Server) appPreviewOrigin(domain string, next http.Handler) http.Handler
 			next.ServeHTTP(w, r)
 			return
 		}
-		next.ServeHTTP(w, previewRewrite(r.Context(), r, id, port))
+		next.ServeHTTP(w, previewRewrite(proxy.WithPreviewHost(r.Context()), r, id, port))
 	})
 }
 

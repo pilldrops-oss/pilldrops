@@ -214,3 +214,71 @@ func TestParseLegacyDomains(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardOffDomain(t *testing.T) {
+	for _, tc := range []struct {
+		domain, origin string
+		want           bool
+	}{
+		{"pilldrops.app", "https://pilldrops.com", true},
+		{"pilldrops.app", "https://pilldrops.app", false},
+		{"example.com", "https://app.example.com", false},
+		{"example.com", "", false},
+		{"", "https://pilldrops.com", false},
+	} {
+		if got := DashboardOffDomain(tc.domain, tc.origin); got != tc.want {
+			t.Errorf("DashboardOffDomain(%q, %q) = %v, want %v", tc.domain, tc.origin, got, tc.want)
+		}
+	}
+}
+
+func TestSandboxDomainOnlyServesNoDashboard(t *testing.T) {
+	hits := 0
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ })
+	legacy := &LegacyDomains{Current: "pilldrops.app", Domains: []string{"pilldrops.com"}}
+	h := legacy.SandboxDomainOnly("pilldrops.app", "https://pilldrops.com/", next)
+	for _, tc := range []struct {
+		host, target string
+		code         int
+		loc          string
+	}{
+		{"pilldrops.app", "/dashboard?x=1", http.StatusFound, "https://pilldrops.com/dashboard?x=1"},
+		{"www.pilldrops.app:443", "/", http.StatusFound, "https://pilldrops.com/"},
+		{"nope.pilldrops.app", "/login", http.StatusNotFound, ""},
+		{"a.b.pilldrops.app", "/", http.StatusNotFound, ""},
+	} {
+		w := legacyDo(h, http.MethodGet, tc.host, tc.target, nil)
+		if w.Code != tc.code || w.Header().Get("Location") != tc.loc {
+			t.Errorf("%s%s = %d %q, want %d %q", tc.host, tc.target, w.Code, w.Header().Get("Location"), tc.code, tc.loc)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("a non-preview host under the preview domain reached the dashboard %d times", hits)
+	}
+
+	// A host a stage resolved to a sandbox, and the dashboard's own host, pass.
+	r := httptest.NewRequest(http.MethodGet, "http://x/preview/sb1/8000/", nil)
+	r.Host = "8000-sb1.pilldrops.app"
+	h.ServeHTTP(httptest.NewRecorder(), r.WithContext(WithPreviewHost(r.Context())))
+	legacyDo(h, http.MethodGet, "pilldrops.com", "/dashboard", nil)
+	if hits != 2 {
+		t.Fatalf("hits = %d, want the resolved preview and the dashboard host through", hits)
+	}
+
+	// The dashboard on the sandbox domain itself, the old shape, is untouched.
+	h = legacy.SandboxDomainOnly("pilldrops.app", "", next)
+	legacyDo(h, http.MethodGet, "pilldrops.app", "/dashboard", nil)
+	if hits != 3 {
+		t.Fatal("with no PORTAL_ORIGIN the apex must still serve the dashboard")
+	}
+
+	// With no legacy domain nothing moved, so nothing changes either.
+	for _, none := range []*LegacyDomains{nil, {Current: "pilldrops.app"}} {
+		h = none.SandboxDomainOnly("pilldrops.app", "https://pilldrops.com", next)
+		legacyDo(h, http.MethodGet, "pilldrops.app", "/dashboard", nil)
+		legacyDo(h, http.MethodGet, "nope.pilldrops.app", "/", nil)
+	}
+	if hits != 7 {
+		t.Fatalf("hits = %d, want every request through with no legacy domain", hits)
+	}
+}

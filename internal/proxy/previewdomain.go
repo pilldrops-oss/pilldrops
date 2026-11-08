@@ -6,6 +6,7 @@ import (
 	"html"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -190,3 +191,59 @@ const legacyMovedPage = `<!doctype html><meta charset="utf-8"><meta name="robots
 .c{max-width:440px;text-align:center;padding:32px}h1{font-size:19px;margin:0 0 10px}p{color:#9aa0a6;font-size:14px;line-height:1.5;margin:0}</style>
 <div class="c"><h1>This sandbox link has moved</h1>
 <p>Sandbox links now live on <b>%s</b>. Ask whoever shared this one for a new link, or open the sandbox from the dashboard.</p></div>`
+
+// DashboardOffDomain reports whether the dashboard at origin lives outside
+// domain, which is when the preview domain must serve previews and nothing else.
+func DashboardOffDomain(domain, origin string) bool {
+	d := strings.ToLower(strings.TrimSpace(domain))
+	u, err := url.Parse(origin)
+	if d == "" || err != nil || u.Hostname() == "" {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	return h != d && !strings.HasSuffix(h, "."+d)
+}
+
+// WarnDashboardOnPreviewDomain logs when previews move off legacy domains but
+// the dashboard at origin stays on the preview domain, beside sandbox code.
+func WarnDashboardOnPreviewDomain(legacy []string, domain, origin string) {
+	if len(legacy) > 0 && !DashboardOffDomain(domain, origin) {
+		slog.Warn("previews move off the legacy domains, but PORTAL_ORIGIN is on PORTAL_SANDBOX_DOMAIN, "+
+			"so the dashboard stays on the preview domain", "component", "preview",
+			"portal_origin", origin, "sandbox_domain", domain)
+	}
+}
+
+// previewHostKey marks a request a host stage already resolved to a sandbox.
+type previewHostKey struct{}
+
+// WithPreviewHost marks ctx as carrying a request a host stage resolved to a sandbox.
+func WithPreviewHost(ctx context.Context) context.Context {
+	return context.WithValue(ctx, previewHostKey{}, true)
+}
+
+// SandboxDomainOnly keeps the dashboard and its sign-in off the preview domain
+// when previews moved off a legacy domain and the dashboard lives at origin,
+// elsewhere. The domain itself and www redirect there; any other host under it
+// that no stage resolved to a sandbox is a 404. Sandbox code may set cookies
+// for the whole preview domain, so nothing of the dashboard's may be served
+// under it. Without legacy domains it changes nothing.
+func (l *LegacyDomains) SandboxDomainOnly(domain, origin string, next http.Handler) http.Handler {
+	if l == nil || len(l.Domains) == 0 || !DashboardOffDomain(domain, origin) {
+		return next
+	}
+	d := strings.ToLower(strings.TrimSpace(domain))
+	origin = strings.TrimRight(origin, "/")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := NormalizeHost(r.Host)
+		resolved, _ := r.Context().Value(previewHostKey{}).(bool)
+		switch {
+		case resolved || (host != d && !strings.HasSuffix(host, "."+d)):
+			next.ServeHTTP(w, r)
+		case host == d || host == "www."+d:
+			http.Redirect(w, r, origin+r.URL.RequestURI(), http.StatusFound)
+		default:
+			http.Error(w, "sandbox not found", http.StatusNotFound)
+		}
+	})
+}

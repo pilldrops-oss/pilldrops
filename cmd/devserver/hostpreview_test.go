@@ -79,3 +79,45 @@ func TestPortalRedirectsLegacyPreviewHosts(t *testing.T) {
 		t.Fatalf("site hits = %d, want 1", siteHits)
 	}
 }
+
+// With the dashboard elsewhere the portal serves nothing but previews under the
+// sandbox domain: the apex goes to the dashboard and an unknown label is a 404.
+func TestPortalKeepsTheDashboardOffThePreviewDomain(t *testing.T) {
+	withDomain(t, "pilldrops.app")
+	withOrigin(t, "https://pilldrops.com")
+	var rpHits, siteHits int
+	rp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { rpHits++ })
+	site := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { siteHits++ })
+	h := portalHandler(nil, rp, site, nil)
+
+	do := func(host, target string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "http://x"+target, nil)
+		req.Host = host
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+	// With no legacy domain configured nothing moved, so the site still answers.
+	do("pilldrops.app", "/dashboard")
+	do("nope.pilldrops.app", "/")
+	if siteHits != 2 {
+		t.Fatalf("site hits = %d with no legacy domain, want the site served as before", siteHits)
+	}
+	siteHits = 0
+
+	h = portalHandler(&proxy.LegacyDomains{Current: "pilldrops.app", Domains: []string{"pilldrops.com"}}, rp, site, nil)
+	if w := do("pilldrops.app", "/dashboard"); w.Code != http.StatusFound || w.Header().Get("Location") != "https://pilldrops.com/dashboard" {
+		t.Errorf("apex = %d %q, want 302 to the dashboard", w.Code, w.Header().Get("Location"))
+	}
+	if w := do("nope.pilldrops.app", "/"); w.Code != http.StatusNotFound {
+		t.Errorf("unknown label = %d, want 404", w.Code)
+	}
+	if siteHits != 0 {
+		t.Fatalf("the site was served under the preview domain %d times", siteHits)
+	}
+	do("8000-sb1.pilldrops.app", "/")
+	do("pilldrops.com", "/dashboard")
+	if rpHits != 1 || siteHits != 1 {
+		t.Fatalf("rp %d site %d, want the preview host to the orchestrator and the dashboard host to the site", rpHits, siteHits)
+	}
+}
