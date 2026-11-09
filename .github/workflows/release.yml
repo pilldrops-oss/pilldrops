@@ -74,8 +74,10 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/sandboxd-linux-amd64 ./cmd/sandboxd/
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/sandboxd-fleet-linux-amd64 ./cmd/sandboxd-fleet/
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o dist/envd-linux-amd64 ./cmd/envd/
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o dist/orchestrator-linux-amd64 ./cmd/orchestrator/
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o dist/pilldrops-join-linux-amd64 ./cmd/pilldrops-join/
           (cd cli && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o ../dist/pilldrops-linux-amd64 ./cmd/pilldrops)
-          (cd dist && sha256sum sandboxd-linux-amd64 sandboxd-fleet-linux-amd64 envd-linux-amd64 pilldrops-linux-amd64 > SHA256SUMS)
+          (cd dist && sha256sum sandboxd-linux-amd64 sandboxd-fleet-linux-amd64 envd-linux-amd64 orchestrator-linux-amd64 pilldrops-join-linux-amd64 pilldrops-linux-amd64 > SHA256SUMS)
           ls -lh dist/
 
       # SHA256SUMS alone proves nothing an attacker could not also produce:
@@ -112,7 +114,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#sandboxd/}"
           gh release create "$GITHUB_REF_NAME" \
-            dist/sandboxd-linux-amd64 dist/sandboxd-fleet-linux-amd64 dist/envd-linux-amd64 dist/pilldrops-linux-amd64 \
+            dist/sandboxd-linux-amd64 dist/sandboxd-fleet-linux-amd64 dist/envd-linux-amd64 dist/orchestrator-linux-amd64 dist/pilldrops-join-linux-amd64 dist/pilldrops-linux-amd64 \
             dist/SHA256SUMS dist/SHA256SUMS.sig dist/SHA256SUMS.pem dist/sbom.spdx.json \
             --title "sandboxd ${VERSION}" \
-            --notes "sandboxd node release ${VERSION}. Install on a node: \`sudo sandboxd-update ${VERSION}\` (fleet variant by default). VERIFY FIRST — SHA256SUMS alone proves nothing, since whoever can swap a binary can swap the checksums beside it; the Sigstore signature cannot be reissued without this repo's release-workflow identity. Run \`scripts/verify-release.sh <download-dir>\`, or see docs/releases.md. Assets: sandboxd-fleet-linux-amd64 (minimal node agent), sandboxd-linux-amd64 (full standalone), envd-linux-amd64 (in-guest agent, kept in sync with sandboxd), SHA256SUMS + .sig + .pem, sbom.spdx.json."
+            --notes "sandboxd node release ${VERSION}. Install on a node: \`sudo sandboxd-update ${VERSION}\` (fleet variant by default). VERIFY FIRST — SHA256SUMS alone proves nothing, since whoever can swap a binary can swap the checksums beside it; the Sigstore signature cannot be reissued without this repo's release-workflow identity. Run \`scripts/verify-release.sh <download-dir>\`, or see docs/releases.md. Assets: sandboxd-fleet-linux-amd64 (minimal node agent), sandboxd-linux-amd64 (full standalone), envd-linux-amd64 (in-guest agent, kept in sync with sandboxd), orchestrator-linux-amd64 (control plane), pilldrops-join-linux-amd64 (joins a host to a fleet), SHA256SUMS + .sig + .pem, sbom.spdx.json."
