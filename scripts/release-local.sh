@@ -46,6 +46,8 @@ ldflags="-s -w -X github.com/pilldrops-oss/pilldrops/internal/nodeboot.Version=$
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$ldflags" -o "$out/sandboxd-linux-amd64" ./cmd/sandboxd/
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$ldflags" -o "$out/sandboxd-fleet-linux-amd64" ./cmd/sandboxd-fleet/
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o "$out/envd-linux-amd64" ./cmd/envd/
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o "$out/orchestrator-linux-amd64" ./cmd/orchestrator/
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o "$out/pilldrops-join-linux-amd64" ./cmd/pilldrops-join/
 cli_rev=$(git -C "$CLI_REPO" rev-parse --short HEAD)
 (cd "$CLI_REPO" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" \
   -o "$OLDPWD/$out/pilldrops-linux-amd64" ./cmd/pilldrops)
