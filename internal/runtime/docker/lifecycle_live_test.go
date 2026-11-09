@@ -242,10 +242,11 @@ func TestLiveAliveSeesAContainerThatDied(t *testing.T) {
 	old := deadConfirmAfter
 	deadConfirmAfter = 0
 	t.Cleanup(func() { deadConfirmAfter = old })
-	if dockerdStarted().IsZero() {
-		// With dockerd's start unknown every stop reads as a restart's, to revive.
+	if restartCasualty(time.Now(), dockerdStarted()) {
+		// With dockerd's start unknown, or within restartGrace of it as on a
+		// fresh CI runner, every stop reads as a restart's, to revive.
 		if lv.Alive() || !inst.(rt.Reviver).Casualty() {
-			t.Error("a stopped container under an unknown dockerd start is not a restart casualty")
+			t.Error("a stop with dockerd's start unknown or recent is not a restart casualty")
 		}
 	} else {
 		if !lv.Alive() {
