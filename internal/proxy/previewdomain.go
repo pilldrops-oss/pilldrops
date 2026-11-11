@@ -253,13 +253,18 @@ func (l *LegacyDomains) SandboxDomainOnly(domain, origin string, next http.Handl
 	})
 }
 
+// PreviewHostHeader carries the host the visitor used from the portal to the
+// orchestrator. A hosting edge between them may replace X-Forwarded-Host.
+const PreviewHostHeader = "X-Pilldrops-Preview-Host"
+
 // PathPreviewTarget is where a browser navigating the path form
 // /preview/<id>/<port>/... should go instead: the same request on the
 // sandbox's own host under domain, so sandbox code never runs on the host
 // that serves the path form. ok=false for everything else, which keeps the
 // path form: API clients, WebSockets, sub-resources, browsers that send no
 // fetch metadata, and a request a host stage already rewrote into the path
-// form, whose Host (or X-Forwarded-Host, from a portal in front) is a preview
+// form, whose Host (or PreviewHostHeader or X-Forwarded-Host, from a portal in
+// front) is a preview
 // host: under domain, preview-shaped under a legacy domain, or named for this
 // sandbox under any domain, which is a portal configured for another domain.
 // legacy may be nil.
@@ -273,7 +278,7 @@ func PathPreviewTarget(r *http.Request, domain string, legacy *LegacyDomains) (s
 	default:
 		return "", false
 	}
-	shown, _, _ := strings.Cut(cmp.Or(r.Header.Get("X-Forwarded-Host"), r.Host), ",")
+	shown, _, _ := strings.Cut(cmp.Or(r.Header.Get(PreviewHostHeader), r.Header.Get("X-Forwarded-Host"), r.Host), ",")
 	shownHost := NormalizeHost(strings.TrimSpace(shown))
 	if strings.HasSuffix(shownHost, "."+d) {
 		return "", false

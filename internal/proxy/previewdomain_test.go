@@ -324,4 +324,12 @@ func TestPathPreviewTarget(t *testing.T) {
 	if got, _ := PathPreviewTarget(r, "pilldrops.app", nil); got != "https://8000-sb1.pilldrops.app/" {
 		t.Errorf("no legacy domains = %q", got)
 	}
+
+	// A hosting edge between portal and orchestrator replaced X-Forwarded-Host.
+	r.Host = "orchestrator.example.net"
+	r.Header.Set("X-Forwarded-Host", "orchestrator.example.net")
+	r.Header.Set(PreviewHostHeader, "8000-sb1.pilldrops.app")
+	if got, ok := PathPreviewTarget(r, "pilldrops.app", nil); ok {
+		t.Errorf("rewritten by a portal behind an edge that replaced X-Forwarded-Host = %q, want no redirect", got)
+	}
 }

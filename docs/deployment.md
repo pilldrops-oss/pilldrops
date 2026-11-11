@@ -204,6 +204,10 @@ dashboard on `example.com` receives, and a page at a slug such as
 5. Leave `*.example.com` DNS in place. It now only redirects.
 6. Update webhook URLs and API clients that call preview hosts to the new
    domain. The redirect does not carry them, as below.
+7. Check a preview the way a browser opens it, since a plain `curl` skips the
+   path-form redirect: `curl -sI -H "Sec-Fetch-Dest: document" https://<port>-<id>.example.app/`
+   must not answer `302` to its own URL. Then open a terminal and a preview
+   from the dashboard.
 
 What changes once it runs:
 

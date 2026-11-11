@@ -149,17 +149,18 @@ func TestPortalSendsPathFormNavigationsToTheHostForm(t *testing.T) {
 // The portal names the host the visitor used, overwriting any the client sent,
 // so the orchestrator does not bounce a rewritten host-form request.
 func TestPortalPreviewProxyNamesTheVisitorsHost(t *testing.T) {
-	var got string
+	var got, gotOwn string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = r.Header.Get("X-Forwarded-Host")
+		got, gotOwn = r.Header.Get("X-Forwarded-Host"), r.Header.Get(proxy.PreviewHostHeader)
 	}))
 	defer up.Close()
 	rp := previewReverseProxy(up.URL)
 	req := httptest.NewRequest(http.MethodGet, "http://x/preview/sb1/8000/", nil)
 	req.Host = "8000-sb1.pilldrops.app"
 	req.Header.Set("X-Forwarded-Host", "forged.example")
+	req.Header.Set(proxy.PreviewHostHeader, "forged.example")
 	rp.ServeHTTP(httptest.NewRecorder(), req)
-	if got != "8000-sb1.pilldrops.app" {
-		t.Fatalf("X-Forwarded-Host = %q, want the visitor's host", got)
+	if got != "8000-sb1.pilldrops.app" || gotOwn != "8000-sb1.pilldrops.app" {
+		t.Fatalf("X-Forwarded-Host = %q, %s = %q, want the visitor's host in both", got, proxy.PreviewHostHeader, gotOwn)
 	}
 }
