@@ -13,9 +13,9 @@ const ENV_LABEL = IS_ADMIN ? 'cluster' : (window.__SANDBOXD__?.runtime ?? 'local
 
 function getInitialTheme(): boolean {
   try {
-    return localStorage.getItem('sandboxd-theme') === 'dark'
+    return localStorage.getItem('sandboxd-theme') !== 'light'
   } catch {
-    return false
+    return true
   }
 }
 
