@@ -74,8 +74,10 @@ make dev          # http://localhost:8080 — dashboard at /dashboard, API docs 
 ```
 
 This development server runs sandbox commands **as your user, without
-isolation**, and only listens on localhost. A fleet of nodes behind a control
-plane is in [deployment](docs/deployment.md).
+isolation**, and only listens on localhost.
+
+A fleet of nodes behind a control plane installs with one command from the CLI,
+`pilldrops cluster apply`; see [deployment](docs/deployment.md).
 
 ### 2. Install an SDK and point it at your server
 

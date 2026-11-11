@@ -122,6 +122,8 @@ anything is sent. Logged out, or against an older server that does not report
     pilldrops metrics <id>
     pilldrops usage
     pilldrops whoami | logout
+    pilldrops cluster example > cluster.toml     # operators: a fleet config to start from
+    pilldrops cluster apply [-f cluster.toml] [--prune]   # install, upgrade or update it over ssh (deployment.md)
 
 ## Raw port forwarding
 

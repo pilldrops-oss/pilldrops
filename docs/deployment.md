@@ -13,6 +13,64 @@ a fresh one; see [SECURITY.md](../SECURITY.md#upgrading-an-existing-fleet).
 
 ---
 
+## One command: `pilldrops cluster apply`
+
+The [CLI](pilldrops-cli.md) (1.9.0 or later) installs a fleet over ssh from one
+config file, and running it again upgrades it or adds nodes. The rest of this
+page is what it sets up, for installing by hand or for knowing what you are
+running.
+
+```bash
+pilldrops cluster example > cluster.toml   # fill in hosts, domain, TLS, admin_email
+pilldrops cluster apply                    # first run takes a few minutes per node
+```
+
+You need:
+
+- Hosts running Ubuntu 24.04 or later on x86_64, reachable with
+  `ssh <host> sudo …` without a password prompt: one control host and at least
+  one node. Nodes with `/dev/kvm` run microVMs, others Docker containers. Each
+  needs an IPv4 address the others can reach (`private_ip`).
+- A domain whose `<domain>` and `*.<domain>` records you can point at the
+  control host, and either a Cloudflare API token for its zone (the wildcard
+  certificate comes from Let's Encrypt over DNS-01) or a wildcard certificate
+  you already have.
+- `ssh` and [`cosign`](https://docs.sigstore.dev/cosign/installation/) on the
+  machine you run it from, and a release `sandboxd/v1.2.1` or later.
+
+What it does, each step checking before it acts:
+
+1. Generates the secrets once into `cluster.secrets` next to `cluster.toml`
+   (mode 0600). Back that file up: a fleet cannot be recovered without it.
+2. Checks the signature over the release's `SHA256SUMS`; every host checks its
+   downloads, `source.tar.gz` included, against it.
+3. Control host: firewall first (ports 9090 and 5432 reachable only from
+   loopback and the nodes, IPv4 and IPv6), Postgres, the orchestrator as
+   `pilldrops-orchestrator.service`, the console's administrator (`admin_email`
+   with `ADMIN_PASSWORD` from the secrets, created before the domain is public),
+   then Caddy with the wildcard certificate and on-demand TLS for customer
+   domains.
+4. Waits for `https://<domain>/health`, printing the two DNS records to create.
+5. Each node: provisions it for its runtime, opens port 18080 to the control
+   host only, joins with a one-time token, and sets the preview domain.
+6. Waits until every node reports healthy.
+
+Running it again changes only what differs. A node already in the fleet is
+not joined again. A new `version` upgrades the control host, then each node in
+turn: cordoned, binaries swapped, restarted (its sandboxes are paused and
+resumed), uncordoned once it reports the new version. A node removed from
+`cluster.toml` is only named; `pilldrops cluster apply --prune` drains it,
+moving its sandboxes to other nodes, and removes it, or stops if any could not
+move.
+
+Not covered yet: object storage (so a paused sandbox does not survive losing
+its node), raw port forwarding, more than one orchestrator, and a release that
+changes the Firecracker or kernel pins (re-run `scripts/provision-node.sh` on
+each node). A Docker node needs a disk that can cap each container's storage;
+see *Host setup, per node*.
+
+---
+
 ## The shape
 
 ```
