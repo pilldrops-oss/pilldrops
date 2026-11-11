@@ -13,7 +13,8 @@ This page is how you satisfy yourself it is the binary this repository built.
 | `orchestrator-linux-amd64` | the control plane: schedules sandboxes across nodes, serves the API and dashboard. See [deployment](deployment.md) |
 | `pilldrops-join-linux-amd64` | joins a host to a fleet by redeeming a one-time join token |
 | `pilldrops-linux-amd64` | the CLI, built from pilldrops-cli at the time of the release. `install/get.sh` installs it on the host and inside sandboxes |
-| `SHA256SUMS` | hashes of the six binaries |
+| `source.tar.gz` | the source at the tag. `install/get.sh` and `pilldrops cluster apply` run its provisioning scripts as root, so it is checked like the binaries instead of fetched from the tag archive |
+| `SHA256SUMS` | hashes of the six binaries and `source.tar.gz` |
 | `SHA256SUMS.sig`, `SHA256SUMS.pem` | Sigstore signature and certificate over `SHA256SUMS` |
 | `sbom.spdx.json` | SPDX SBOM of the source tree the binaries were built from |
 

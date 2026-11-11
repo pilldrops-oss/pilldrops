@@ -13,7 +13,7 @@
 #   PILLDROPS_PORT          API and dashboard port (default 8080)
 #   PILLDROPS_DOMAIN        wildcard domain for app previews, e.g. sandbox.example.com
 #   PILLDROPS_RELEASE_BASE  URL of a directory laid out like a release, for
-#                           mirrors and testing; it must also hold source.tar.gz
+#                           mirrors and testing
 set -eu
 
 REPO=pilldrops-oss/pilldrops
@@ -46,27 +46,26 @@ if [ -z "$base" ]; then
     [ -n "$tag" ] || die "could not find the latest release of $REPO"
   fi
   base="https://github.com/$REPO/releases/download/$tag"
-  source_url="https://github.com/$REPO/archive/refs/tags/$tag.tar.gz"
 else
   tag="${PILLDROPS_VERSION:-from $base}"
-  source_url="$base/source.tar.gz"
 fi
 say "installing PillDrops $tag"
 
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
-files="sandboxd-linux-amd64 envd-linux-amd64 pilldrops-linux-amd64"
+# The source carries the provisioning scripts and templates, which run as root,
+# so it is checked like the binaries.
+files="sandboxd-linux-amd64 envd-linux-amd64 pilldrops-linux-amd64 source.tar.gz"
 curl -fsSL "$base/SHA256SUMS" -o "$stage/SHA256SUMS" || die "no SHA256SUMS at $base"
 for f in $files; do
   curl -fsSL "$base/$f" -o "$stage/$f" || die "could not download $f"
-  grep " $f\$" "$stage/SHA256SUMS" >/dev/null || die "$f is not listed in SHA256SUMS"
+  grep " $f\$" "$stage/SHA256SUMS" >/dev/null ||
+    die "$f is not listed in SHA256SUMS; releases before sandboxd/v1.2.1 cannot be installed with this script"
 done
 (cd "$stage" && grep -E " ($(echo "$files" | tr ' ' '|'))\$" SHA256SUMS | sha256sum -c --quiet -) ||
   die "a download does not match SHA256SUMS; nothing was installed"
 say "downloads match SHA256SUMS (check the signature with scripts/verify-release.sh before trusting a release)"
 
-# The provisioning scripts and templates come from the same release's source.
-curl -fsSL "$source_url" -o "$stage/source.tar.gz" || die "could not download the source for $tag"
 rm -rf "$SRC" && mkdir -p "$SRC" "$SRC/bin"
 tar -xzf "$stage/source.tar.gz" -C "$SRC" --strip-components=1
 install -m 0755 "$stage/pilldrops-linux-amd64" "$SRC/bin/pilldrops-linux"

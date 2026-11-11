@@ -51,7 +51,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o "$out/pilldro
 cli_rev=$(git -C "$CLI_REPO" rev-parse --short HEAD)
 (cd "$CLI_REPO" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" \
   -o "$OLDPWD/$out/pilldrops-linux-amd64" ./cmd/pilldrops)
-(cd "$out" && if command -v sha256sum >/dev/null; then sha256sum -- *-linux-amd64; else shasum -a 256 -- *-linux-amd64; fi > SHA256SUMS)
+git archive --format=tar.gz --prefix=pilldrops/ -o "$out/source.tar.gz" HEAD
+(cd "$out" && if command -v sha256sum >/dev/null; then sha256sum -- *-linux-amd64 source.tar.gz; else shasum -a 256 -- *-linux-amd64 source.tar.gz; fi > SHA256SUMS)
 
 if [ -n "${COSIGN_KEY:-}" ]; then
   echo "==> signing SHA256SUMS"
@@ -65,7 +66,7 @@ fi
 ls -l "$out"
 
 [ "$publish" = --publish ] || { echo; echo "built in $out; run again with --publish to create the release"; exit 0; }
-assets=("$out"/*-linux-amd64 "$out/SHA256SUMS" "$out/SHA256SUMS.sig")
+assets=("$out"/*-linux-amd64 "$out/source.tar.gz" "$out/SHA256SUMS" "$out/SHA256SUMS.sig")
 [ -f "$out/sbom.spdx.json" ] && assets+=("$out/sbom.spdx.json")
 git push origin "$tag"
 gh release create "$tag" "${assets[@]}" --repo pilldrops-oss/pilldrops --title "sandboxd ${version}" --notes \
