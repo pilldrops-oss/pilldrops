@@ -734,6 +734,7 @@ func previewReverseProxy(orchURL string) http.Handler {
 		// Overwritten, not passed through: it is how the orchestrator tells a
 		// preview host rewritten here from the path form a browser opened.
 		req.Header.Set("X-Forwarded-Host", req.Host)
+		req.Header.Set(proxy.PreviewHostHeader, req.Host)
 		req.Host = base.Host
 	}
 	rp.ModifyResponse = previewErrorIntercept
