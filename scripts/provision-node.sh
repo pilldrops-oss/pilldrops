@@ -25,7 +25,7 @@
 # Env (defaults shown):
 #   FC_VERSION=v1.17.0            firecracker/jailer release (see the pin note below)
 #   FC_KERNEL_VERSION=5.10.223    guest kernel (see the pin note below)
-#   GO_VERSION=1.26.10            must satisfy go.mod
+#   GO_VERSION=1.26.11            must satisfy go.mod
 #   KERNEL_PATH=/var/lib/sandbox/vmlinux
 #   SNAPSHOT_DIR=/var/lib/sandbox/templates
 #   OVERLAY_DIR=/var/lib/sandbox/overlays
@@ -56,7 +56,7 @@ trap '_on_err $LINENO' ERR
 # snapshots rebuild themselves.
 FC_VERSION="${FC_VERSION:-v1.17.0}"
 FC_KERNEL_VERSION="${FC_KERNEL_VERSION:-5.10.223}"
-GO_VERSION="${GO_VERSION:-1.26.10}"
+GO_VERSION="${GO_VERSION:-1.26.11}"
 KERNEL_PATH="${KERNEL_PATH:-/var/lib/sandbox/vmlinux}"
 SNAPSHOT_DIR="${SNAPSHOT_DIR:-/var/lib/sandbox/templates}"
 OVERLAY_DIR="${OVERLAY_DIR:-/var/lib/sandbox/overlays}"
@@ -82,9 +82,9 @@ KERNEL_SHA256_x86_64="22847375721aceea63d934c28f2dfce4670b6f52ec904fae19f5145a97
 KERNEL_SHA256_aarch64="eb5d95ac8a67f7a86acf0cb35625633713ad5170b56de8617808d0e18bb832ec"
 # Go tarball checksums as published by go.dev/dl.
 # shellcheck disable=SC2034
-GO_SHA256_x86_64="ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5"
+GO_SHA256_x86_64="9849f4e04ee35303714e34fbc3ac8ab44ea3e448a95aa182f91e3b9b79c710ec"
 # shellcheck disable=SC2034
-GO_SHA256_aarch64="3f4227ce7b206a513e794f1393adb473a07b46e94d18bd15d1c684bbb7319797"
+GO_SHA256_aarch64="6c2f29b458b5add0835f18b776f69c8881a6d88428f1484a6da55755e620757e"
 
 log() { echo "── $*"; }
 
