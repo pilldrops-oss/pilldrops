@@ -30,10 +30,12 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 	s.proxyToNode(rec, r, http.MethodGet, r.URL.Path)
 	var cat []map[string]any
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &cat) != nil {
-		maps.Copy(w.Header(), rec.Header())
-		w.WriteHeader(rec.Code)
-		_, _ = w.Write(rec.Body.Bytes()) //nolint:errcheck // best-effort: headers are committed
-		return
+		if cat = s.compiledCatalog(r.Context(), rec.Code); cat == nil {
+			maps.Copy(w.Header(), rec.Header())
+			w.WriteHeader(rec.Code)
+			_, _ = w.Write(rec.Body.Bytes()) //nolint:errcheck // best-effort: headers are committed
+			return
+		}
 	}
 	now := s.now()
 	// An older node lists internal templates; they never reach a tenant.
@@ -53,6 +55,35 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 		listed = append(listed, t)
 	}
 	writeJSON(w, http.StatusOK, listed)
+}
+
+// compiledCatalog stands in when no node answered; nil without the store, which holds what the admin unpublished.
+func (s *Server) compiledCatalog(ctx context.Context, code int) []map[string]any {
+	st := s.st.Load()
+	if st == nil || (code != http.StatusServiceUnavailable && code != http.StatusBadGateway) {
+		return nil
+	}
+	flags, err := st.GetImageFlags(ctx)
+	if err != nil {
+		s.log().Warn("could not read image flags", "component", "templates", "err", err)
+		return nil
+	}
+	published := make([]templates.Template, 0, len(templates.Listed()))
+	for _, t := range templates.Listed() {
+		if f, ok := flags[t.ID]; ok && f.Published != nil && !*f.Published {
+			continue
+		}
+		published = append(published, t)
+	}
+	raw, err := json.Marshal(published)
+	if err != nil {
+		return nil
+	}
+	var cat []map[string]any
+	if json.Unmarshal(raw, &cat) != nil {
+		return nil
+	}
+	return cat
 }
 
 // customTemplates is what the caller's org built, which no node's catalogue
