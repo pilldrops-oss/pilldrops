@@ -105,7 +105,8 @@ describe('SandboxDetail tabs and fork', () => {
   it('names a fork after the sandbox it came from', async () => {
     const fork = vi.spyOn(api, 'forkSandbox').mockResolvedValue({ id: 'sb2' } as never)
     renderPage()
-    await userEvent.click(await screen.findByRole('button', { name: 'Fork' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'More actions' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Fork' }))
     await waitFor(() => expect(fork).toHaveBeenCalledWith('sb1', 'my-app-fork'))
   })
 })

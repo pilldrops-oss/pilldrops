@@ -74,13 +74,27 @@ describe('PreviewTab port detection', () => {
     expect(screen.getByLabelText(/preview port/i)).toBeInTheDocument()
   })
 
+  it('says nothing is serving on a probed port that did not answer, instead of framing an error page', async () => {
+    getPortsMock.mockResolvedValue(portsResp([{ port: 8000, listening: false }]))
+    const openTerminal = vi.fn()
+    const { container } = render(
+      <PreviewTab id="sb1" status="running" defaultPort={8000} publicPreview={false} onOpenTerminal={openTerminal} />,
+    )
+
+    expect(await screen.findByText('Nothing to preview yet')).toBeInTheDocument()
+    expect(screen.getByText(/token only/)).toBeInTheDocument()
+    expect(container.querySelector('iframe')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Open terminal' }))
+    expect(openTerminal).toHaveBeenCalled()
+  })
+
   // Detection probes a fixed candidate list, not the socket table.
   it('labels detected ports as a hint rather than a guarantee', async () => {
     getPortsMock.mockResolvedValue(portsResp([{ port: 3000, listening: true }]))
     render(<PreviewTab id="sb1" status="running" defaultPort={8000} />)
 
     await screen.findByRole('button', { name: /3000/ })
-    expect(screen.getByText(/unusual port|not exhaustive|common ports/i)).toBeInTheDocument()
+    expect(screen.getByTitle(/unusual port|not exhaustive|common ports/i)).toBeInTheDocument()
   })
 
   it('still works when detection finds nothing — no chips, manual/default port still drives the preview', async () => {

@@ -56,14 +56,16 @@ describe('sandbox detail success toasts (B22 toasts item)', () => {
   it('shows a success toast after pausing', async () => {
     vi.mocked(api.pauseSandbox).mockResolvedValue({ status: 'paused' } as never)
     renderPage()
-    await userEvent.click(await screen.findByRole('button', { name: 'Pause' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'More actions' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Pause' }))
     expect(await screen.findByText('Paused')).toBeInTheDocument()
   })
 
   it('shows a success toast after refreshing the TTL', async () => {
     vi.mocked(api.refreshSandbox).mockResolvedValue({ status: 'running' } as never)
     renderPage()
-    await userEvent.click(await screen.findByRole('button', { name: 'Refresh TTL' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'More actions' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh TTL' }))
     expect(await screen.findByText('TTL refreshed')).toBeInTheDocument()
   })
 

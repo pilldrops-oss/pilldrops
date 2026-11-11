@@ -206,6 +206,11 @@ button { font-family: var(--sans); }
 }
 
 .side .foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--line); }
+.side-new { width: 100%; justify-content: center; margin: 4px 0 14px; flex: none; }
+.side .foot select.btn { width: 100%; margin-bottom: 10px; }
+.side-acct { display: flex; justify-content: space-between; margin-top: 8px; }
+.side-acct button { background: none; border: none; padding: 4px 6px; font-family: var(--sans); font-size: 12.5px; color: var(--sub); cursor: pointer; }
+.side-acct button:hover { color: var(--ink); }
 
 .upsell {
   border: 1px solid var(--line);
@@ -276,33 +281,10 @@ button { font-family: var(--sans); }
 
 .tr { display: flex; align-items: center; gap: 10px; }
 
-.toggle {
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
-  color: var(--sub);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  transition: background 0.15s, color 0.15s;
-}
-.toggle:hover { background: var(--hover); color: var(--ink); }
-
-.env {
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 6px 11px;
-  font-size: 12.5px;
-  color: var(--sub);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-family: var(--mono);
-}
+/* A page fills the slot with its own title and actions, replacing the breadcrumb. */
+.top-slot { display: contents; }
+.top-left:has(+ .top-slot:not(:empty)) .bc { display: none; }
+.top .detail-title { margin-left: 12px; }
 
 .btn {
   border: 1px solid var(--line2);
@@ -737,7 +719,7 @@ body.dark .callout.error { border-color: rgba(220,38,38,0.3); background: rgba(2
 
 /* ── Sandbox Detail ──────────────────────────────────────────────────────── */
 .detail-wrap {
-  padding: 28px 32px 50px;
+  padding: 22px 32px 50px;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -768,26 +750,36 @@ body.dark .callout.error { border-color: rgba(220,38,38,0.3); background: rgba(2
   text-decoration: none;
 }
 .back-link:hover { color: var(--ink); }
+.bc .back-link { font-size: inherit; }
 
 .detail-title {
   display: flex;
   align-items: center;
   gap: 12px;
   flex: 1;
+  min-width: 0;
 }
 
 .detail-name {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: -0.4px;
+  letter-spacing: -0.2px;
 }
 
 .detail-id {
   font-family: var(--mono);
   font-size: 12px;
   color: var(--dim);
-  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
+
+.icon-btn { background: none; border: none; padding: 2px; color: var(--dim); cursor: pointer; display: inline-flex; }
+.icon-btn:hover { color: var(--ink); }
+.icon-btn:disabled { opacity: 0.4; cursor: default; }
+.icon-btn svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; }
 
 .detail-actions {
   display: flex;
@@ -795,7 +787,13 @@ body.dark .callout.error { border-color: rgba(220,38,38,0.3); background: rgba(2
   gap: 8px;
   flex-wrap: wrap;
 }
-.detail-access { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--sub); white-space: nowrap; }
+.detail-actions .btn.more { padding: 0; width: 38px; justify-content: center; font-size: 18px; line-height: 1; }
+.detail-menu { min-width: 200px; padding: 6px; }
+.detail-menu button { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 7px; font-size: 13.5px; font-weight: 500; justify-content: flex-start; }
+.detail-menu button:disabled { opacity: 0.5; cursor: default; }
+.detail-menu svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; color: var(--dim); flex: none; }
+.detail-menu button.danger svg { color: inherit; }
+.detail-menu hr { border: none; border-top: 1px solid var(--line); margin: 6px 4px; }
 
 /* ── Metrics strip ───────────────────────────────────────────────────────── */
 .metrics-strip {
@@ -808,9 +806,11 @@ body.dark .callout.error { border-color: rgba(220,38,38,0.3); background: rgba(2
   gap: 0;
   border: 1px solid var(--line);
   border-radius: var(--r);
-  background: var(--bg2);
-  margin-bottom: 16px;
+  background: var(--surface);
+  box-shadow: var(--cardsh);
+  margin-bottom: 22px;
   overflow: hidden;
+  flex: none;
 }
 
 /* Sandbox header metrics. Namespaced sbmetric- deliberately: `.metric` already
@@ -820,32 +820,38 @@ body.dark .callout.error { border-color: rgba(220,38,38,0.3); background: rgba(2
 .sbmetric {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 10px 18px;
+  gap: 5px;
+  padding: 12px 18px 13px;
+  position: relative;
   border-right: 1px solid var(--line);
   /* Share the row evenly. With only min-width, the LAST cell absorbed all the
      slack — uptime took nearly half the strip while CPU sat at 90px, which
      read as broken rather than as a designed layout. */
   flex: 1 1 0;
-  min-width: 90px;
+  min-width: 140px;
 }
 .sbmetric:last-child { border-right: none; }
 
-.sbmetric-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--dim);
-}
+.sbmetric-label { font-size: 11.5px; color: var(--sub); display: flex; align-items: center; gap: 7px; }
+.sbmetric-row { display: flex; align-items: center; gap: 12px; min-height: 24px; }
 
-.sbmetric-value {
-  font-family: var(--mono);
-  font-size: 14px;
-  color: var(--ink);
-}
+.sbmetric-value { font-size: 13px; color: var(--dim); white-space: nowrap; }
+.sbmetric-value b { font-family: var(--mono); font-size: 15px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+.sbmetric-value small { font-size: 11.5px; }
+
+/* Named sbspark because .metric .spark belongs to the overview stat cards. */
+.sbspark { flex: 1; min-width: 40px; max-width: 90px; height: 22px; margin-left: auto; overflow: visible; color: var(--green); }
+.sbspark .l { fill: none; stroke: currentColor; stroke-width: 1.6; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.sbspark .a { fill: currentColor; opacity: 0.12; }
+
+.sbmeter { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; }
+.sbmeter span { display: block; height: 100%; border-radius: 0 2px 2px 0; background: var(--green); transition: width 0.6s; }
+.sbmeter.ttl span { background: var(--slate); }
+
+.sbmetric .sel { border: none; background-color: transparent; padding: 0 22px 0 0; font-family: var(--sans); font-size: 14px; font-weight: 500; width: 100%; min-height: 24px; }
 
 .sbmetric-warn { background: rgba(220, 38, 38, 0.06); }
-.sbmetric-warn .sbmetric-value { color: #dc2626; }
+.sbmetric-warn .sbmetric-value b, .sbmetric-warn .sbspark { color: #dc2626; }
 
 .sbmetric-warning {
   font-size: 11px;
@@ -863,8 +869,8 @@ body.dark .callout.error { border-color: rgba(220,38,38,0.3); background: rgba(2
 }
 
 .tab-item {
-  padding: 9px 18px;
-  font-size: 13.5px;
+  padding: 10px 16px 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--sub);
   cursor: pointer;
@@ -1290,51 +1296,11 @@ body.dark .term-stderr {
    editor reflows at the same point as the rest of the page. */
 
 /* ── Preview tab ─────────────────────────────────────────────────────────── */
-.preview-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-  min-height: 0;
-}
-
 .preview-toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: none;
-}
-
-.preview-port-input {
-  background: var(--surface);
-  border: 1px solid var(--line2);
-  border-radius: 9px;
-  padding: 8px 12px;
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--ink);
-  outline: none;
-  width: 110px;
-  transition: border-color 0.15s;
-}
-.preview-port-input:focus { border-color: var(--ink); }
-
-.preview-detected-ports {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: none;
-}
-
-.preview-detected-label {
-  font-size: 11.5px;
-  color: var(--dim);
-}
-
-.preview-port-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
 }
 
 /* Matches the house .chip geometry (7px radius, --bg2 on --line, 3px 10px).
@@ -1357,15 +1323,48 @@ body.dark .term-stderr {
 .port-chip:disabled { opacity: 0.45; cursor: not-allowed; }
 .port-chip:disabled:hover { color: var(--sub); border-color: var(--line); }
 
-.preview-frame-wrap {
-  flex: 1;
-  min-height: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
-  background: var(--bg2);
-  position: relative;
-}
+.pvpanel { flex: 1; display: flex; flex-direction: column; min-height: 420px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--cardsh); }
+.pvbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.pvbar .icon-btn { width: 34px; height: 34px; align-items: center; justify-content: center; border-radius: 8px; color: var(--sub); flex: none; }
+.pvbar .icon-btn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.pvbar .icon-btn svg { width: 15px; height: 15px; }
+.pvbar .btn { min-height: 34px; padding-top: 0; padding-bottom: 0; white-space: nowrap; }
+.pvaddr { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 6px 0 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); font-family: var(--mono); font-size: 12.5px; }
+.pvaddr:focus-within { border-color: var(--ink); }
+.pvaddr .url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.pvport { display: flex; align-items: center; gap: 6px; font-family: var(--sans); font-size: 11.5px; color: var(--dim); border-left: 1px solid var(--line); padding-left: 10px; }
+.pvport input { width: 48px; border: none; outline: none; background: none; font: inherit; font-family: var(--mono); font-size: 12.5px; font-weight: 500; color: var(--ink); padding: 0; -moz-appearance: textfield; }
+.pvport input::-webkit-inner-spin-button { display: none; }
+.pvports { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.pvports-l { font-size: 11.5px; color: var(--dim); margin-right: 2px; }
+.pvbody { flex: 1; display: flex; min-height: 0; background: var(--bg2); }
+.pvbody > * { flex: 1; }
+.pvbody > .pvempty { flex: 0 1 420px; min-width: 0; margin: auto; text-align: center; padding: 40px 20px; }
+.pvempty .btn { display: inline-flex; }
+.pvempty .ic { width: 46px; height: 46px; border: 1px solid var(--line); border-radius: 12px; display: grid; place-items: center; margin: 0 auto 22px; color: var(--sub); }
+.pvempty .ic svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+.pvempty h3 { margin: 0 0 12px; font-size: 17px; font-weight: 600; }
+.pvempty p { margin: 0 0 22px; font-size: 14px; line-height: 1.6; color: var(--sub); }
+.pvempty code { font-family: var(--mono); font-size: 12.5px; background: var(--surface); padding: 2px 6px; border-radius: 5px; color: var(--ink); }
+
+/* Dark in both themes: the log reads as a terminal, like the shell tab beside it. */
+.logpanel { flex: 1; display: flex; flex-direction: column; min-height: 420px; background: #121413; color: #e4e7ea; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(20, 22, 26, 0.16); }
+.logpanel-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid rgba(255, 255, 255, 0.07); font-family: var(--mono); font-size: 12px; }
+.logpanel-head .dot { width: 6px; height: 6px; border-radius: 50%; background: #8a8f96; }
+.logpanel-head .count { color: #8a8f96; }
+.logpanel-head .chk { margin-left: auto; display: flex; align-items: center; gap: 8px; font-family: var(--sans); font-size: 13px; cursor: pointer; }
+.logpanel-head input { accent-color: #0f9b62; width: 15px; height: 15px; }
+.logpanel-body { flex: 1; overflow-y: auto; padding: 14px 18px; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; display: flex; flex-direction: column; }
+.logpanel-line { white-space: pre-wrap; word-break: break-all; }
+.logpanel-note { color: #8a8f96; margin-bottom: 6px; }
+.logpanel-empty { margin: auto; text-align: center; max-width: 460px; padding: 40px 0; }
+.logpanel-empty .ic { width: 48px; height: 48px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; display: grid; place-items: center; margin: 0 auto 22px; color: #a3a9a6; }
+.logpanel-empty h3 { margin: 0 0 14px; font-family: var(--sans); font-size: 17px; font-weight: 600; }
+.logpanel-empty p { margin: 0 0 24px; font-family: var(--sans); font-size: 14px; line-height: 1.6; color: #a3a9a6; }
+.logpanel-empty code { font-family: var(--mono); font-size: 12.5px; color: #e4e7ea; background: rgba(255, 255, 255, 0.08); padding: 2px 6px; border-radius: 5px; }
+.logpanel-empty .cta { display: flex; gap: 10px; justify-content: center; }
+.logpanel .btn { background: transparent; border-color: rgba(255, 255, 255, 0.14); color: #f4f5f2; }
+.logpanel .btn.primary { background: #f4f5f2; border-color: #f4f5f2; color: #08090a; }
 
 .preview-iframe {
   width: 100%;
@@ -3403,6 +3402,7 @@ body.dark .dp-error { border-color: rgba(220, 38, 38, 0.3); background: rgba(220
 /* Hamburger + drawer backdrop are desktop-hidden; the media query below turns
    the fixed 240px sidebar into an off-canvas drawer. */
 .top-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+@media (max-width: 1100px) { .top .detail-id { display: none; } }
 .hamburger { display: none; }
 .side-backdrop { display: none; }
 
@@ -3455,13 +3455,14 @@ body.dark .dp-error { border-color: rgba(220, 38, 38, 0.3); background: rgba(220
   .pricing-menu { grid-template-columns: 1fr; }
   .wrap { padding: 22px 18px 40px; }
   .top { padding: 14px 18px; }
+  .top .detail-title { margin-left: 0; }
+  .top .detail-title .chip, .top .detail-title .back-link, .top .detail-title .sep { display: none; }
+  .top .detail-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
   .detail-wrap { padding: 22px 18px 40px; }
 }
 
 @media (max-width: 560px) {
   .metrics, .usage-metrics { grid-template-columns: 1fr; }
-  /* The env badge is nice-to-have; drop it so the top-bar actions fit. */
-  .top .env { display: none; }
   /* Sandbox table: drop Port + Age columns on very small screens. */
   .rowh, .row { grid-template-columns: 1.5fr 0.9fr 0.7fr 40px; gap: 10px; }
   .rowh > :nth-child(4), .row > :nth-child(4),
