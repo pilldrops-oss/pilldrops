@@ -2,75 +2,75 @@
 :root {
   /* Terminal surface. A shell stays dark in both themes: a light
      terminal fights every tool that emits ANSI colour for a dark one. */
-  --term-bg: #0e1116;
-  --term-fg: #e6e6e6;
-  /* Warm "paper" surface + phosphor-green accent — matches the landing page. */
-  --bg: #fefdfb;
-  --bg2: #f4f1ea;
+  --term-bg: #040505;
+  --term-fg: #e4e7ea;
+  /* Light variant of the pilldrops.com look; dark (body.dark) is the default. */
+  --bg: #f6f6f3;
+  --bg2: #efefea;
   --surface: #ffffff;
-  --surface2: #f7f5ef;
-  --hover: #f4f1ea;
-  --line: rgba(20, 18, 12, 0.13);
-  --line2: rgba(20, 18, 12, 0.26);
+  --surface2: #f6f6f3;
+  --hover: #efefea;
+  --line: rgba(20, 22, 26, 0.09);
+  --line2: rgba(20, 22, 26, 0.18);
   /* subtle card lift so white panels stay crisp on the near-white surface */
-  --cardsh: 0 1px 3px rgba(20, 18, 12, 0.04);
+  --cardsh: 0 1px 3px rgba(20, 22, 26, 0.05);
   /* premium template-icon depth (inset top highlight + soft drop shadow) */
   --icon-hi: rgba(255, 255, 255, 0.65);
-  --icon-sh: rgba(20, 18, 12, 0.09);
-  --ink: #141310;
-  --sub: #565448;
-  --dim: #8b887c;
-  --faint: #c4c1b4;
-  --primbg: #0c8a56;
-  --primfg: #ffffff;
-  --primbg-h: #0a7548;
-  --markbg: #141310;
-  --markfg: #f7f5f0;
-  --green: #0c8a56;
-  --greensoft: rgba(12, 138, 86, 0.09);
-  --greenline: rgba(12, 138, 86, 0.38);
-  /* Secondary accent (paused / "em") → amber, per the landing palette. */
-  --slate: #9a6d10;
-  --slatesoft: rgba(154, 109, 16, 0.09);
-  --slateline: rgba(154, 109, 16, 0.32);
-  --amber: #9a6d10;
-  --chartink: #0c8a56;
-  --gridline: rgba(20, 18, 12, 0.06);
-  --sans: 'Hanken Grotesk', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, monospace;
-  --disp: 'JetBrains Mono', ui-monospace, monospace;
-  --dots: rgba(20, 18, 12, 0.055);
-  --r: 5px;
+  --icon-sh: rgba(20, 22, 26, 0.09);
+  --ink: #0d0f12;
+  --sub: #535860;
+  --dim: #8a8f96;
+  --faint: #c5c8cc;
+  --primbg: #0d0f12;
+  --primfg: #f6f6f3;
+  --primbg-h: #24282d;
+  --markbg: #0d0f12;
+  --markfg: #f6f6f3;
+  --green: #0f9b62;
+  --greensoft: rgba(15, 155, 98, 0.09);
+  --greenline: rgba(15, 155, 98, 0.34);
+  /* Secondary accent (paused / "em") → amber, from the brand spark. */
+  --slate: #a86400;
+  --slatesoft: rgba(168, 100, 0, 0.09);
+  --slateline: rgba(168, 100, 0, 0.3);
+  --amber: #a86400;
+  --chartink: #0f9b62;
+  --gridline: rgba(20, 22, 26, 0.06);
+  --sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, Menlo, monospace;
+  --disp: 'Funnel Display', ui-sans-serif, system-ui, sans-serif;
+  --dots: rgba(20, 22, 26, 0.05);
+  --r: 10px;
 }
 
 body.dark {
-  /* Warm-dark "coal" variant + brighter phosphor — the landing's dark mode. */
-  --bg: #131210;
-  --bg2: #1a1815;
-  --surface: #1a1815;
-  --surface2: #211f1a;
-  --hover: #211f1a;
-  --line: rgba(244, 240, 230, 0.12);
-  --line2: rgba(244, 240, 230, 0.26);
-  --ink: #f4f1e8;
-  --sub: #a8a294;
-  --dim: #7a7567;
-  --faint: #4a463c;
-  --primbg: #35c98a;
-  --primfg: #131210;
-  --primbg-h: #2fb87e;
-  --markbg: #f4f1e8;
-  --markfg: #131210;
-  --green: #35c98a;
-  --greensoft: rgba(53, 201, 138, 0.11);
-  --greenline: rgba(53, 201, 138, 0.34);
+  /* The pilldrops.com look: near-black, white primary, phosphor green. */
+  --bg: #060708;
+  --bg2: #0b0d0f;
+  --surface: #0f1114;
+  --surface2: #14171b;
+  --hover: #14171b;
+  --line: rgba(255, 255, 255, 0.07);
+  --line2: rgba(255, 255, 255, 0.13);
+  --ink: #f4f5f2;
+  --sub: #a3a9a6;
+  --dim: #646a68;
+  --faint: #3a3f3d;
+  --primbg: #f4f5f2;
+  --primfg: #08090a;
+  --primbg-h: #ffffff;
+  --markbg: #f4f5f2;
+  --markfg: #060708;
+  --green: #3ecf8e;
+  --greensoft: rgba(62, 207, 142, 0.11);
+  --greenline: rgba(62, 207, 142, 0.35);
   --slate: #ffb03a;
   --slatesoft: rgba(255, 176, 58, 0.11);
   --slateline: rgba(255, 176, 58, 0.30);
   --amber: #ffb03a;
-  --chartink: #35c98a;
-  --gridline: rgba(244, 240, 230, 0.05);
-  --dots: rgba(244, 240, 230, 0.06);
+  --chartink: #3ecf8e;
+  --gridline: rgba(255, 255, 255, 0.05);
+  --dots: rgba(255, 255, 255, 0.05);
   --cardsh: none;
   --icon-hi: rgba(255, 255, 255, 0.07);
   --icon-sh: rgba(0, 0, 0, 0.35);
@@ -92,7 +92,7 @@ body {
 }
 
 /* Editorial display type: page titles, panel headers and big metric numbers use
-   the mono display face (JetBrains Mono), matching the landing page. */
+   the display face (Funnel Display), matching the landing page. */
 .h1, .ph h2, .ph h3, .metric .v, .section-head h2, .bill-balance, .est-total .amt {
   font-family: var(--disp);
   letter-spacing: -0.02em;
