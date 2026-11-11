@@ -227,6 +227,11 @@ export function PreviewTab({
 
   const listening = (detected ?? []).filter(p => p.listening)
 
+  function chipTitle(p: PortStatus) {
+    if (p.loopback_only) return 'Listens on 127.0.0.1 only, so a preview cannot reach it. Bind 0.0.0.0 to open it.'
+    return p.port === defaultPort ? 'Declared preview port' : undefined
+  }
+
   function choosePort(p: number) {
     const s = String(p)
     setPort(s)
@@ -305,7 +310,8 @@ export function PreviewTab({
                 type="button"
                 className={`port-chip${String(p.port) === activePort ? ' active' : ''}`}
                 onClick={() => choosePort(p.port)}
-                title={p.port === defaultPort ? 'Declared preview port' : undefined}
+                disabled={p.loopback_only}
+                title={chipTitle(p)}
               >
                 {p.port}{p.port === defaultPort ? ' ★' : ''}
               </button>

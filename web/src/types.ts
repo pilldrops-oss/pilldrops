@@ -653,6 +653,8 @@ export interface SandboxMetrics {
 export interface PortStatus {
   port: number
   listening: boolean
+  /** Bound to 127.0.0.1 only, so a preview link cannot reach it. */
+  loopback_only?: boolean
 }
 
 export interface SandboxPorts {

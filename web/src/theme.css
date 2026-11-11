@@ -1354,6 +1354,8 @@ body.dark .term-stderr {
 }
 .port-chip:hover { color: var(--ink); border-color: var(--dim); }
 .port-chip.active { color: var(--ink); border-color: var(--ink); font-weight: 600; }
+.port-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+.port-chip:disabled:hover { color: var(--sub); border-color: var(--line); }
 
 .preview-frame-wrap {
   flex: 1;
