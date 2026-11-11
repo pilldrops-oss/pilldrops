@@ -55,6 +55,17 @@ describe('PreviewTab port detection', () => {
     expect(iframe?.getAttribute('src')).toContain('https://3000-sb1')
   })
 
+  it('disables a port that listens on loopback only and says why', async () => {
+    getPortsMock.mockResolvedValue(portsResp([{ port: 9222, listening: true, loopback_only: true }]))
+    const { container } = render(<PreviewTab id="sb1" status="running" defaultPort={8000} />)
+
+    const chip = await screen.findByRole('button', { name: /9222/ })
+    expect(chip).toBeDisabled()
+    expect(chip).toHaveAttribute('title', expect.stringMatching(/127\.0\.0\.1/))
+    await userEvent.click(chip)
+    expect(container.querySelector('iframe')?.getAttribute('src')).toContain('https://8000-sb1')
+  })
+
   it('keeps the manual port input as a fallback alongside detected chips', async () => {
     getPortsMock.mockResolvedValue(portsResp([{ port: 3000, listening: true }]))
     render(<PreviewTab id="sb1" status="running" defaultPort={8000} />)
