@@ -11,6 +11,7 @@ import (
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
+	"github.com/pilldrops-oss/pilldrops/internal/templates"
 )
 
 // S1 made /v1/nodes operator-only, so a tenant could no longer tell which
@@ -175,6 +176,51 @@ func TestTenantCataloguesHideSnapshotTemplatesFromAnyNode(t *testing.T) {
 		}
 		if strings.Contains(string(body), snap) {
 			t.Errorf("%s relayed the snapshot template: %s", path, body)
+		}
+	}
+}
+
+// With the only node down the Templates page showed "no healthy node" and nothing else.
+func TestTemplatesAreListedWithNoNodeOnline(t *testing.T) {
+	st, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "tpl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	_, member, err := st.CreateKey(t.Context(), "m", "org-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden := templates.Listed()[0].ID
+	off := false
+	if _, err := st.SetImageFlags(t.Context(), hidden, store.ImageFlags{Published: &off}); err != nil {
+		t.Fatal(err)
+	}
+	s := fleetServer("apikey", "nodetoken")
+	s.SetStore(st)
+	orch := httptest.NewServer(s.Routes())
+	t.Cleanup(orch.Close)
+
+	req, _ := http.NewRequest(http.MethodGet, orch.URL+"/v1/templates", nil)
+	req.Header.Set("Authorization", "Bearer "+member)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var cat []map[string]any
+	if resp.StatusCode != 200 || json.NewDecoder(resp.Body).Decode(&cat) != nil {
+		t.Fatalf("templates = %d, want the catalogue", resp.StatusCode)
+	}
+	if want := len(templates.Listed()) - 1; len(cat) != want {
+		t.Errorf("got %d templates, want the %d published", len(cat), want)
+	}
+	for _, tpl := range cat {
+		if tpl["id"] == hidden {
+			t.Errorf("%s is unpublished and was listed", hidden)
+		}
+		if tpl["available"] != false {
+			t.Errorf("%s: available = %v with no node online", tpl["id"], tpl["available"])
 		}
 	}
 }
