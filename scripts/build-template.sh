@@ -38,6 +38,7 @@ docker build -t "sandbox-${TEMPLATE}" "${TEMPLATE_DIR}"
 # the image is to hold a real X server — Xvfb pulls libgl1 for GLX, which pulls
 # libgl1-mesa-dri + libllvm15 (159 MB of software-GL), and fluxbox pulls
 # libimlib2 with its Ghostscript/poppler/x265 loaders (76 MB).
+# USER root: a base image may leave a user that cannot run apt-get.
 # PD_NO_DESKTOP=1 skips it for an image apt cannot extend; has_desktop then
 # lies for that template, which is what the verify-templates.sh probe catches.
 if [ "${PD_NO_DESKTOP:-0}" != 1 ]; then
@@ -45,6 +46,7 @@ if [ "${PD_NO_DESKTOP:-0}" != 1 ]; then
     DESKTOP_LAYER=$(cat internal/runtime/docker/desktop-layer.dockerfile)
     if ! docker build -t "sandbox-${TEMPLATE}" - <<DESKTOPEOF
 FROM sandbox-${TEMPLATE}
+USER root
 ${DESKTOP_LAYER}
 DESKTOPEOF
     then
