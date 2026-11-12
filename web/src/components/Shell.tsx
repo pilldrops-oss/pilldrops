@@ -9,8 +9,6 @@ import { clearThread } from '../lib/threadStore'
 const MODE = window.__SANDBOXD__?.mode ?? 'user'
 const IS_ADMIN = MODE === 'admin'
 
-const ENV_LABEL = IS_ADMIN ? 'cluster' : (window.__SANDBOXD__?.runtime ?? 'local')
-
 function getInitialTheme(): boolean {
   try {
     return localStorage.getItem('sandboxd-theme') !== 'light'
@@ -22,6 +20,7 @@ function getInitialTheme(): boolean {
 export default function Shell() {
   const [dark, setDark] = useState(getInitialTheme)
   const [mobileNav, setMobileNav] = useState(false)
+  const [topSlot, setTopSlot] = useState<HTMLDivElement | null>(null)
   const navigate = useNavigate()
   const loc = useLocation()
   // The console is served in user mode; an operator key still gets the admin pages.
@@ -56,6 +55,13 @@ export default function Shell() {
           </div>
         </div>
 
+        <button
+          className="btn primary side-new"
+          onClick={() => { clearThread(); navigate(IS_ADMIN ? '/add-node' : '/deploy') }}
+        >
+          {IS_ADMIN ? '＋ Add node' : '＋ New sandbox'}
+        </button>
+
         {IS_ADMIN ? <AdminNav /> : (
           <>
             <UserNav />
@@ -64,24 +70,34 @@ export default function Shell() {
         )}
 
         <div className="foot">
-          <div className="rt">
+          <div className="rt" title="Where your sandboxes run">
             <span className="d" />
             runtime · {window.__SANDBOXD__?.runtime ?? 'process'} · v1.0
+          </div>
+          <div className="side-acct">
+            <button type="button" onClick={toggleTheme} title="Toggle theme" aria-label="Toggle dark mode">
+              ◐ Theme
+            </button>
+            <form method="post" action="/dashboard/logout">
+              <button type="submit">Sign out</button>
+            </form>
           </div>
         </div>
       </aside>
 
       <main className="main">
-        <TopBar
-          dark={dark}
-          onToggle={toggleTheme}
-          onDeploy={() => navigate(IS_ADMIN ? '/add-node' : '/deploy')}
-          onOpenNav={() => setMobileNav(true)}
-            onNew={() => { clearThread(); navigate(IS_ADMIN ? '/add-node' : '/deploy'); }}
-        />
+        <div className="top">
+          <div className="top-left">
+            <button className="hamburger" onClick={() => setMobileNav(true)} aria-label="Open navigation menu">
+              <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+            </button>
+            <Breadcrumb />
+          </div>
+          <div className="top-slot" ref={setTopSlot} />
+        </div>
         <ErrorBoundary resetKey={loc.pathname}>
           <Suspense fallback={<div className="wrap"><RowsSkeleton rows={6} /></div>}>
-            <Outlet />
+            <Outlet context={topSlot} />
           </Suspense>
         </ErrorBoundary>
       </main>
@@ -255,51 +271,6 @@ function AdminNav() {
         </NavLink>
       </nav>
     </>
-  )
-}
-
-interface TopBarProps {
-  dark: boolean
-  onToggle: () => void
-  onDeploy: () => void
-  onOpenNav: () => void
-  onNew: () => void
-}
-
-function TopBar({ onToggle, onDeploy, onOpenNav, onNew }: TopBarProps) {
-  return (
-    <div className="top">
-      <div className="top-left">
-        <button className="hamburger" onClick={onOpenNav} aria-label="Open navigation menu">
-          <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
-        </button>
-        <Breadcrumb />
-      </div>
-      <div className="tr">
-        <button className="toggle" onClick={onToggle} title="Toggle theme" aria-label="Toggle dark mode">
-          ◐
-        </button>
-        <span className="env" title="Where your sandboxes run">
-          <span className="d" />
-          {ENV_LABEL}
-        </span>
-        {IS_ADMIN ? (
-          <button className="btn primary" onClick={onDeploy}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            Add Node
-          </button>
-        ) : (
-          <button className="btn" onClick={onNew}>
-            ＋ New
-          </button>
-        )}
-        <form method="post" action="/dashboard/logout">
-          <button className="btn" type="submit">Sign out</button>
-        </form>
-      </div>
-    </div>
   )
 }
 

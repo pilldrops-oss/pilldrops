@@ -52,7 +52,7 @@ describe('playwright report and logs (UC4)', () => {
     render(<LogsTab id="sb1" />)
     expect(await screen.findByText('RED done')).toBeInTheDocument()
     expect(screen.getByText('plain')).toBeInTheDocument()
-    const toggle = screen.getByRole('checkbox', { name: /auto-scroll/ })
+    const toggle = screen.getByRole('checkbox', { name: /auto-scroll/i })
     expect(toggle).toBeChecked()
     await userEvent.click(toggle)
     await waitFor(() => expect(toggle).not.toBeChecked())

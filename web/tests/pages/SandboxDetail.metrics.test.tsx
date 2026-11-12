@@ -100,6 +100,12 @@ describe('MetricsStrip', () => {
     expect(getMetricsMock).not.toHaveBeenCalled()
   })
 
+  it('keeps the access controls it was handed when the sandbox is paused', () => {
+    render(<MetricsStrip id="sb1" status="paused"><label>API access<select /></label></MetricsStrip>)
+    expect(screen.getByRole('combobox', { name: 'API access' })).toBeInTheDocument()
+    expect(screen.queryByTestId('metric-uptime')).toBeNull()
+  })
+
   it('stops polling once unmounted', async () => {
     getMetricsMock.mockResolvedValue(metrics())
     const { unmount } = render(<MetricsStrip id="sb1" status="running" />)
