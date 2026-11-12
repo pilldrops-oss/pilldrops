@@ -80,7 +80,7 @@ function HistoryRow({ rec }: { rec: HistoryRecord }) {
         }}>{badge.label}</span>
 
         <div className="hist-id">
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{rec.template || rec.image || 'sandbox'}</span>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>{rec.slug || rec.template || rec.image || 'sandbox'}</span>
           <span style={{ fontSize: 12, color: 'var(--dim)', fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {rec.id}
           </span>

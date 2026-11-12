@@ -591,6 +591,8 @@ export interface AdminSessions {
 export interface HistoryRecord {
   id: string
   org_id: string
+  /** The name the sandbox answered to while it ran, when it had one. */
+  slug?: string
   owner?: string
   template: string
   image?: string
