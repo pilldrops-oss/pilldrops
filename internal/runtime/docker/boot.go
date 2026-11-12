@@ -152,6 +152,10 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 			cmd = []string{"sh", "-c", handover + startIfPresent + "exec sleep infinity"}
 		}
 	}
+	serviceTerminal := service && fileExists(envdHostPath())
+	if serviceTerminal {
+		base = append(base, "-v", envdHostPath()+":/usr/local/bin/envd:ro")
+	}
 	// Some storage drivers reject --storage-opt size; retried without it below.
 	runArgs := append([]string{}, base...)
 	if spec.StorageMB > 0 {
@@ -204,7 +208,7 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 	}
 	// The terminal port is best-effort; the sandbox boots without it.
 	termHost, _ := mappedPort(ctx, cid, terminalPort)
-	return &dockerInstance{
+	inst := &dockerInstance{
 		id: spec.SandboxID, cid: cid, host: host, termHost: termHost,
 		envdToken: envdToken,
 		vcpu:      spec.VCPU, memMiB: spec.MemMiB, service: service, runUser: runUser,
@@ -212,7 +216,11 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 		eng:     r.eng,
 		primary: primary,
 		ports:   map[int]string{primary: host},
-	}, nil
+	}
+	if serviceTerminal {
+		inst.startServiceTerminal(ctx)
+	}
+	return inst, nil
 }
 
 // hostHasIPv6 reports whether this kernel has an IPv6 stack. Not cached: the

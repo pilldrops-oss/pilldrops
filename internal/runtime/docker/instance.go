@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pilldrops-oss/pilldrops/internal/auth/sbtoken"
 	"github.com/pilldrops-oss/pilldrops/internal/envdproto"
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
@@ -357,11 +358,28 @@ func (i *dockerInstance) Revive(ctx context.Context) (rt.Instance, error) {
 	}
 	host, _ := mappedPort(ctx, i.cid, i.primary)
 	termHost, _ := mappedPort(ctx, i.cid, terminalPort)
-	return &dockerInstance{
+	revived := &dockerInstance{
 		id: i.id, cid: i.cid, host: host, termHost: termHost, envdToken: i.envdToken,
 		vcpu: i.vcpu, memMiB: i.memMiB, service: i.service, runUser: i.runUser,
 		start: time.Now(), eng: i.eng, primary: i.primary, ports: map[int]string{i.primary: host},
-	}, nil
+	}
+	if i.service && i.envdToken != "" {
+		revived.startServiceTerminal(ctx)
+	}
+	return revived, nil
+}
+
+// startServiceTerminal runs envd beside a service's own entrypoint, which is
+// PID 1 and starts nothing of ours, so the sandbox has a web terminal. A
+// service without one still works, so a failure only leaves the token empty.
+func (i *dockerInstance) startServiceTerminal(ctx context.Context) {
+	token, hash := sbtoken.Mint()
+	args := append([]string{"exec", "-d", "-e", "ENVD_TOKEN_HASH=" + hash}, i.userArgs()...)
+	_, _, code, err := dockerOut(ctx, append(args, i.cid, "/usr/local/bin/envd", "reap")...)
+	if err != nil || code != 0 {
+		token = ""
+	}
+	i.envdToken = token
 }
 
 // reviveSettle is how long a started container must stay running to count as
