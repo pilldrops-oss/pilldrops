@@ -73,24 +73,45 @@ func shareScheme() string {
 	return "https"
 }
 
-func shareLinkURL(name string) string { return shareScheme() + "://" + name + "." + shareDomain() }
+// shareOnSandboxDomain reports whether share links live on the sandbox domain,
+// as share-<name> hosts beside the previews, instead of a domain of their own.
+func shareOnSandboxDomain() bool {
+	share := shareHost()
+	return share != "" && share == proxy.NormalizeHost(strings.TrimSpace(os.Getenv("PORTAL_SANDBOX_DOMAIN")))
+}
+
+func shareLinkURL(name string) string {
+	if shareOnSandboxDomain() {
+		name = proxy.ShareLabel + "-" + name
+	}
+	return shareScheme() + "://" + name + "." + shareDomain()
+}
 
 func shareTunnelURL() string {
-	if devInsecure() {
-		return "ws://" + shareDomain() + "/tunnel"
+	host := shareDomain()
+	if shareOnSandboxDomain() {
+		host = proxy.ShareLabel + "." + host
 	}
-	return "wss://" + shareDomain() + "/tunnel"
+	if devInsecure() {
+		return "ws://" + host + "/tunnel"
+	}
+	return "wss://" + host + "/tunnel"
 }
 
 // ShareDomainGuardError refuses a share domain that overlaps the platform's. A
 // reported phishing link must not take the dashboard's domain with it, and a
-// customer's app must not be able to set cookies on it.
+// customer's app must not be able to set cookies on it. The sandbox domain
+// itself is allowed: it already serves customer content, and links take the
+// share- hosts there.
 func ShareDomainGuardError(sandboxDomain, portalOrigin string) error {
 	share := shareHost()
 	if share == "" {
 		return nil
 	}
-	others := []string{proxy.NormalizeHost(strings.TrimSpace(sandboxDomain))}
+	var others []string
+	if sandbox := proxy.NormalizeHost(strings.TrimSpace(sandboxDomain)); sandbox != share {
+		others = append(others, sandbox)
+	}
 	if u, err := url.Parse(strings.TrimSpace(portalOrigin)); err == nil {
 		others = append(others, strings.ToLower(u.Hostname()))
 	}

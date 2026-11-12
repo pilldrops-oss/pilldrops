@@ -418,3 +418,40 @@ func TestAppCannotSetTheAckCookie(t *testing.T) {
 		t.Fatal("the warning was skipped after the app tried to set the cookie")
 	}
 }
+
+func TestSharesOnTheSandboxDomainTakeOnlyTheShareHosts(t *testing.T) {
+	const domain = "sb.example.com"
+	t.Setenv("PORTAL_SANDBOX_DOMAIN", domain)
+	s := shareServer(t)
+	t.Setenv("SHARE_DOMAIN", domain)
+	srv := httptest.NewServer(s.Routes())
+	defer srv.Close()
+
+	m := decodeJSON(t, apiReq(t, s, "POST", "u:one", "/v1/shares", `{}`))
+	name := m["name"].(string)
+	if m["url"] != "https://share-"+name+"."+domain || m["tunnel_url"] != "wss://share."+domain+"/tunnel" {
+		t.Fatalf("url = %v, tunnel_url = %v", m["url"], m["tunnel_url"])
+	}
+	if r := visit(t, srv.URL, "share."+domain, "GET", "/health", nil, nil); r.StatusCode != 200 {
+		t.Fatalf("tunnel host health = %d", r.StatusCode)
+	}
+	if r := visit(t, srv.URL, "share."+domain, "GET", "/v1/capabilities", nil, nil); r.StatusCode != http.StatusNotFound {
+		t.Fatalf("tunnel host API = %d", r.StatusCode)
+	}
+	if r := visit(t, srv.URL, "share-"+name+"."+domain, "GET", "/", nil, nil); r.Header.Get("X-Robots-Tag") != "noindex" {
+		t.Fatalf("link host = %d, not answered as a share", r.StatusCode)
+	}
+
+	// Previews and slugs on the same domain are not the share front's.
+	t.Setenv("SHARE_INGRESS", "remote")
+	srv2 := httptest.NewServer(s.Routes())
+	defer srv2.Close()
+	if r := visit(t, srv2.URL, "share-"+name+"."+domain, "GET", "/", nil, nil); r.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("link host off the ingress = %d", r.StatusCode)
+	}
+	for _, host := range []string{"8000-sb1." + domain, "myapp." + domain, "agent-sb1." + domain, domain} {
+		if r := visit(t, srv2.URL, host, "GET", "/", nil, nil); r.StatusCode == http.StatusServiceUnavailable {
+			t.Fatalf("%s was taken by the share front", host)
+		}
+	}
+}

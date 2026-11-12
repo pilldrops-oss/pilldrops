@@ -35,6 +35,9 @@ func AssignableSlug(s string) error {
 	if reservedForNewSlugs[s] {
 		return fmt.Errorf("slug %q is reserved", s)
 	}
+	if strings.HasPrefix(s, "share-") {
+		return fmt.Errorf("slug %q: the share- prefix is reserved for share links", s)
+	}
 	return nil
 }
 

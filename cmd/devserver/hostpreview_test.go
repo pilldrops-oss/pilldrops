@@ -58,7 +58,7 @@ func TestPortalRedirectsLegacyPreviewHosts(t *testing.T) {
 	var rpHits, siteHits int
 	rp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { rpHits++ })
 	site := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { siteHits++ })
-	h := portalHandler(&proxy.LegacyDomains{Current: "pilldrops.app", Domains: []string{"pilldrops.com"}}, rp, site, nil)
+	h := portalHandler(&proxy.LegacyDomains{Current: "pilldrops.app", Domains: []string{"pilldrops.com"}}, rp, nil, site, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "http://x/a?token=t", nil)
 	req.Host = "8000-sb1.pilldrops.com"
@@ -88,7 +88,7 @@ func TestPortalKeepsTheDashboardOffThePreviewDomain(t *testing.T) {
 	var rpHits, siteHits int
 	rp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { rpHits++ })
 	site := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { siteHits++ })
-	h := portalHandler(nil, rp, site, nil)
+	h := portalHandler(nil, rp, nil, site, nil)
 
 	do := func(host, target string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, "http://x"+target, nil)
@@ -105,7 +105,7 @@ func TestPortalKeepsTheDashboardOffThePreviewDomain(t *testing.T) {
 	}
 	siteHits = 0
 
-	h = portalHandler(&proxy.LegacyDomains{Current: "pilldrops.app", Domains: []string{"pilldrops.com"}}, rp, site, nil)
+	h = portalHandler(&proxy.LegacyDomains{Current: "pilldrops.app", Domains: []string{"pilldrops.com"}}, rp, nil, site, nil)
 	if w := do("pilldrops.app", "/dashboard"); w.Code != http.StatusFound || w.Header().Get("Location") != "https://pilldrops.com/dashboard" {
 		t.Errorf("apex = %d %q, want 302 to the dashboard", w.Code, w.Header().Get("Location"))
 	}
@@ -162,5 +162,34 @@ func TestPortalPreviewProxyNamesTheVisitorsHost(t *testing.T) {
 	rp.ServeHTTP(httptest.NewRecorder(), req)
 	if got != "8000-sb1.pilldrops.app" || gotOwn != "8000-sb1.pilldrops.app" {
 		t.Fatalf("X-Forwarded-Host = %q, %s = %q, want the visitor's host in both", got, proxy.PreviewHostHeader, gotOwn)
+	}
+}
+
+func TestPortalForwardsShareHostsToTheOrchestrator(t *testing.T) {
+	withDomain(t, "pilldrops.app")
+	var got *http.Request
+	orch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = r }))
+	defer orch.Close()
+	var rpHits, siteHits int
+	rp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { rpHits++ })
+	site := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { siteHits++ })
+	h := portalHandler(nil, rp, shareHostProxy(orch.URL), site, nil)
+
+	for _, host := range []string{"share.pilldrops.app", "share-gentle-lark-4axhhjs6.pilldrops.app"} {
+		got = nil
+		req := httptest.NewRequest(http.MethodGet, "http://x/tunnel?share=sh_1", nil)
+		req.Host = host
+		h.ServeHTTP(httptest.NewRecorder(), req)
+		if got == nil || got.Host != host || got.URL.RequestURI() != "/tunnel?share=sh_1" || rpHits+siteHits != 0 {
+			t.Fatalf("share host %s: orchestrator reached %v, rp %d site %d", host, got != nil, rpHits, siteHits)
+		}
+	}
+
+	// A preview host is unaffected.
+	req := httptest.NewRequest(http.MethodGet, "http://x/", nil)
+	req.Host = "8000-sb1.pilldrops.app"
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if rpHits != 1 {
+		t.Fatalf("preview host hits = %d, want 1", rpHits)
 	}
 }

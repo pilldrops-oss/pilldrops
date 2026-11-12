@@ -338,3 +338,23 @@ func TestAppPreviewHandlesAnIDThatStartsWithAgentDash(t *testing.T) {
 		t.Fatalf("body = %q", body)
 	}
 }
+
+func TestParseShareHost(t *testing.T) {
+	const domain = "pilldrops.app"
+	for _, c := range []struct {
+		host, name string
+		ok         bool
+	}{
+		{"share-gentle-lark-4axhhjs6.pilldrops.app", "gentle-lark-4axhhjs6", true},
+		{"share.pilldrops.app", "", true},
+		{"share-.pilldrops.app", "", false},
+		{"shared.pilldrops.app", "", false},
+		{"myapp.pilldrops.app", "", false},
+		{"a.share-x.pilldrops.app", "", false},
+		{"share-x.other.app", "", false},
+	} {
+		if name, ok := ParseShareHost(c.host, domain); name != c.name || ok != c.ok {
+			t.Errorf("ParseShareHost(%q) = (%q,%v), want (%q,%v)", c.host, name, ok, c.name, c.ok)
+		}
+	}
+}
