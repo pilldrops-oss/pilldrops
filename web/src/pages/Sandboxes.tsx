@@ -7,7 +7,7 @@ import { previewUrl, getSandbox, pauseSandbox, resumeSandbox, destroySandbox, re
 import type { StatsPayload, SandboxRow, UsageResp, EventRow, Template } from '../types'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmModal'
-import { MetricsSkeleton, RowsSkeleton } from '../components/Skeleton'
+import { MetricsSkeleton, RowsSkeleton, Skeleton } from '../components/Skeleton'
 import { errText, isCreditError } from '../lib/errText'
 import { loadState } from '../lib/loadState'
 import ErrorState from '../components/ErrorState'
@@ -477,9 +477,13 @@ export default function Sandboxes() {
         <div>
           <h1 className="h1">Sandboxes</h1>
           <p>
-            {total} sandbox{total !== 1 ? 'es' : ''} ·{' '}
-            <b>{running} running</b> ·{' '}
-            <em>{paused} paused</em>
+            {sandboxes ? (
+              <>
+                {total} sandbox{total !== 1 ? 'es' : ''} ·{' '}
+                <b>{running} running</b> ·{' '}
+                <em>{paused} paused</em>
+              </>
+            ) : loading && <Skeleton w={220} h={13} />}
           </p>
         </div>
         <button className="btn primary" onClick={() => openLaunch()}>

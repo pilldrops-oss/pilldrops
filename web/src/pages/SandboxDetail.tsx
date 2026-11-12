@@ -58,10 +58,12 @@ function quickStart(template: string): { cmds: QuickCmd[] } {
     return {
       cmds: [
         { label: 'Python version', cmd: 'python3 --version' },
-        {
-          label: 'pandas demo',
-          cmd: `python3 -c "import pandas as pd; print(pd.DataFrame({'x':[1,2,3],'y':[4,5,6]}).describe())"`,
-        },
+        ...(has('code-interpreter', 'python', 'jupyter')
+          ? [{
+              label: 'pandas demo',
+              cmd: `python3 -c "import pandas as pd; print(pd.DataFrame({'x':[1,2,3],'y':[4,5,6]}).describe())"`,
+            }]
+          : []),
         { label: 'Installed packages', cmd: 'pip list' },
       ],
     }
@@ -440,6 +442,9 @@ export function LogsTab({ id, onOpenTerminal }: { id: string; onOpenTerminal?: (
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight >= 60) setAutoScroll(false)
   }
 
+  // The server words this note for the CLI; the page has its own copy for it.
+  const noAppLog = !note || note.startsWith('no app log yet')
+
   return (
     <div className="logpanel">
       <div className="logpanel-head">
@@ -454,8 +459,8 @@ export function LogsTab({ id, onOpenTerminal }: { id: string; onOpenTerminal?: (
         {lines.length === 0 ? (
           <div className="logpanel-empty">
             <div className="ic">&gt;_</div>
-            <h3>{note || 'No app logs yet'}</h3>
-            {!note && (
+            <h3>{noAppLog ? 'No app logs yet' : note}</h3>
+            {noAppLog && (
               <p>
                 Logs capture the server started with <code>--start</code> or the start API. Output from
                 ad-hoc <code>exec</code> is returned by exec itself, not here.
@@ -576,11 +581,13 @@ function IconCopyButton({ text, label }: { text: string; label: string }) {
   )
 }
 
+const API_ACCESS_LABEL = { org: 'Everyone in the org', private: 'Only the key that created it' } as const
+
 function storageLabel(sb: SandboxDetailType): string {
   if (sb.storage_used_mb !== undefined) {
     return `${fmtMB(sb.storage_used_mb)} of ${sb.storage_mb ? fmtMB(sb.storage_mb) : '—'}`
   }
-  return sb.storage_mb ? `${fmtMB(sb.storage_mb)} (usage not reported)` : '—'
+  return sb.storage_mb ? fmtMB(sb.storage_mb) : '—'
 }
 
 export function InfoTab({
@@ -598,7 +605,7 @@ export function InfoTab({
     { key: 'ID', value: sandbox.id, copy: sandbox.id },
     { key: 'Template', value: sandbox.template },
     { key: 'Status', value: sandbox.status },
-    { key: 'API access', value: sandbox.visibility === 'private' ? 'Only the key that created it' : 'Everyone in the org' },
+    { key: 'API access', value: API_ACCESS_LABEL[sandbox.visibility ?? 'org'] },
     { key: 'Preview URL', value: previewUrl, copy: previewUrl },
     {
       key: 'Ports',
@@ -859,6 +866,7 @@ export default function SandboxDetail() {
   const [fetched, setFetched] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [transition, setTransition] = useState<'pausing' | 'resuming' | null>(null)
 
   // Cleared on a 404 too, so a destroyed sandbox is not polled until unmount.
   const pollRef = useRef<number | null>(null)
@@ -872,7 +880,7 @@ export default function SandboxDetail() {
       setFetched(true)
       setError(null)
     } catch (e) {
-      setError((e as Error).message)
+      setError(e instanceof ApiError ? e.message : 'Connection lost — retrying…')
       if (e instanceof ApiError && e.status === 404 && pollRef.current !== null) {
         window.clearInterval(pollRef.current)
         pollRef.current = null
@@ -986,7 +994,11 @@ export default function SandboxDetail() {
     { id: 'info', label: 'Info' },
   ]
 
-  const status = statusPill(sb.status || 'running')
+  const status = statusPill(transition ?? (sb.status || 'running'))
+  const lifecycle = (to: 'pausing' | 'resuming', run: () => Promise<unknown>, done: string) => {
+    setTransition(to)
+    void doAction(run, undefined, done).finally(() => setTransition(null))
+  }
   const menuAction = (run: () => void) => () => { setMenuOpen(false); run() }
 
   const bar = (
@@ -1020,16 +1032,17 @@ export default function SandboxDetail() {
             aria-label="More actions"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
+            disabled={busy}
             onClick={() => setMenuOpen(o => !o)}
           >
-            ⋯
+            {busy ? <span className="spinner" aria-hidden="true" /> : '⋯'}
           </button>
           {menuOpen && (
             <div className="menu detail-menu">
               {!IS_LOCAL_RUNTIME && (isRunning ? (
                 <button
                   disabled={busy}
-                  onClick={menuAction(() => doAction(() => pauseSandbox(id), undefined, 'Paused'))}
+                  onClick={menuAction(() => lifecycle('pausing', () => pauseSandbox(id), 'Paused'))}
                 >
                   <svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14" /></svg>
                   Pause
@@ -1037,7 +1050,7 @@ export default function SandboxDetail() {
               ) : (
                 <button
                   disabled={busy}
-                  onClick={menuAction(() => doAction(() => resumeSandbox(id), undefined, 'Resumed'))}
+                  onClick={menuAction(() => lifecycle('resuming', () => resumeSandbox(id), 'Resumed'))}
                 >
                   <svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" /></svg>
                   Resume
@@ -1106,8 +1119,8 @@ export default function SandboxDetail() {
                 value={isPrivate ? 'private' : 'org'}
                 onChange={e => { if ((e.target.value === 'private') !== isPrivate) void shareToggle() }}
               >
-                <option value="org">Whole org</option>
-                <option value="private">Only my key</option>
+                <option value="org">{API_ACCESS_LABEL.org}</option>
+                <option value="private">{API_ACCESS_LABEL.private}</option>
               </select>
             </label>
             {!previewAccessHidden && sb.public_preview !== undefined && (
