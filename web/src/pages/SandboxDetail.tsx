@@ -193,10 +193,12 @@ export function PreviewTab({
   defaultPort,
   outcome,
   publicPreview,
+  createdAt,
   onOpenTerminal,
 }: {
   id: string
   status: string
+  createdAt?: string
   defaultPort?: number
   outcome?: string
   publicPreview?: boolean
@@ -241,6 +243,8 @@ export function PreviewTab({
   const listening = (detected ?? []).filter(p => p.listening)
   // Only a port the probe covered and heard nothing from; an unprobed port still loads.
   const nothingServing = (detected ?? []).some(p => String(p.port) === activePort && !p.listening)
+  // A compiled starter listens well after the sandbox reports running.
+  const starting = !!createdAt && Date.now() - Date.parse(createdAt) < 60_000
 
   // A starter is still booting right after launch, so keep looking until it listens.
   useEffect(() => {
@@ -277,9 +281,11 @@ export function PreviewTab({
           <div className="ic">
             <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M4 9h16" /></svg>
           </div>
-          <h3>Nothing to preview yet</h3>
+          <h3>{starting ? 'Waiting for the app to start' : 'Nothing to preview yet'}</h3>
           <p>
-            Start a server with <code>--start</code> or the start API and it will show up here.
+            {starting
+              ? 'A new sandbox can take a minute to build and start its app. This checks again every few seconds.'
+              : <>Start a server with <code>--start</code> or the start API and it will show up here.</>}
             {publicPreview !== undefined && ` Preview access is set to ${publicPreview ? 'public' : 'token only'}.`}
           </p>
           {onOpenTerminal && <button type="button" className="btn" onClick={onOpenTerminal}>Open terminal</button>}
@@ -1184,6 +1190,7 @@ export default function SandboxDetail() {
             defaultPort={fetched ? previewPort : undefined}
             outcome={tplMeta?.outcome}
             publicPreview={sb.public_preview}
+            createdAt={sb.created_at}
             onOpenTerminal={() => setTab('shell')}
           />
         )}
