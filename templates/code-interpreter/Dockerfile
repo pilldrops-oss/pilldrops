@@ -1,11 +1,11 @@
 FROM python:3.11-slim-bookworm
 
 # System packages: build toolchain + the shell tools agents assume exist
-# (procps = ps/free/pkill/uptime; psmisc = killall; zip/unzip; jq). Installed at
+# (procps = ps/free/pkill/uptime; psmisc = killall; iproute2 = ss/ip; zip/unzip; jq). Installed at
 # BUILD time on the node host (full RAM), so this never hits the 1 GB-VM
 # runtime-apt OOM path.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl git build-essential procps psmisc zip unzip jq xz-utils ca-certificates \
+    curl git build-essential procps psmisc iproute2 zip unzip jq xz-utils ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Node LTS via the official static tarball into /usr/local (bin/node, bin/npm,

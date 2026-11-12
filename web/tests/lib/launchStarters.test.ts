@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { starterFiles } from '../../src/lib/launchStarters'
+import { starterFiles, starterStart } from '../../src/lib/launchStarters'
 import type { Template } from '../../src/types'
 
 // python-3.11's image has no matplotlib, and a starter that imports a missing
@@ -28,6 +28,14 @@ describe('rust starter', () => {
     expect(cargo).not.toMatch(/\[dependencies\][^[]*\S/)
     expect(main).toContain('env::var("PORT")')
   })
+
+  // One 1 KB read left a proxied request's headers unread, the close reset the
+  // connection, and the preview showed "App isn't responding yet" for good.
+  it('reads the whole request head, and gives up on a silent client', () => {
+    const main = starterFiles({ id: 'rust', name: 'Rust', description: '', cpu: 2, memory_mb: 2048, visibility: 'public', language: 'rust' })[0].content
+    expect(main).toContain('b"\\r\\n\\r\\n"')
+    expect(main).toContain('set_read_timeout')
+  })
 })
 
 // "go" as a substring also matched mongodb and django, so they got a Go project.
@@ -46,5 +54,11 @@ describe('node starter', () => {
   it('declares UTF-8, since it serves an emoji', () => {
     const tpl: Template = { id: 'node', name: 'Node', description: '', cpu: 1, memory_mb: 512, visibility: 'public', language: 'node' }
     expect(starterFiles(tpl)[0].content).toContain('text/html; charset=utf-8')
+  })
+
+  // The starter page promises an edit shows up on save.
+  it('starts in watch mode', () => {
+    const tpl: Template = { id: 'node', name: 'Node', description: '', cpu: 1, memory_mb: 512, visibility: 'public', language: 'node' }
+    expect(starterStart(tpl)).toBe('node --watch server.js')
   })
 })

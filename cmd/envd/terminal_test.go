@@ -115,3 +115,18 @@ func TestTerminalWS_RunsACommandAndReportsItsExitCode(t *testing.T) {
 		t.Errorf("output %q does not show the cwd %s", got, dir)
 	}
 }
+
+// The dashboard terminal names no cwd. In a Firecracker guest envd runs from /,
+// so the shell opened there while exec and the Files tab were in /root.
+func TestTerminalStartDir(t *testing.T) {
+	home := t.TempDir()
+	for _, tc := range []struct{ name, envdDir, home, want string }{
+		{"guest root falls to home", "/", home, home},
+		{"a workspace is kept", "/workspace", home, ""},
+		{"a home that cannot be entered is skipped", "/", home + "/missing", ""},
+	} {
+		if got := terminalStartDir(tc.envdDir, tc.home); got != tc.want {
+			t.Errorf("%s: terminalStartDir(%q, %q) = %q, want %q", tc.name, tc.envdDir, tc.home, got, tc.want)
+		}
+	}
+}

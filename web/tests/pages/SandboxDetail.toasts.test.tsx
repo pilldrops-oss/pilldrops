@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import SandboxDetail from '../../src/pages/SandboxDetail'
@@ -77,6 +77,33 @@ describe('sandbox detail success toasts (B22 toasts item)', () => {
     await userEvent.type(input, 'myapp')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Slug set to myapp')).toBeInTheDocument()
+  })
+})
+
+describe('sandbox detail in-flight and offline feedback', () => {
+  it('shows the sandbox as pausing and blocks the menu until the pause answers', async () => {
+    let finish: () => void = () => {}
+    vi.mocked(api.pauseSandbox).mockReturnValue(new Promise(resolve => { finish = () => resolve({ status: 'paused' } as never) }))
+    renderPage()
+    const more = await screen.findByRole('button', { name: 'More actions' })
+    await userEvent.click(more)
+    await userEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(await screen.findByText('Pausing')).toBeInTheDocument()
+    expect(more).toBeDisabled()
+    finish()
+    await waitFor(() => expect(more).toBeEnabled())
+    expect(screen.queryByText('Pausing')).toBeNull()
+  })
+
+  it('says the connection dropped instead of the raw fetch error', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.mocked(api.getSandbox).mockResolvedValueOnce(sb).mockRejectedValue(new TypeError('Failed to fetch'))
+    renderPage()
+    await vi.waitFor(() => expect(api.getSandbox).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(await screen.findByText('Connection lost — retrying…')).toBeInTheDocument()
+    expect(screen.queryByText('Failed to fetch')).toBeNull()
+    vi.useRealTimers()
   })
 })
 

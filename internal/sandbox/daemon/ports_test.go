@@ -4,6 +4,9 @@ import (
 	"context"
 	"net"
 	"testing"
+
+	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
+	"github.com/pilldrops-oss/pilldrops/internal/runtime/runtimetest"
 )
 
 func TestDetectPortsFindsTheOneListening(t *testing.T) {
@@ -42,6 +45,65 @@ func TestDetectPortsFindsTheOneListening(t *testing.T) {
 	for _, ps := range got {
 		if ps.Listening != want[ps.Port] {
 			t.Fatalf("port %d listening=%v, want %v", ps.Port, ps.Listening, want[ps.Port])
+		}
+	}
+}
+
+// procNetRuntime is an isolated fake whose guests answer every exec with a
+// fixed socket table.
+type procNetRuntime struct {
+	*runtimetest.Fake
+	procNet string
+}
+
+func (p procNetRuntime) Capabilities() rt.Caps {
+	c := p.Fake.Capabilities()
+	c.Isolation = true
+	return c
+}
+
+func (p procNetRuntime) Boot(ctx context.Context, s rt.BootSpec) (rt.Instance, error) {
+	inst, err := p.Fake.Boot(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	return procNetInstance{inst, p.procNet}, nil
+}
+
+type procNetInstance struct {
+	rt.Instance
+	procNet string
+}
+
+func (p procNetInstance) Exec(context.Context, rt.ExecSpec) (rt.ExecResult, error) {
+	return rt.ExecResult{Stdout: p.procNet}, nil
+}
+
+// The desktop template declares the platform desktop port as its preview port,
+// so the caller asks about it; the terminal port stays out of the answer.
+func TestDetectPortsReportsARequestedPlatformPort(t *testing.T) {
+	d, _ := newTestDaemon(t)
+	d.cfg.Runtime = procNetRuntime{runtimetest.NewFake(), `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000:17C0 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1 1
+   1: 00000000:1E01 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 2 1
+`}
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "desktop", OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := d.DetectPorts(ctx, sb.ID, []int{8000, rt.DesktopPort})
+	if err != nil {
+		t.Fatalf("DetectPorts: %v", err)
+	}
+	want := map[int]bool{8000: false, rt.DesktopPort: true}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v, want only ports %v", got, want)
+	}
+	for _, ps := range got {
+		if listening, asked := want[ps.Port]; !asked || ps.Listening != listening {
+			t.Fatalf("got %+v, want ports %v", got, want)
 		}
 	}
 }
