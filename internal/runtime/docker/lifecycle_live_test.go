@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
@@ -289,4 +290,47 @@ func TestLiveProcsWithoutAShell(t *testing.T) {
 			t.Errorf("%q listed with host pid %d, which Signal would send into the container", p.Cmd, p.PID)
 		}
 	}
+}
+
+// A service's own entrypoint is PID 1 and starts no envd, so its terminal
+// preview answered 503 "starting" for good. Needs PD_ENVD_PATH: a linux envd
+// built for the daemon's architecture.
+func TestLiveServiceSandboxHasATerminal(t *testing.T) {
+	if !fileExists(envdHostPath()) {
+		t.Skip("no envd binary at PD_ENVD_PATH")
+	}
+	r, err := New()
+	if err != nil {
+		t.Skipf("docker runtime unavailable: %v", err)
+	}
+	ctx := t.Context()
+	inst, err := r.Boot(ctx, rt.BootSpec{
+		SandboxID: liveSandboxID(t, "sb-live-svc"),
+		Template:  rt.Template{Name: "redis", Image: "redis:7-alpine", Ports: []int{6379}},
+		VCPU:      1, MemMiB: 256,
+	})
+	if err != nil {
+		t.Skipf("boot failed (image or daemon unavailable): %v", err)
+	}
+	token, _ := inst.(rt.TerminalAuthorizer).TerminalToken()
+	if token == "" {
+		t.Fatal("service sandbox has no terminal token: envd was not started")
+	}
+	target, err := inst.ListenTarget(rt.TerminalPort)
+	if err != nil {
+		t.Fatalf("terminal target: %v", err)
+	}
+	var lastErr error
+	for range 20 {
+		var resp *http.Response
+		if resp, lastErr = http.Get("http://" + target + "/"); lastErr == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+			lastErr = errors.New(resp.Status)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	t.Fatalf("terminal never answered on %s: %v", target, lastErr)
 }
