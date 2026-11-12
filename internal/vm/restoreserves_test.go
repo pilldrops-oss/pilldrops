@@ -72,6 +72,23 @@ func TestARebakedTemplateRetiresItsGolden(t *testing.T) {
 	if err := writeGoldenIdentity(dir, golden); err != nil {
 		t.Fatal(err)
 	}
+	_, memMB := defaultResources(cfg, "base")
+	writeMem := func(mb int) {
+		t.Helper()
+		f, err := os.Create(filepath.Join(dir, "mem"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := f.Truncate(int64(mb) << 20); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeMem(memMB / 2)
+	if goldenCurrent(dir, cfg, "base") {
+		t.Fatal("a golden taken at an older memory default was served")
+	}
+	writeMem(memMB)
 	if !goldenCurrent(dir, cfg, "base") {
 		t.Fatal("a golden of the image the template has was not served")
 	}

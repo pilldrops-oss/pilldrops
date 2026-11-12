@@ -606,12 +606,17 @@ func bakedEnvdProtocol(rootfs string) (int, error) {
 	return envdproto.Scan(out), nil
 }
 
-// goldenCurrent reports whether the golden in dir was built at the size a
-// default create of template now asks for (see goldenStorageMB) and against the
-// template image it now has.
+// goldenCurrent reports whether the golden in dir was built at the disk and
+// memory a default create of template now asks for (see goldenStorageMB) and
+// against the template image it now has.
 func goldenCurrent(dir string, cfg Config, template string) bool {
 	g, err := readGoldenIdentity(dir)
 	if err != nil || g.StorageMB != goldenStorageMB(cfg, template) {
+		return false
+	}
+	// The mem file is exactly the guest's RAM, so its size is the memory the golden was taken at.
+	_, memMB := defaultResources(cfg, template)
+	if fi, err := os.Stat(filepath.Join(dir, "mem")); err != nil || fi.Size() != int64(memMB)<<20 {
 		return false
 	}
 	have, err := digestOf(filepath.Join(cfg.SnapshotDir, template, "rootfs.squashfs"))
