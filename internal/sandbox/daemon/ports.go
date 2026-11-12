@@ -19,6 +19,9 @@ type PortStatus struct {
 	LoopbackOnly bool `json:"loopback_only,omitempty"`
 }
 
+// envdPort is the guest agent's own listener, which every sandbox has and no user app owns.
+const envdPort = 6001
+
 // DetectPorts reports which ports a running sandbox listens on. The guest's own
 // socket table is the answer when it can be read: it finds a server on any port,
 // and it is not fooled by docker-proxy, which accepts a connection on a published
@@ -51,7 +54,7 @@ func (d *Daemon) DetectPorts(ctx context.Context, id string, candidates []int) (
 	for port, loopbackOnly := range listeners {
 		// A platform port is not a user app, unless the caller asked about it:
 		// the desktop template's declared preview port is the desktop port.
-		if _, asked := byPort[port]; !asked && rt.IsPlatformPort(port) {
+		if _, asked := byPort[port]; !asked && (port == envdPort || rt.IsPlatformPort(port)) {
 			continue
 		}
 		byPort[port] = PortStatus{Port: port, Listening: true, LoopbackOnly: loopbackOnly}

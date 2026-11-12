@@ -80,12 +80,13 @@ func (p procNetInstance) Exec(context.Context, rt.ExecSpec) (rt.ExecResult, erro
 }
 
 // The desktop template declares the platform desktop port as its preview port,
-// so the caller asks about it; the terminal port stays out of the answer.
+// so the caller asks about it; the terminal and guest agent ports stay out of the answer.
 func TestDetectPortsReportsARequestedPlatformPort(t *testing.T) {
 	d, _ := newTestDaemon(t)
 	d.cfg.Runtime = procNetRuntime{runtimetest.NewFake(), `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
    0: 00000000:17C0 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1 1
    1: 00000000:1E01 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 2 1
+   2: 00000000:1771 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 3 1
 `}
 	ctx := context.Background()
 	sb, err := d.Create(ctx, CreateSpec{Template: "desktop", OrgID: "default"})
