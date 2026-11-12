@@ -159,6 +159,9 @@ async function pageWsUrl() {
   const clients = new Set()
   const broadcast = (o) => { const s = JSON.stringify(o); for (const c of clients) if (c.readyState === 1) c.send(s) }
   let view = { w: 1280, h: 800 }
+  // The page's address and title, replayed to a viewer that connects after the
+  // navigation that announced them.
+  let pageUrl = '', pageTitle = ''
 
   // Lay the remote page out at the client's CSS box size so it FITS exactly (no
   // overflow), and use deviceScaleFactor purely for sharpness — bounded so the
@@ -203,10 +206,12 @@ async function pageWsUrl() {
       broadcast({ t: 'frame', data: m.params.data })
       cmd('Page.screencastFrameAck', { sessionId: m.params.sessionId })
     } else if (m.method === 'Page.frameNavigated' && m.params.frame && !m.params.frame.parentId) {
-      broadcast({ t: 'url', url: m.params.frame.url })
+      pageUrl = m.params.frame.url
+      broadcast({ t: 'url', url: pageUrl })
     } else if (m.method === 'Page.loadEventFired') {
       cmd('Runtime.evaluate', { expression: 'document.title', returnByValue: true }, r => {
-        broadcast({ t: 'title', title: (r && r.result && r.result.value) || '' })
+        pageTitle = (r && r.result && r.result.value) || ''
+        broadcast({ t: 'title', title: pageTitle })
       })
     } else if (m.method === 'Network.requestWillBeSent') {
       const p = m.params
@@ -390,6 +395,8 @@ async function pageWsUrl() {
   wss.on('connection', ws => {
     clients.add(ws)
     ws.send(JSON.stringify({ t: 'view', w: view.w, h: view.h }))
+    if (pageUrl) ws.send(JSON.stringify({ t: 'url', url: pageUrl }))
+    if (pageTitle) ws.send(JSON.stringify({ t: 'title', title: pageTitle }))
     ws.on('close', () => clients.delete(ws))
     ws.on('message', raw => {
       let e; try { e = JSON.parse(raw) } catch { return }
