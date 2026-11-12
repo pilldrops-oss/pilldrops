@@ -391,6 +391,30 @@ port filters nothing. `network_advisories` says so on a domain-only allow list.
 
 ---
 
+## Share links
+
+`pilldrops share <port>` gives an app on a developer's own machine a public URL.
+The CLI connects outward, so that machine opens no port.
+
+1. Get a domain of its own. Startup refuses a `SHARE_DOMAIN` that equals, falls
+   under, contains or shares a registrable domain with `PORTAL_SANDBOX_DOMAIN` or
+   the `PORTAL_ORIGIN` host, because a reported phishing link must not take your
+   main domain with it.
+2. Point the domain and `*.<domain>` at one replica, and terminate TLS in front of
+   it with a wildcard certificate for both. WebSockets must pass through.
+3. On that replica set `SHARE_DOMAIN` and `SHARE_INGRESS=1`. On the others set the
+   same `SHARE_DOMAIN` and `SHARE_INGRESS=remote`.
+4. Add the domain to the Public Suffix List, so one link's app cannot set cookies
+   on another's.
+
+**Links are open to anyone with the URL.** Browsers get a warning page first; a
+link lasts 8 hours by default and 24 at most. Take one down with
+`POST /v1/admin/shares/{name}/block`, using the operator key. A takedown reaches
+open connections within 5 seconds.
+
+One replica carries all share traffic, and bandwidth is not capped per link. Each
+link's byte totals are in the `shares` table.
+
 ## Environment
 
 ### Control plane (`cmd/orchestrator`)
@@ -416,6 +440,12 @@ port filters nothing. `network_advisories` says so on a domain-only allow list.
 | `FORWARD_INGRESS` | on **exactly one** replica | `1` makes this replica bind the public ports of every port forward; `remote` on the API-only replicas declares that another one does. Unset everywhere means no ingress exists, and the forwards API refuses creates rather than serving an address nothing answers on — see *Raw port forwarding* |
 | `FORWARD_PUBLIC_HOST` | for port forwards | the hostname the endpoints are published under. Defaults to `PORTAL_SANDBOX_DOMAIN`; with neither set, `POST /forwards` is refused with `no_forward_host` |
 | `FORWARD_PORT_RANGE` | no | `lo-hi` public port range, default `40000-60000`. An unparseable value falls back to the default |
+| `SHARE_DOMAIN` | for share links | The domain share links live under; see *Share links* |
+| `SHARE_INGRESS` | on **exactly one** replica | `1` makes this replica hold the tunnels; `remote` on the others declares that one does. Unset everywhere means the API refuses to create links |
+| `SHARE_MAX_PER_ORG` | no | Active links per org (default `5`, `0` off) |
+| `SHARE_MAX_CONNS` | no | Open connections per link (default `64`, `0` off) |
+| `SHARE_RATE_PER_SEC` | no | Requests per second per link (default `50`, `0` off) |
+| `SHARE_ABUSE_CONTACT` | no | Shown on the warning page |
 | `ORCHESTRATOR_ROLE` | no | `edge` runs a replica that serves **only sandbox traffic** — previews (path and host form), the agent origin, customer domains — from the shared Redis routes. Needs `REDIS_URL` and the same `ORCHESTRATOR_API_KEY`, `ORCHESTRATOR_TOKEN`, `PREVIEW_SECRET`, `SANDBOXD_DATABASE_URL` and `PORTAL_SANDBOX_DOMAIN` as the API replicas; it runs no API, dashboard, reconciler or background job. Point `*.<domain>` at edge replicas and `api.`/the console at the others, and preview traffic scales — and keeps serving — independently of the API (verified: previews answered 200 through an edge with every API replica stopped) |
 | `ORG_RATE_PER_SEC` | no | requests per second per org across every replica (default `40`, `0` off); counted in Redis when `REDIS_URL` is set. Over it: `429 rate_limited`, `Retry-After: 1` |
 | `ORCHESTRATOR_ARTIFACT_STORE` | no | `s3` keeps template builds, named snapshots and move captures in a bucket (with `ORCHESTRATOR_ARTIFACT_S3_*`, below); every replica shares it and nodes read it directly. Unset uses `ORCHESTRATOR_ARTIFACT_DIR`. The process **refuses to start** if it cannot list the bucket. See *Object storage* |

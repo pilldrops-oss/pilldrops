@@ -86,6 +86,9 @@ type Server struct {
 	flipsMu      sync.Mutex
 	flips        map[string]int64 // sandbox id -> preview access flips; no-store fallback only
 
+	// shares holds this replica's share tunnels. Zero value ready; see shareingress.go.
+	shares shareHub
+
 	// logger is the structured logger. Use the ...Context variants so
 	// request_id and trace_id are stamped from the context.
 	logger *slog.Logger
@@ -409,6 +412,7 @@ func (s *Server) Routes() http.Handler {
 	s.registerPreviewSourceRoutes(mux)
 	s.registerOrgEgressRoutes(mux)
 	s.registerForwardRoutes(mux)
+	s.registerShareRoutes(mux)
 	s.registerPublicTemplateRoutes(mux)
 	s.registerLaunchStatsRoutes(mux)
 	// Artifact publish lives here because a node's database role has only SELECT on template_builds and artifacts.
@@ -442,10 +446,10 @@ func (s *Server) Routes() http.Handler {
 	// the path form before the mux sees it. observability.Middleware resolves
 	// the correlation id everything below reads. The span is named by mux
 	// pattern so sandbox ids do not become distinct operations.
-	return s.hostIngress(observability.Middleware(observability.TraceMiddleware(func(r *http.Request) string {
+	return s.shareFront(s.hostIngress(observability.Middleware(observability.TraceMiddleware(func(r *http.Request) string {
 		_, pattern := mux.Handler(r)
 		return pattern
-	})(s.capBody(mux))))
+	})(s.capBody(mux)))))
 }
 
 // EdgeRoutes is the sandbox data path alone: previews in path and host form,
@@ -459,10 +463,10 @@ func (s *Server) EdgeRoutes() http.Handler {
 	mux.HandleFunc("GET /livez", s.handleLive)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("/preview/{id}/{rest...}", s.handlePreview)
-	return s.hostIngress(observability.Middleware(observability.TraceMiddleware(func(r *http.Request) string {
+	return s.shareFront(s.hostIngress(observability.Middleware(observability.TraceMiddleware(func(r *http.Request) string {
 		_, pattern := mux.Handler(r)
 		return pattern
-	})(mux)))
+	})(mux))))
 }
 
 // handleLive checks no dependency: the only response to a liveness failure is

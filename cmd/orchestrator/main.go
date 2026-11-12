@@ -77,6 +77,9 @@ func run(ctx context.Context, stop func()) error {
 		return err
 	}
 	proxy.WarnDashboardOnPreviewDomain(legacy, os.Getenv("PORTAL_SANDBOX_DOMAIN"), os.Getenv("PORTAL_ORIGIN"))
+	if err := orchestrator.ShareDomainGuardError(os.Getenv("PORTAL_SANDBOX_DOMAIN"), os.Getenv("PORTAL_ORIGIN")); err != nil {
+		return err
+	}
 	if err := orchestrator.VaultKeyGuardError(clustered, devInsecure,
 		os.Getenv("ALLOW_PLAINTEXT_VAULT") == "1", os.Getenv("VAULT_SECRET_KEY")); err != nil {
 		return err
