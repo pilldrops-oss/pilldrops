@@ -3145,6 +3145,9 @@ func main() {
 		r.Get("/v1/concurrency", func(w http.ResponseWriter, r *http.Request) {
 			fleetProxy(w, r, func(w http.ResponseWriter) { writeBytes(w, []byte(`{"points":[]}`)) })
 		})
+		r.Get("/v1/audit", func(w http.ResponseWriter, r *http.Request) {
+			fleetProxy(w, r, func(w http.ResponseWriter) { writeBytes(w, []byte(`{"entries":[]}`)) })
+		})
 
 		// Custom image build, relayed to the orchestrator with body and status untouched.
 		r.Post("/v1/images/build", func(w http.ResponseWriter, r *http.Request) {
