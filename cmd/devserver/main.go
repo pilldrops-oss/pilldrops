@@ -2543,6 +2543,8 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(chimid.Recoverer)
+	// JSON only: streams, downloads and previews pass through untouched.
+	r.Use(chimid.Compress(5, "application/json"))
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
