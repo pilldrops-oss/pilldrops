@@ -116,7 +116,7 @@ func run() error {
 	// Installed before the daemon, which needs the pin hook so a live VM's
 	// rootfs is never evicted under disk pressure.
 	tiers, err := nodeboot.InstallTemplateSource(bootCtx, dataDir, orchURL,
-		nodeboot.Env("NODE_API_KEY", ""), st)
+		nodeboot.Env("NODE_API_KEY", ""), st, nil)
 	if err != nil {
 		return fmt.Errorf("artifact store: %w", err)
 	}

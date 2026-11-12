@@ -117,6 +117,9 @@ func run(ctx context.Context, stop func()) error {
 
 				db.Store(st)
 				srv.SetStore(st)
+				if !strings.EqualFold(os.Getenv("ORCHESTRATOR_ARTIFACT_STORE"), string(artifact.KindS3)) && os.Getenv("ORCHESTRATOR_ARTIFACT_DIR") == "" {
+					srv.UseSavedObjectStore(ctx, st)
+				}
 				if edge {
 					// The edge reads rows (visibility, customer domains); the
 					// control plane replicas own every background writer.
@@ -197,8 +200,8 @@ func run(ctx context.Context, stop func()) error {
 		srv.SetArtifactStore(blobs)
 		slog.Info("artifact store ready", "component", "artifact", "kind", blobs.Name(), "dir", dir)
 	} else {
-		slog.Info("no artifact store configured: publishing a template artifact will be refused "+
-			"(set ORCHESTRATOR_ARTIFACT_DIR)", "component", "artifact")
+		slog.Info("no artifact store in the environment: publishing a template artifact is refused "+
+			"unless an operator saved one (PUT /v1/admin/object-store, or set ORCHESTRATOR_ARTIFACT_DIR)", "component", "artifact")
 	}
 
 	// The placement table is in-memory; rebuild it from the nodes so a restart recovers it.

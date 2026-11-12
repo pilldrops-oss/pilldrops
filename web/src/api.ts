@@ -19,6 +19,7 @@ import type {
   CustomDomain,
   Capabilities,
   ClusterStats,
+  ObjectStoreView,
   JoinToken,
   ImageInfo,
   PatchImageReq,
@@ -333,6 +334,14 @@ export const getHost = () => request<HostResp>('GET', '/v1/host', undefined)
 export const listNodes = () => request<{ nodes: NodeInfo[] }>('GET', '/v1/nodes', undefined)
 
 export const getClusterStats = () => request<ClusterStats>('GET', '/v1/cluster/stats', undefined)
+
+export const getObjectStore = () => request<ObjectStoreView>('GET', '/v1/admin/object-store', undefined)
+
+export const putObjectStore = (body: {
+  endpoint: string; bucket: string; region: string; access_key: string; secret_key: string
+}) => request<ObjectStoreView>('PUT', '/v1/admin/object-store', body)
+
+export const deleteObjectStore = () => request<ObjectStoreView>('DELETE', '/v1/admin/object-store', undefined)
 
 // mintJoinToken returns a one-time join token plus the one-line node bootstrap command.
 export const mintJoinToken = () => request<JoinToken>('POST', '/v1/join-tokens', {})

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pilldrops-oss/pilldrops/internal/artifact"
 	"github.com/pilldrops-oss/pilldrops/internal/config"
 	"github.com/pilldrops-oss/pilldrops/internal/nodeboot"
 	"github.com/pilldrops-oss/pilldrops/internal/observability"
@@ -121,8 +122,16 @@ func run() error {
 
 	// Installed before the daemon, which needs the pin hook so a live VM's
 	// rootfs is never evicted under disk pressure.
+	var savedBucket *artifact.S3Options
+	if o, err := st.GetObjectStore(bootCtx); err != nil {
+		slog.Warn("saved object store unreadable; using this node's own artifact settings", "component", "artifact", "err", err)
+	} else if o != nil {
+		savedBucket = &artifact.S3Options{
+			Endpoint: o.Endpoint, Bucket: o.Bucket, Region: o.Region, AccessKey: o.AccessKey, SecretKey: o.SecretKey,
+		}
+	}
 	tiers, err := nodeboot.InstallTemplateSource(bootCtx, dataDir, orchURL,
-		nodeboot.Env("NODE_API_KEY", ""), st)
+		nodeboot.Env("NODE_API_KEY", ""), st, savedBucket)
 	if err != nil {
 		return fmt.Errorf("artifact store: %w", err)
 	}
