@@ -38,6 +38,12 @@ type Registry struct {
 	cached   []*Node
 	cachedAt time.Time
 
+	// routeCache keeps a placement for listTTL too. NodeFor runs on every
+	// sandbox request, and against a shared store each lookup is a round trip.
+	// Only hits are kept: a sandbox another replica just placed must resolve.
+	routeMu    sync.Mutex
+	routeCache map[string]cachedRoute
+
 	// routeFallback names a sandbox's node when the route catalog does not:
 	// a wiped or restarted Redis loses every route, and until the nodes'
 	// inventories rebuild them each sandbox would read as not found.
@@ -45,6 +51,13 @@ type Registry struct {
 
 	saveFlags func(SavedNodeFlags)
 }
+
+type cachedRoute struct {
+	nodeID string
+	at     time.Time
+}
+
+const routeCacheMax = 100_000
 
 // SetRouteFallback installs where NodeFor looks after a route miss; the
 // control plane points it at the sandbox rows, which record the owning node.
@@ -105,6 +118,18 @@ func logStoreErr(op string, err error) {
 func (r *Registry) list() []*Node {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
+	cached := r.fresh()
+	out := make([]*Node, len(cached))
+	for i, n := range cached {
+		c := *n
+		out[i] = &c
+	}
+	return out
+}
+
+// fresh returns the cached list itself, reloaded when older than listTTL, or
+// nil when the store is unreadable. The caller holds cacheMu.
+func (r *Registry) fresh() []*Node {
 	if r.cached == nil || time.Since(r.cachedAt) >= r.listTTL {
 		ns, err := r.nodes.List()
 		if err != nil {
@@ -113,12 +138,20 @@ func (r *Registry) list() []*Node {
 		}
 		r.cached, r.cachedAt = sortNodes(ns), time.Now()
 	}
-	out := make([]*Node, len(r.cached))
-	for i, n := range r.cached {
-		c := *n
-		out[i] = &c
+	return r.cached
+}
+
+// listedNode returns a copy of one node from the cached list.
+func (r *Registry) listedNode(id string) (*Node, bool) {
+	r.cacheMu.Lock()
+	defer r.cacheMu.Unlock()
+	for _, n := range r.fresh() {
+		if n.ID == id {
+			c := *n
+			return &c, true
+		}
 	}
-	return out
+	return nil, false
 }
 
 // invalidate drops the cached list after this replica changed a node.
@@ -334,6 +367,7 @@ func (r *Registry) Remove(id string) bool {
 	}
 	r.flagsChanged(id)
 	_, _ = r.routes.UnplaceNode(id)
+	r.forgetRoutes()
 	return true
 }
 
@@ -360,6 +394,9 @@ func (r *Registry) ReapDeadNodes(now time.Time, deadAfter time.Duration) []strin
 	}
 	for _, id := range reaped {
 		_, _ = r.routes.UnplaceNode(id)
+	}
+	if len(reaped) > 0 {
+		r.forgetRoutes()
 	}
 	sort.Strings(reaped)
 	return reaped
@@ -393,16 +430,53 @@ func (r *Registry) Node(id string) (*Node, bool) {
 // Place records that a sandbox now lives on a node.
 func (r *Registry) Place(sandboxID, nodeID string) {
 	_ = r.routes.Place(sandboxID, nodeID)
+	r.rememberRoute(sandboxID, nodeID)
 }
 
 // Unplace forgets a sandbox's placement.
 func (r *Registry) Unplace(sandboxID string) {
 	_ = r.routes.Unplace(sandboxID)
+	r.routeMu.Lock()
+	delete(r.routeCache, sandboxID)
+	r.routeMu.Unlock()
+}
+
+func (r *Registry) rememberRoute(sandboxID, nodeID string) {
+	if r.listTTL <= 0 {
+		return
+	}
+	r.routeMu.Lock()
+	if r.routeCache == nil || len(r.routeCache) >= routeCacheMax { // ponytail: wholesale reset, an LRU if it churns
+		r.routeCache = map[string]cachedRoute{}
+	}
+	r.routeCache[sandboxID] = cachedRoute{nodeID: nodeID, at: time.Now()}
+	r.routeMu.Unlock()
+}
+
+func (r *Registry) rememberedRoute(sandboxID string) (string, bool) {
+	r.routeMu.Lock()
+	defer r.routeMu.Unlock()
+	c, ok := r.routeCache[sandboxID]
+	if !ok || time.Since(c.at) >= r.listTTL {
+		return "", false
+	}
+	return c.nodeID, true
+}
+
+// forgetRoutes drops every cached placement after a node's routes were removed.
+func (r *Registry) forgetRoutes() {
+	r.routeMu.Lock()
+	r.routeCache = nil
+	r.routeMu.Unlock()
 }
 
 // NodeFor returns the node owning a sandbox; ok is false if the sandbox is
-// unknown or its node is gone.
+// unknown or its node is gone. With a shared store the answer may be up to
+// listTTL old: another replica's move or destroy shows after that.
 func (r *Registry) NodeFor(sandboxID string) (*Node, bool) {
+	if nodeID, ok := r.rememberedRoute(sandboxID); ok {
+		return r.routedNode(nodeID)
+	}
 	nodeID, ok, err := r.routes.NodeFor(sandboxID)
 	if err != nil || !ok {
 		if r.routeFallback == nil {
@@ -416,6 +490,18 @@ func (r *Registry) NodeFor(sandboxID string) (*Node, bool) {
 			_ = r.routes.Place(sandboxID, nodeID) // best-effort: the next miss just asks again
 		}
 		return n, ok
+	}
+	r.rememberRoute(sandboxID, nodeID)
+	return r.routedNode(nodeID)
+}
+
+// routedNode reads a node from the cached list when there is one, and from the
+// store when the list does not have it yet.
+func (r *Registry) routedNode(nodeID string) (*Node, bool) {
+	if r.listTTL > 0 {
+		if n, ok := r.listedNode(nodeID); ok {
+			return n, true
+		}
 	}
 	return r.Node(nodeID)
 }
