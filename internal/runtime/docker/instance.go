@@ -373,13 +373,11 @@ func (i *dockerInstance) Revive(ctx context.Context) (rt.Instance, error) {
 // PID 1 and starts nothing of ours, so the sandbox has a web terminal. A
 // service without one still works, so a failure only leaves the token empty.
 func (i *dockerInstance) startServiceTerminal(ctx context.Context) {
-	token, hash := sbtoken.Mint()
-	args := append([]string{"exec", "-d", "-e", "ENVD_TOKEN_HASH=" + hash}, i.userArgs()...)
+	args := append([]string{"exec", "-d", "-e", "ENVD_TOKEN_HASH=" + sbtoken.HashHex(i.envdToken)}, i.userArgs()...)
 	_, _, code, err := dockerOut(ctx, append(args, i.cid, "/usr/local/bin/envd", "reap")...)
 	if err != nil || code != 0 {
-		token = ""
+		i.envdToken = ""
 	}
-	i.envdToken = token
 }
 
 // reviveSettle is how long a started container must stay running to count as

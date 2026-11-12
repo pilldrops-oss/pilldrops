@@ -53,7 +53,8 @@ func (r *Runtime) Adopt(ctx context.Context, sandboxID string) (rt.Instance, err
 	service := !strings.Contains(cmdOut, "sleep infinity")
 	inst := &dockerInstance{
 		id: sandboxID, cid: cid, host: host, termHost: termHost, service: service,
-		runUser: r.adoptedRunUser(ctx, cid, service), start: time.Now(),
+		envdToken: adoptedEnvdToken(ctx, cid),
+		runUser:   r.adoptedRunUser(ctx, cid, service), start: time.Now(),
 		eng:     r.eng,
 		primary: primary,
 		ports:   map[int]string{primary: host},
@@ -101,6 +102,19 @@ func adoptedPrimaryPort(ctx context.Context, cid string) int {
 		}
 	}
 	return appPort
+}
+
+// envdTokenLabel records a container's envd token for Adopt.
+const envdTokenLabel = "sandboxd.envdtoken"
+
+// adoptedEnvdToken reads the envd token bootImage labelled the container with;
+// "" for a container booted before the label, whose terminal stays locked.
+func adoptedEnvdToken(ctx context.Context, cid string) string {
+	out, _, code, err := dockerOut(ctx, "inspect", "-f", `{{index .Config.Labels "`+envdTokenLabel+`"}}`, cid)
+	if err != nil || code != 0 || strings.Contains(out, "<no value>") {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // adoptedRunUser reads the run user from the sandboxd.runuser label. The label
