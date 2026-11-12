@@ -57,7 +57,9 @@ func run() error {
 	defer func() { _ = logger.Sync() }()
 
 	dsn := nodeboot.Env("SANDBOXD_DATABASE_URL", filepath.Join(dataDir, "state.db"))
-	if err := nodeboot.ProductionDBError(nodeboot.EnvBool("SANDBOXD_PRODUCTION", false), dsn); err != nil {
+	// One box answering its own API may keep SQLite; a node other nodes share a database with may not.
+	clustered := nodeboot.Env("ORCHESTRATOR_URL", "") != ""
+	if err := nodeboot.ProductionDBError(nodeboot.EnvBool("SANDBOXD_PRODUCTION", false) && clustered, dsn); err != nil {
 		return err
 	}
 	st, err := store.Open(bootCtx, dsn)

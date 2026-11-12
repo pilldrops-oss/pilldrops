@@ -85,7 +85,9 @@ type Sandbox struct {
 	// Token is the per-sandbox envd access token, "" when auth is off.
 	Token string
 	// Egress is the policy this sandbox booted under, kept so a fork inherits it.
-	Egress    *egress.Rules
+	Egress *egress.Rules
+	// Volumes are the extra disks attached at boot, kept so a pause records them.
+	Volumes   []string
 	stopTimer context.CancelFunc
 }
 
@@ -218,6 +220,9 @@ type CreateRequest struct {
 	// Egress is the sandbox's egress policy; nil is unrestricted. Only the netns
 	// path can enforce one, and a boot that cannot fails rather than pretends.
 	Egress *egress.Rules
+	// Volumes are host paths of extra disks to attach. A golden snapshot was
+	// taken with no such drives, so a create with any cold-boots.
+	Volumes []string
 }
 
 // defaultResources returns the template's default vCPU/RAM, falling back to the
@@ -329,6 +334,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Sandbox, erro
 		ExpiresAt:   expiresAt,
 		Token:       token,
 		Egress:      req.Egress,
+		Volumes:     vm.Volumes,
 		stopTimer:   cancel,
 	}
 
@@ -401,7 +407,7 @@ func (m *Manager) acquireVM(_ context.Context, req CreateRequest, sandboxID, tok
 	// On a deployment with per-plan storage caps most creates cold boot, since
 	// goldens exist only at DefaultOverlayMB. The warn makes that visible.
 	goldenMB := goldenStorageMB(m.config, template)
-	restoreEligible := restoreServes(wantVCPU, defVCPU, wantMem, defMem, req.StorageMB, goldenMB)
+	restoreEligible := restoreServes(wantVCPU, defVCPU, wantMem, defMem, req.StorageMB, goldenMB) && len(req.Volumes) == 0
 	if !restoreEligible && m.config.EnableSnapshots {
 		m.log.Warn("restore_ineligible_custom_size",
 			zap.String("template", template),
@@ -423,7 +429,7 @@ func (m *Manager) acquireVM(_ context.Context, req CreateRequest, sandboxID, tok
 		}
 	}
 
-	vm, err := ColdBoot(template, sandboxID, m.config, m.log, wantVCPU, wantMem, req.StorageMB, tokenHash, req.Egress)
+	vm, err := ColdBoot(template, sandboxID, m.config, m.log, wantVCPU, wantMem, req.StorageMB, tokenHash, req.Egress, req.Volumes)
 	if err != nil {
 		return nil, "", fmt.Errorf("all boot methods failed: %w", err)
 	}
@@ -611,7 +617,7 @@ func (m *Manager) recoverOrphanProcs(procs []*OrphanProcess) {
 			m.log.Info("vm_held_for_adoption", zap.String("vm_id", proc.SandboxID), zap.String("owner", rec.Owner))
 			continue
 		}
-		if !m.knowsSandbox(proc.SandboxID) {
+		if !m.knowsSandbox(proc.SandboxID) && !m.isOrphanedGolden(proc.SandboxID) {
 			pid := 0
 			if proc.Machine != nil {
 				pid = proc.Machine.Pid()

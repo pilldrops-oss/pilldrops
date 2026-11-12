@@ -45,6 +45,9 @@ func (d *Daemon) Fork(ctx context.Context, parentID string, spec ForkSpec) (res 
 	if !d.isolationOK.Load() {
 		return ForkResult{}, ErrIsolationPreflight
 	}
+	if err := d.refuseIfVolumes(ctx, parentID); err != nil {
+		return ForkResult{}, err
+	}
 	forker, ok := d.cfg.Runtime.(rt.Forker)
 	if !ok {
 		return ForkResult{}, fmt.Errorf("%w: the %s runtime cannot fork", rt.ErrUnsupported, d.cfg.Runtime.Name())
@@ -135,7 +138,7 @@ func (d *Daemon) Fork(ctx context.Context, parentID string, spec ForkSpec) (res 
 		// private. The HTTP layer has already refused a fork of a sandbox this
 		// key cannot see, so nothing here needs the parent's own visibility.
 		CreatedBy:  spec.CreatedBy,
-		Visibility: visibilityOrPrivate(spec.Visibility),
+		Visibility: forkVisibility(spec.Visibility, spec.CreatedBy),
 		inst:       inst,
 		meter:      newMeter(vcpu, memMiB, storageMB, now),
 		unpin:      unpin,

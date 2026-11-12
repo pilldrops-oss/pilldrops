@@ -296,3 +296,43 @@ func TestPickPassesOverACPUHotNode(t *testing.T) {
 		t.Fatalf("Pick = %v, want tight: a hot node still serves when it is the only fit", got)
 	}
 }
+
+// A sandbox attaching a volume runs where the volume's image is, even when
+// another node has more room; a volume only goes where volumes can live.
+func TestPickHonoursTheNodePinAndVolumes(t *testing.T) {
+	now := time.Now()
+	roomy := node("roomy", 64000, 60000, 0, 0.1, now)
+	small := node("small", 8000, 2000, 0, 3, now)
+	small.Volumes = true
+	nodes := []*Node{roomy, small}
+
+	if got := pick(nodes, Request{Node: "small"}, now, NodeTTL); got == nil || got.ID != "small" {
+		t.Errorf("pinned to small, picked %v", got)
+	}
+	if got := pick(nodes, Request{Node: "gone"}, now, NodeTTL); got != nil {
+		t.Errorf("pinned to a node that is not there, picked %s", got.ID)
+	}
+	if got := pick(nodes, Request{Volumes: true}, now, NodeTTL); got == nil || got.ID != "small" {
+		t.Errorf("a volume went to %v, want the only node that can hold one", got)
+	}
+}
+
+// A volume pins every sandbox that attaches it, so it must not land on the
+// fullest node, where the first attach finds no room while the fleet has plenty.
+func TestPickMostRoomChoosesTheEmptiestNode(t *testing.T) {
+	now := time.Now()
+	nodes := []*Node{
+		node("full", 32000, 2000, 30000, 1, now),
+		node("empty", 32000, 30000, 2000, 1, now),
+		node("middle", 32000, 15000, 17000, 1, now),
+	}
+	for _, n := range nodes {
+		n.Volumes = true
+	}
+	if got := Pick(nodes, Request{Volumes: true, MostRoom: true}, now, time.Minute); got == nil || got.ID != "empty" {
+		t.Fatalf("MostRoom picked %v, want empty", got)
+	}
+	if got := Pick(nodes, Request{Volumes: true}, now, time.Minute); got == nil || got.ID != "full" {
+		t.Fatalf("best fit picked %v, want full", got)
+	}
+}

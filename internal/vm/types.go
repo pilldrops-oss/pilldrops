@@ -36,6 +36,8 @@ type RestoredVM struct {
 	BootType    string // "snapshot" | "cold"
 	// NetNS is the network namespace name, "" on the shared-bridge path.
 	NetNS string
+	// Volumes are the extra disks the VM booted with; see FirecrackerConfig.
+	Volumes []string
 	// MemBase is the memory file this VM was restored from and tracks dirty
 	// pages against; "" for a cold boot.
 	MemBase string
@@ -82,8 +84,11 @@ type FirecrackerConfig struct {
 	// TokenHash, when set, rides the kernel cmdline as envd.token_hash=<hash>. Never the token.
 	TokenHash string
 	// NetNS is the namespace path handed to the jailer as --netns; "" keeps it in the root netns.
-	NetNS  string
-	Config Config
+	NetNS string
+	// Volumes are host paths of extra writable disks, attached after the
+	// overlay so the guest sees them as /dev/vdc, /dev/vdd, ... in order.
+	Volumes []string
+	Config  Config
 }
 
 // OrphanProcess is a Firecracker process from a previous run.

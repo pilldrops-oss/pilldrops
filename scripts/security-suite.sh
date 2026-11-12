@@ -619,7 +619,9 @@ TAGNET_OK=$(api GET /v1/capabilities | jq -r '.tag_networks // false')
 # A unique suffix: slugs are unique platform-wide and a previous run's leftovers
 # would otherwise take the name.
 TAGSFX="$$"
-if [ "$TAGNET_OK" != "true" ]; then
+if [ "$RUNTIME" != "firecracker" ]; then
+  skiptagnet "tag networks are a firecracker-only feature (docs/runtimes.md)" na
+elif [ "$TAGNET_OK" != "true" ]; then
   skiptagnet "this node reports tag_networks=false, so there is nothing to opt into"
 else
   TA=$(sb_create_net "sec-t-$TAGSFX" "tagalpha$TAGSFX")
@@ -753,16 +755,25 @@ DISK_SBX=$(sb_create_sized "$DISK_CAP_MB")
 if [ -z "$DISK_SBX" ]; then
   skip "exhaust.disk" "could not create a sandbox with a declared ${DISK_CAP_MB}MB cap"
 else
-  DISK=$(sb_exec "$DISK_SBX" "timeout 180 dd if=/dev/zero of=\$HOME/fill bs=1M count=$DISK_TRY_MB oflag=direct 2>&1 | tail -1; rm -f \$HOME/fill")
+  # fallocate first: it allocates without dirtying page cache, so a hard quota
+  # answers ENOSPC; a buffered dd there can end in a memory-cgroup kill of the
+  # whole sandbox and report nothing. dd stays as the fallback for an image
+  # without fallocate. The file's size is the measurement either way.
+  # Half the cap first, as the positive control: a disk that refuses every
+  # allocation would otherwise pass as contained.
+  HALF=$(sb_exec "$DISK_SBX" "if command -v fallocate >/dev/null; then fallocate -l $(( DISK_CAP_MB / 2 ))M \$HOME/half && echo HALF_OK; else echo HALF_OK; fi; rm -f \$HOME/half")
+  DISK=$(sb_exec "$DISK_SBX" "if command -v fallocate >/dev/null; then fallocate -l ${DISK_TRY_MB}M \$HOME/fill 2>/dev/null; else timeout 180 dd if=/dev/zero of=\$HOME/fill bs=1M count=$DISK_TRY_MB oflag=direct >/dev/null 2>&1; fi; stat -c %s \$HOME/fill; rm -f \$HOME/fill")
   WROTE=$(printf '%s' "$DISK" | grep -o '^[0-9]*' | head -1)
-  if ! api GET /health >/dev/null 2>&1; then
+  if ! printf '%s' "$HALF" | grep -q HALF_OK; then
+    skip "exhaust.disk" "could not allocate half the cap ($(( DISK_CAP_MB / 2 )) MB), so a refusal above it proves nothing"
+  elif ! api GET /health >/dev/null 2>&1; then
     fail "exhaust.disk" "node stopped answering after a large guest write"
   elif [ -z "$WROTE" ]; then
-    skip "exhaust.disk" "could not parse dd output: $(printf '%s' "$DISK" | tr -d '\r' | tail -1)"
+    skip "exhaust.disk" "could not read the size written: $(printf '%s' "$DISK" | tr -d '\r' | tail -1)"
   elif [ "$WROTE" -gt $(( DISK_CAP_MB * 1024 * 1024 * 12 / 10 )) ]; then
     disk_over_cap "$WROTE"
   else
-    pass "exhaust.disk" "write stopped at $(( WROTE / 1000000 )) MB against a declared ${DISK_CAP_MB}MB cap"
+    pass "exhaust.disk" "$(( DISK_CAP_MB / 2 )) MB fit; a $DISK_TRY_MB MB write stopped at $(( WROTE / 1000000 )) MB against a declared ${DISK_CAP_MB}MB cap"
   fi
 fi
 

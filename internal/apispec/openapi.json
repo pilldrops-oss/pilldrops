@@ -176,6 +176,20 @@
         }
       }
     },
+    "/v1/volumes": {
+      "post": {
+        "summary": "Create a volume",
+        "description": "A disk that outlives the sandbox it is attached to. Attach it at create with `volumes: [{id, path}]`. Firecracker nodes only.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["size_mb"], "properties": { "name": { "type": "string" }, "size_mb": { "type": "integer", "minimum": 256, "maximum": 102400 } } } } } },
+        "responses": { "201": { "description": "The volume." }, "400": { "description": "Bad size or name." }, "501": { "description": "This node's runtime cannot attach volumes." } }
+      },
+      "get": { "summary": "List volumes", "responses": { "200": { "description": "`{\"volumes\": [...]}`" } } }
+    },
+    "/v1/volumes/{id}": {
+      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+      "get": { "summary": "Get a volume", "responses": { "200": { "description": "The volume; `attached_to` names the sandbox holding it." }, "404": { "description": "No such volume in the caller's org." } } },
+      "delete": { "summary": "Delete a volume and its data", "responses": { "204": { "description": "Deleted." }, "409": { "description": "A sandbox holds it." } } }
+    },
     "/v1/sandboxes/{id}": {
       "parameters": [
         {
@@ -1159,6 +1173,32 @@
         }
       }
     },
+    "/v1/domains": {
+      "get": {
+        "summary": "List the org's custom domains",
+        "description": "Control plane only. Each row is a customer hostname in front of one public sandbox, or a `*.` wildcard in front of all of the org's. `record` is the DNS record to create. `legacy_target` is true while the row's DNS still names a sandbox domain the platform has moved off: that record keeps working while the host gets traffic, and stops being accepted 90 days after the last request. A host that matches only by address also needs `txt_record`; `txt_required` says it is missing.",
+        "responses": {
+          "200": {
+            "description": "The org's rows, host-ordered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "domains": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CustomDomain"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/shares": {
       "post": {
         "summary": "Create a public share link",
@@ -1337,6 +1377,63 @@
       }
     },
     "schemas": {
+      "CustomDomain": {
+        "type": "object",
+        "description": "A customer hostname pointed at the platform. Only `active` rows route.",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "description": "Empty for a wildcard row, whose label names the sandbox."
+          },
+          "port": {
+            "type": "integer"
+          },
+          "wildcard": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active"
+            ]
+          },
+          "error": {
+            "type": "string",
+            "description": "Why the host is not active yet; empty when it is."
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "cname_target": {
+            "type": "string",
+            "description": "What the CNAME must point at, under the current sandbox domain."
+          },
+          "record": {
+            "type": "string",
+            "description": "The DNS record to create, as one line."
+          },
+          "legacy_target": {
+            "type": "boolean",
+            "description": "True while the row's DNS names a sandbox domain the platform moved off. Create `record` to keep the host."
+          },
+          "txt_record": {
+            "type": "string",
+            "description": "The ownership record a host needs when it points here by address (an A record or a flattened CNAME) instead of the exact CNAME in `record`, as one line, such as `_pilldrops-challenge.example.com TXT <token>`. A wildcard's sits at its base domain. Not needed with the CNAME."
+          },
+          "txt_required": {
+            "type": "boolean",
+            "description": "True once the host matches the platform only by address and `txt_record` is missing: the record is needed now, before `txt_grace_ends_at` when that is present, else for the host to verify."
+          },
+          "txt_grace_ends_at": {
+            "type": "integer",
+            "description": "Unix seconds. Present while a host attached before the TXT check existed keeps routing without `txt_record`; after it, the host goes `pending` until the record exists."
+          }
+        }
+      },
       "Error": {
         "type": "object",
         "description": "Every error carries a human-readable message and a stable machine-readable code.",

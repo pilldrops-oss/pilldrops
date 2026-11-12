@@ -174,6 +174,8 @@ func StartHeartbeat(ctx context.Context, d *daemon.Daemon, dataDir, selfURL, run
 			// Same, for a create whose egress rules name a domain: only a node
 			// running the name layer can enforce one.
 			"egress_domains": caps.EgressDomains,
+			// A volume is placed, and a create attaching one pinned, only where it can live.
+			"volumes": caps.Volumes,
 			// Placement and the fleet capability answer read these: a create
 			// naming a snapshot may only land where one can actually be booted,
 			// and a tenant asking what the fleet can do never sees this node's

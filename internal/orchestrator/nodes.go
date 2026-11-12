@@ -36,6 +36,9 @@ type heartbeatBody struct {
 	// egress rule enforceable. Older nodes omit it, which reads as false: a
 	// create whose rules name a domain is not placed there.
 	EgressDomains bool `json:"egress_domains"`
+	// Volumes means the node can create and attach standalone volumes. Older
+	// nodes omit it: no volume is placed there.
+	Volumes bool `json:"volumes"`
 	// Checkpoint, NamedSnapshot and Standby are the capture-plane bits. Older
 	// nodes omit them, which reads as false: a create from a snapshot is not
 	// placed there and the fleet answer does not claim the verb.
@@ -76,6 +79,13 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	var b heartbeatBody
 	if json.NewDecoder(r.Body).Decode(&b) != nil || b.ID == "" || b.URL == "" {
 		writeErr(w, 400, "id and url required")
+		return
+	}
+	// Checked before the credential branches below so a removed id is
+	// refused whichever path would otherwise accept it, including the
+	// NODE_KEY_SECRET-unset dev-insecure fallback that skips heartbeatAuthorized entirely.
+	if s.nodeRemoved(r.Context(), b.ID) {
+		writeErr(w, 403, "node removed: this id was revoked by an operator and will not be re-registered")
 		return
 	}
 	if s.nodeKeySecret == "" {
@@ -146,8 +156,8 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	s.reg.SetNodeMeta(b.ID, cluster.NodeMeta{
 		Runtime: b.Runtime, Isolation: b.Isolation, Templates: b.Templates,
 		CanFetch: b.CanFetch, AutoPause: b.AutoPause, TagNetworks: b.TagNetworks,
-		EgressDomains: b.EgressDomains,
-		Checkpoint:    b.Checkpoint, NamedSnapshot: b.NamedSnapshot, Standby: b.Standby,
+		EgressDomains: b.EgressDomains, Volumes: b.Volumes,
+		Checkpoint: b.Checkpoint, NamedSnapshot: b.NamedSnapshot, Standby: b.Standby,
 		MultiPort: b.MultiPort, L4Forward: b.L4Forward, NestedDocker: b.NestedDocker,
 		CPUFeatures: b.CPUFeatures,
 	})

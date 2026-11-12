@@ -38,7 +38,8 @@ func SelectRuntime(ctx context.Context, dataDir string, logger *zap.Logger) (rt.
 	slog.Info("probing machine type: Firecracker (KVM), then Docker",
 		"component", "runtime", "selected_by", "SANDBOXD_RUNTIME=auto", "dev_build", DevBuild)
 	fcBin := Env("FIRECRACKER_BIN", "/usr/bin/firecracker")
-	kernel := Env("KERNEL_PATH", filepath.Join(dataDir, "vmlinux"))
+	fcDir := firecrackerDir(dataDir, provisionedDir)
+	kernel := Env("KERNEL_PATH", filepath.Join(fcDir, "vmlinux"))
 	_, binErr := os.Stat(fcBin)
 	_, kernErr := os.Stat(kernel)
 	kvmOK := false
@@ -48,7 +49,7 @@ func SelectRuntime(ctx context.Context, dataDir string, logger *zap.Logger) (rt.
 	}
 	// A KVM host missing the binary or kernel falls through to Docker.
 	if kvmOK && binErr == nil && kernErr == nil {
-		snapDir := Env("SNAPSHOT_DIR", filepath.Join(dataDir, "templates"))
+		snapDir := Env("SNAPSHOT_DIR", filepath.Join(fcDir, "templates"))
 		templates.SetDir(snapDir)
 		// Per-template defaults; a request may override, with VM_MEMORY_MB and
 		// VM_VCPUS as the final fallback.
@@ -56,10 +57,10 @@ func SelectRuntime(ctx context.Context, dataDir string, logger *zap.Logger) (rt.
 		envdAuth := Env("ENVD_AUTH", "1") == "1"
 		fc, ferr := firecracker.New(ctx, firecracker.Config{
 			SnapshotDir:    snapDir,
-			OverlayDir:     Env("OVERLAY_DIR", filepath.Join(dataDir, "overlays")),
+			OverlayDir:     Env("OVERLAY_DIR", filepath.Join(fcDir, "overlays")),
 			FirecrackerBin: Env("FIRECRACKER_BIN", "/usr/bin/firecracker"),
 			JailerBin:      Env("JAILER_BIN", "/usr/bin/jailer"),
-			KernelPath:     Env("KERNEL_PATH", filepath.Join(dataDir, "vmlinux")),
+			KernelPath:     kernel,
 			Templates:      TemplateList(Env("TEMPLATE", "base")),
 			MaxConcurrent:  10,
 			MaxActive:      EnvInt("VM_MAX_ACTIVE", 50),
@@ -128,4 +129,20 @@ func templateResources(catalog []templates.Template) map[string]rt.Resources {
 		out[t.ID] = res
 	}
 	return out
+}
+
+// provisionedDir is where scripts/provision-node.sh puts the kernel, templates and overlays.
+const provisionedDir = "/var/lib/sandbox"
+
+// firecrackerDir finds those files when the environment does not name them. A
+// provisioned host whose node data lives elsewhere would otherwise find no
+// kernel and quietly run Docker instead.
+func firecrackerDir(dataDir, provisioned string) string {
+	if _, err := os.Stat(filepath.Join(dataDir, "vmlinux")); err == nil {
+		return dataDir
+	}
+	if _, err := os.Stat(filepath.Join(provisioned, "vmlinux")); err == nil {
+		return provisioned
+	}
+	return dataDir
 }

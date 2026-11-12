@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import SandboxDetail, { InfoTab } from '../../src/pages/SandboxDetail'
@@ -56,7 +56,7 @@ describe('sandbox detail (U4)', () => {
     Object.assign(navigator, { clipboard: { writeText } })
     render(<ToastProvider><InfoTab sandbox={{ ...sb, boot_type: 'cold', boot_ms: 1136 }} previewPort={3000} /></ToastProvider>)
     expect(screen.getByText('my-app')).toBeInTheDocument()
-    expect(screen.getByText('2 GB (usage not reported)')).toBeInTheDocument()
+    expect(screen.getByText('2 GB')).toBeInTheDocument()
     expect(screen.getByText('cold')).toBeInTheDocument()
     expect(screen.getByText('1136 ms')).toBeInTheDocument()
     expect(screen.getByText(/3000 preview · 7681 terminal/)).toBeInTheDocument()
@@ -96,6 +96,14 @@ describe('sandbox detail (U4)', () => {
     const access = await screen.findByRole('combobox', { name: /API access/ })
     await userEvent.selectOptions(access, 'private')
     await waitFor(() => expect(api.setSandboxVisibility).toHaveBeenCalledWith('sb1', 'private'))
+  })
+
+  it('words API access the same in the header control and on Info', async () => {
+    renderPage()
+    const access = await screen.findByRole('combobox', { name: /API access/ })
+    const chosen = within(access).getByRole<HTMLOptionElement>('option', { selected: true }).textContent
+    await userEvent.click(screen.getByRole('tab', { name: 'Info' }))
+    expect(screen.getByText('API access', { selector: '.info-key' }).closest('.info-row')?.textContent).toContain(chosen)
   })
 
   it('the ready screen builds the preview URL the dashboard way, not from the node domain', () => {

@@ -33,6 +33,10 @@ type Fake struct {
 	// EgressDomains makes Capabilities advertise the name layer, so a rule set
 	// naming a domain is accepted. False (the default) refuses one.
 	EgressDomains bool
+	// Volumes makes Capabilities advertise volumes and Fake a Volumer.
+	Volumes bool
+	// volumeFiles are the volume images created and not yet deleted.
+	volumeFiles map[string]int
 	// networks is the last membership pushed per sandbox, for assertions.
 	networks map[string][]string
 	// CheckpointKind is the Kind Checkpoint reports; "" means "memory".
@@ -81,6 +85,7 @@ func (f *Fake) Capabilities() rt.Caps {
 		MemoryRestore: f.MemoryRestore,
 		EgressPolicy:  f.EgressPolicy,
 		EgressDomains: f.EgressDomains,
+		Volumes:       f.Volumes,
 		NamedSnapshot: !f.NoSnapshotBoot,
 	}
 }
@@ -501,4 +506,31 @@ func (f *fakeFS) Stat(ctx context.Context, p string) (rt.FileInfo, error) {
 		return rt.FileInfo{}, fmt.Errorf("no such file: %s", p)
 	}
 	return rt.FileInfo{Name: p, Size: int64(len(b)), Mode: "-rw-r--r--"}, nil
+}
+
+// CreateVolume implements rt.Volumer.
+func (f *Fake) CreateVolume(id string, sizeMB int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.volumeFiles == nil {
+		f.volumeFiles = map[string]int{}
+	}
+	f.volumeFiles[id] = sizeMB
+	return nil
+}
+
+// DeleteVolume implements rt.Volumer.
+func (f *Fake) DeleteVolume(id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.volumeFiles, id)
+	return nil
+}
+
+// VolumeFile reports whether a volume image exists.
+func (f *Fake) VolumeFile(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.volumeFiles[id]
+	return ok
 }

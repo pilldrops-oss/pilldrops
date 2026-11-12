@@ -18,6 +18,16 @@ describe('Terminal tab', () => {
     expect(screen.getByRole('button', { name: /go version/i })).toBeInTheDocument()
   })
 
+  it('offers the pandas demo only where the template ships pandas', () => {
+    setDomain('pilldrops.com')
+    const { unmount } = render(<ShellTab id="sb1" status="running" template="fastapi" />)
+    expect(screen.getByRole('button', { name: /python version/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /pandas demo/i })).toBeNull()
+    unmount()
+    render(<ShellTab id="sb1" status="running" template="python-3.11" />)
+    expect(screen.getByRole('button', { name: /pandas demo/i })).toBeInTheDocument()
+  })
+
   it('offers the generic ones for a template with no specialisation', () => {
     setDomain('pilldrops.com')
     render(<ShellTab id="sb1" status="running" template="base" />)

@@ -203,10 +203,12 @@ func (s *Server) authorizePreview(w http.ResponseWriter, r *http.Request, id str
 	ckName := previewCookieName(id, port)
 	if previewtoken.BrowserValid(key, r.URL.Query().Get("token"), id, port, gen) {
 		// Re-mint for the cookie so the visitor gets a full window, not the link's remainder.
+		sameSite, partitioned := s.previewCookieSite()
 		http.SetCookie(w, &http.Cookie{
 			Name: ckName, Value: previewtoken.Browser(key, id, port, gen),
 			Path: "/", Secure: true, HttpOnly: true,
-			SameSite: http.SameSiteLaxMode, MaxAge: int(previewtoken.BrowserTTL.Seconds()),
+			SameSite: sameSite, Partitioned: partitioned,
+			MaxAge: int(previewtoken.BrowserTTL.Seconds()),
 		})
 		return true
 	}
@@ -224,10 +226,27 @@ func (s *Server) authorizePreview(w http.ResponseWriter, r *http.Request, id str
 	return false
 }
 
+// previewCookieSite is the SameSite mode and Partitioned flag for a cookie a
+// preview sets. A dashboard on another site embeds previews cross-site, where
+// a Lax cookie is neither stored nor sent; Partitioned keys it to the
+// embedding site, so it cannot follow the visitor anywhere else.
+func (s *Server) previewCookieSite() (http.SameSite, bool) {
+	if proxy.DashboardOffDomain(s.sandboxDomain, s.portalOrigin) {
+		return http.SameSiteNoneMode, true
+	}
+	return http.SameSiteLaxMode, false
+}
+
 func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 	if s.previewLimit != nil && s.previewLimit.rps > 0 && !s.previewLimit.allow(httpx.ClientIP(r)) {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+	// A browser on the path form would run sandbox code on this host. A
+	// customer host is the sandbox's own origin already.
+	if target, ok := proxy.PathPreviewTarget(r, s.sandboxDomain, s.legacy); ok && !onCustomHost(r) {
+		http.Redirect(w, r, target, http.StatusFound)
 		return
 	}
 	id := r.PathValue("id")

@@ -108,4 +108,58 @@ describe('Domains', () => {
     expect(await screen.findByText(/at least two labels/i)).toBeInTheDocument()
     expect(api.addDomain).not.toHaveBeenCalled()
   })
+
+  it('asks the owner to update a host still on the old domain', async () => {
+    vi.mocked(api.listDomains).mockResolvedValue([
+      row({ status: 'active', legacy_target: true, record: 'app.example.com CNAME 8000-sb1.pilldrops.app' }),
+    ])
+    renderDomains()
+
+    expect(await screen.findByText(/Update your DNS record to/)).toBeInTheDocument()
+  })
+
+  it('shows the TXT record and the deadline for a host in its grace period', async () => {
+    vi.mocked(api.listDomains).mockResolvedValue([
+      row({
+        status: 'active',
+        txt_record: '_pilldrops-challenge.app.example.com TXT abc123',
+        txt_required: true,
+        txt_grace_ends_at: 1_000_000_000,
+      }),
+    ])
+    renderDomains()
+
+    expect(await screen.findByText('_pilldrops-challenge.app.example.com TXT abc123')).toBeInTheDocument()
+    expect(screen.getByText(new RegExp(new Date(1_000_000_000_000).toLocaleDateString()))).toBeInTheDocument()
+  })
+
+  it('shows the TXT record a pending host needs', async () => {
+    vi.mocked(api.listDomains).mockResolvedValue([
+      row({ txt_record: '_pilldrops-challenge.app.example.com TXT abc123', txt_required: true }),
+    ])
+    renderDomains()
+
+    expect(await screen.findByText('_pilldrops-challenge.app.example.com TXT abc123')).toBeInTheDocument()
+    expect(screen.getByText(/to prove it is yours/)).toBeInTheDocument()
+    expect(screen.queryByText(/keeps working until/)).not.toBeInTheDocument()
+  })
+
+  it('offers the TXT record as an alternative without warning when it is not required', async () => {
+    vi.mocked(api.listDomains).mockResolvedValue([
+      row({ status: 'active', txt_record: '_pilldrops-challenge.app.example.com TXT abc123', txt_required: false }),
+    ])
+    renderDomains()
+
+    expect(await screen.findByText('_pilldrops-challenge.app.example.com TXT abc123')).toBeInTheDocument()
+    expect(screen.queryByText(/to prove it is yours/)).not.toBeInTheDocument()
+  })
+
+  it('says nothing about DNS for a host on the current domain', async () => {
+    vi.mocked(api.listDomains).mockResolvedValue([row({ status: 'active' })])
+    renderDomains()
+
+    expect(await screen.findByText('active')).toBeInTheDocument()
+    expect(screen.queryByText(/Update your DNS record/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/_pilldrops-challenge/)).not.toBeInTheDocument()
+  })
 })

@@ -66,6 +66,35 @@
         },
         "type": "array"
       },
+      "proxied_secrets": {
+        "description": "vault secrets the sandbox may use but never sees: it gets NAME=pd-proxied and NAME_PROXY_URL, and the node adds the secret to calls made through that URL to host. Point the SDK's base URL at it, e.g. OPENAI_BASE_URL=$OPENAI_API_KEY_PROXY_URL/v1",
+        "items": {
+          "properties": {
+            "format": {
+              "description": "value with {} for the secret (default \"Bearer {}\"; Anthropic: \"{}\")",
+              "type": "string"
+            },
+            "header": {
+              "description": "header to set (default Authorization)",
+              "type": "string"
+            },
+            "host": {
+              "description": "the API host the secret is for, e.g. api.openai.com",
+              "type": "string"
+            },
+            "name": {
+              "description": "vault secret name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "host"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
       "public": {
         "description": "make the preview URL reachable without a token (shareable link); default false = private",
         "type": "boolean"
@@ -73,6 +102,13 @@
       "runtime": {
         "description": "pin isolation runtime: firecracker | docker (omit = auto)",
         "type": "string"
+      },
+      "secret_refs": {
+        "description": "vault secrets (see list_secrets) to put in the sandbox's environment by name",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       },
       "slug": {
         "description": "DNS label this sandbox is hosted and resolved under; also its name on a network tag (\u003cslug\u003e.pd)",
@@ -97,8 +133,45 @@
       "vcpu": {
         "description": "vCPUs (0 = template default)",
         "type": "integer"
+      },
+      "volumes": {
+        "description": "standalone volumes to attach (see create_volume)",
+        "items": {
+          "properties": {
+            "id": {
+              "description": "volume id",
+              "type": "string"
+            },
+            "path": {
+              "description": "where to mount it, e.g. /data",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "path"
+          ],
+          "type": "object"
+        },
+        "type": "array"
       }
     },
+    "type": "object"
+  },
+  "create_volume": {
+    "properties": {
+      "name": {
+        "description": "a label for the volume",
+        "type": "string"
+      },
+      "size_mb": {
+        "description": "256 to 102400",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "size_mb"
+    ],
     "type": "object"
   },
   "delete_saved_state": {
@@ -152,6 +225,18 @@
     "required": [
       "name",
       "confirm"
+    ],
+    "type": "object"
+  },
+  "delete_volume": {
+    "properties": {
+      "volume_id": {
+        "description": "volume id (see list_volumes)",
+        "type": "string"
+      }
+    },
+    "required": [
+      "volume_id"
     ],
     "type": "object"
   },
@@ -315,6 +400,10 @@
     "type": "object"
   },
   "list_templates": {
+    "properties": {},
+    "type": "object"
+  },
+  "list_volumes": {
     "properties": {},
     "type": "object"
   },

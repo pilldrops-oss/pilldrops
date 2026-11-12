@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -237,8 +238,8 @@ func TestFleetCapabilitiesIsNotProxiedToANode(t *testing.T) {
 			"which means the request fell through to the /v1/ catch-all proxy instead of "+
 			"reaching handleCapabilities", got.Scope)
 	}
-	if got.Features == nil || len(got.Features) != 0 {
-		t.Errorf("features = %#v, want [] on the wire: absent would read as a server too old to say", got.Features)
+	if !slices.Equal(got.Features, []string{"control-plane", "volume"}) {
+		t.Errorf("features = %#v, want control-plane and volume: a fleet lists no cloud groups, and absent would read as a server too old to say", got.Features)
 	}
 	if !hasLevel(got.IsolationLevels, rt.IsolationStrong) {
 		t.Errorf("isolation_levels = %v, want strong — the registered node reports firecracker, "+

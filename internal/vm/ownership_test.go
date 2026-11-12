@@ -3,13 +3,13 @@
 package vm
 
 import (
+	"go.uber.org/zap"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
-
-	"go.uber.org/zap"
 )
 
 // A sandboxd sharing a host must never destroy what its own state dir has no record of.
@@ -97,5 +97,65 @@ func TestStaleTapDecisionNeverTouchesUnrecordedTaps(t *testing.T) {
 		if _, ok := records[v.id]; !ok {
 			t.Fatalf("decision produced a victim outside its own records: %v", v)
 		}
+	}
+}
+
+// A daemon that dies mid-build leaves its golden VM running with no sandbox record.
+// The overlay in this daemon's own directory says it is ours, so the restart reaps it.
+func TestRecoverOrphansReapsAGoldenVMFromADeadBuild(t *testing.T) {
+	m := ownershipManager(t)
+	m.config.OverlayDir = t.TempDir()
+	old := jailerBaseDir
+	jailerBaseDir = t.TempDir()
+	defer func() { jailerBaseDir = old }()
+
+	start := func() (int, chan struct{}) {
+		cmd := exec.Command("sleep", "60")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = cmd.Process.Kill() })
+		reaped := make(chan struct{})
+		go func() { _, _ = cmd.Process.Wait(); close(reaped) }()
+		return cmd.Process.Pid, reaped
+	}
+	overlay := func(id string) string {
+		path := filepath.Join(m.config.OverlayDir, id+".ext4")
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	alive := func(pid int) bool { return syscall.Kill(pid, 0) == nil }
+
+	orphanPID, orphanReaped := start()
+	orphanOverlay := overlay("golden-base-dead")
+
+	neighbourPID, _ := start()
+
+	buildingPID, _ := start()
+	overlay("golden-base-live")
+	goldenBuildStarted("golden-base-live")
+	defer goldenBuildFinished("golden-base-live")
+
+	m.recoverOrphanProcs([]*OrphanProcess{
+		{SandboxID: "golden-base-dead", Machine: &procKiller{pid: orphanPID}},
+		{SandboxID: "golden-base-other-daemon", Machine: &procKiller{pid: neighbourPID}},
+		{SandboxID: "golden-base-live", Machine: &procKiller{pid: buildingPID}},
+	})
+
+	select {
+	case <-orphanReaped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("a golden VM from a dead build was not reaped")
+	}
+	if _, err := os.Stat(orphanOverlay); !os.IsNotExist(err) {
+		t.Errorf("the dead build's overlay is still on disk: %v", err)
+	}
+	if !alive(neighbourPID) {
+		t.Error("killed a golden VM whose overlay is not in this daemon's directory: another daemon's build")
+	}
+	if !alive(buildingPID) {
+		t.Error("killed the golden VM this process is building right now")
 	}
 }

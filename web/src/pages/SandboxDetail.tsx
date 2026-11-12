@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { useParams, useNavigate, useLocation, useOutletContext } from 'react-router-dom'
 import { getSandbox, getSandboxLogs, pauseSandbox, resumeSandbox, forkSandbox, refreshSandbox, destroySandbox, listTemplates, isPreviewCrossOrigin, getSandboxMetrics, getSandboxPorts, setSandboxSlug, slugUrl, setSandboxVisibility, setPreviewAccess, absolutePreviewUrl, ApiError, IS_LOCAL_RUNTIME } from '../api'
 import UnsafeEmbedNotice from '../components/UnsafeEmbedNotice'
 import { useConfirm } from '../components/ConfirmModal'
@@ -9,7 +10,6 @@ import { cpuReading, memReading, diskReading } from '../lib/liveMetrics'
 import FileBrowser from '../components/FileBrowser'
 import type { SandboxDetail as SandboxDetailType, Template, SandboxMetrics, PortStatus } from '../types'
 import { statusPill } from './Sandboxes'
-import { TemplateIcon } from '../components/templateIcons'
 import { usePreviewLink, forgetPreviewTokens } from '../lib/previewToken'
 import { previewPortOf, withNoVncResize } from '../lib/previewPort'
 import SandboxTerminal from '../components/SandboxTerminal'
@@ -58,10 +58,12 @@ function quickStart(template: string): { cmds: QuickCmd[] } {
     return {
       cmds: [
         { label: 'Python version', cmd: 'python3 --version' },
-        {
-          label: 'pandas demo',
-          cmd: `python3 -c "import pandas as pd; print(pd.DataFrame({'x':[1,2,3],'y':[4,5,6]}).describe())"`,
-        },
+        ...(has('code-interpreter', 'python', 'jupyter')
+          ? [{
+              label: 'pandas demo',
+              cmd: `python3 -c "import pandas as pd; print(pd.DataFrame({'x':[1,2,3],'y':[4,5,6]}).describe())"`,
+            }]
+          : []),
         { label: 'Installed packages', cmd: 'pip list' },
       ],
     }
@@ -190,11 +192,15 @@ export function PreviewTab({
   status,
   defaultPort,
   outcome,
+  publicPreview,
+  onOpenTerminal,
 }: {
   id: string
   status: string
   defaultPort?: number
   outcome?: string
+  publicPreview?: boolean
+  onOpenTerminal?: () => void
 }) {
   // No default yet means the port is still being resolved: nothing is loaded
   // rather than a guess, since 8000 is wrong for a desktop. The default is
@@ -215,6 +221,12 @@ export function PreviewTab({
   }
   const isRunning = status === 'running'
 
+  const [reloads, setReloads] = useState(0)
+  function reload() {
+    if (port !== activePort) setActivePort(port)
+    setReloads(n => n + 1)
+  }
+
   const [detected, setDetected] = useState<PortStatus[] | null>(null)
   useEffect(() => {
     if (!isRunning) { setDetected(null); return }
@@ -223,9 +235,16 @@ export function PreviewTab({
       .then(r => { if (alive) setDetected(r.ports ?? []) })
       .catch(() => { if (alive) setDetected(null) })
     return () => { alive = false }
-  }, [id, isRunning])
+  }, [id, isRunning, reloads])
 
   const listening = (detected ?? []).filter(p => p.listening)
+  // Only a port the probe covered and heard nothing from; an unprobed port still loads.
+  const nothingServing = (detected ?? []).some(p => String(p.port) === activePort && !p.listening)
+
+  function chipTitle(p: PortStatus) {
+    if (p.loopback_only) return 'Listens on 127.0.0.1 only, so a preview cannot reach it. Bind 0.0.0.0 to open it.'
+    return p.port === defaultPort ? 'Declared preview port' : undefined
+  }
 
   function choosePort(p: number) {
     const s = String(p)
@@ -244,8 +263,24 @@ export function PreviewTab({
     if (!isRunning) return <NotRunningNotice status={status} what="preview your application" />
     if (!isPreviewCrossOrigin()) return <UnsafeEmbedNotice url={embedUrl} what="preview" />
     if (!activePort) return <div className="empty">Finding the preview port…</div>
+    if (nothingServing) {
+      return (
+        <div className="pvempty">
+          <div className="ic">
+            <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M4 9h16" /></svg>
+          </div>
+          <h3>Nothing to preview yet</h3>
+          <p>
+            Start a server with <code>--start</code> or the start API and it will show up here.
+            {publicPreview !== undefined && ` Preview access is set to ${publicPreview ? 'public' : 'token only'}.`}
+          </p>
+          {onOpenTerminal && <button type="button" className="btn" onClick={onOpenTerminal}>Open terminal</button>}
+        </div>
+      )
+    }
     return (
       <iframe
+        key={reloads}
         className="preview-iframe"
         src={embedUrl}
         title={`Preview — port ${activePort}`}
@@ -255,35 +290,40 @@ export function PreviewTab({
   }
 
   return (
-    <div className="preview-wrap">
-      <div className="preview-toolbar">
-        <span style={{ fontSize: 13, color: 'var(--sub)', fontWeight: 500 }}>Port</span>
-        <input
-          className="preview-port-input"
-          type="number"
-          value={port}
-          onChange={e => setPort(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') setActivePort(port) }}
-          min={1}
-          max={65535}
-          placeholder="8000"
-          aria-label="Preview port"
-        />
-        <button
-          className="btn"
-          onClick={() => setActivePort(port)}
-          disabled={!isRunning}
-        >
-          Load
+    <div className="pvpanel">
+      <div className="pvbar">
+        <button type="button" className="icon-btn" onClick={reload} disabled={!isRunning} title="Reload" aria-label="Reload preview">
+          <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5" /></svg>
         </button>
+        <div className="pvaddr">
+          <span className="url">{activePort ? absolutePreviewUrl(id, activePort) : ''}</span>
+          <label className="pvport">
+            Port
+            <input
+              type="number"
+              value={port}
+              onChange={e => setPort(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') setActivePort(port) }}
+              min={1}
+              max={65535}
+              placeholder="8000"
+              aria-label="Preview port"
+            />
+          </label>
+        </div>
+        {isRunning && iframeUrl && (
+          <IconCopyButton text={new URL(iframeUrl, window.location.origin).href} label="preview link" />
+        )}
         {isRunning && (
           <a
             href={iframeUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn"
+            className="icon-btn"
+            title="Open in new tab"
+            aria-label="Open in new tab"
           >
-            Open in new tab ↗
+            <svg viewBox="0 0 24 24"><path d="M7 17L17 7M9 7h8v8" /></svg>
           </a>
         )}
         {isRunning && outcome === 'report' && iframeUrl && (
@@ -294,27 +334,27 @@ export function PreviewTab({
       </div>
 
       {listening.length > 0 && (
-        <div className="preview-detected-ports">
-          <span className="preview-detected-label">
-            Detected ports — common ports we probed and got an answer from; an app on an unusual port may not appear
-          </span>
-          <div className="preview-port-chips">
-            {listening.map(p => (
-              <button
-                key={p.port}
-                type="button"
-                className={`port-chip${String(p.port) === activePort ? ' active' : ''}`}
-                onClick={() => choosePort(p.port)}
-                title={p.port === defaultPort ? 'Declared preview port' : undefined}
-              >
-                {p.port}{p.port === defaultPort ? ' ★' : ''}
-              </button>
-            ))}
-          </div>
+        <div
+          className="pvports"
+          title="Common ports we probed and got an answer from; an app on an unusual port may not appear"
+        >
+          <span className="pvports-l">Detected ports</span>
+          {listening.map(p => (
+            <button
+              key={p.port}
+              type="button"
+              className={`port-chip${String(p.port) === activePort ? ' active' : ''}`}
+              onClick={() => choosePort(p.port)}
+              disabled={p.loopback_only}
+              title={chipTitle(p)}
+            >
+              {p.port}{p.port === defaultPort ? ' ★' : ''}
+            </button>
+          ))}
         </div>
       )}
 
-      <div className="preview-frame-wrap">
+      <div className="pvbody">
         {previewBody()}
       </div>
     </div>
@@ -368,7 +408,7 @@ function NotRunningNotice({ status, what }: { status: string; what: string }) {
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
 
-export function LogsTab({ id }: { id: string }) {
+export function LogsTab({ id, onOpenTerminal }: { id: string; onOpenTerminal?: () => void }) {
   const [lines, setLines] = useState<string[]>([])
   const [note, setNote] = useState('')
   const [truncated, setTruncated] = useState(false)
@@ -402,35 +442,37 @@ export function LogsTab({ id }: { id: string }) {
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight >= 60) setAutoScroll(false)
   }
 
+  // The server words this note for the CLI; the page has its own copy for it.
+  const noAppLog = !note || note.startsWith('no app log yet')
+
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
-      <div className="logbar">
-        <span className="hint">{lines.length} lines</span>
+    <div className="logpanel">
+      <div className="logpanel-head">
+        <span className="dot" />
+        Application log <span className="count">· {lines.length} lines</span>
         <label className="chk">
-          <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} /> auto-scroll
+          <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} /> Auto-scroll
         </label>
       </div>
-      <div
-        ref={containerRef}
-        onScroll={handleScroll}
-        className="log-feed"
-        style={{
-          flex: 1, overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: 12.5,
-          background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: 14,
-        }}
-      >
-        {truncated && (
-          <div style={{ color: 'var(--faint)', marginBottom: 6 }}>… older output truncated</div>
-        )}
+      <div ref={containerRef} onScroll={handleScroll} className="logpanel-body">
+        {truncated && <div className="logpanel-note">… older output truncated</div>}
         {lines.length === 0 ? (
-          <div className="empty" style={{ padding: '60px 20px' }}>
-            {note || 'No app output yet.'}
-            {!note && <p>stdout and stderr of the start command appear here.</p>}
+          <div className="logpanel-empty">
+            <div className="ic">&gt;_</div>
+            <h3>{noAppLog ? 'No app logs yet' : note}</h3>
+            {noAppLog && (
+              <p>
+                Logs capture the server started with <code>--start</code> or the start API. Output from
+                ad-hoc <code>exec</code> is returned by exec itself, not here.
+              </p>
+            )}
+            <div className="cta">
+              {onOpenTerminal && <button type="button" className="btn primary" onClick={onOpenTerminal}>Open terminal</button>}
+              <a className="btn" href="#/docs">Read the docs</a>
+            </div>
           </div>
         ) : (
-          lines.map((l, i) => (
-            <div key={i} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{l}</div>
-          ))
+          lines.map((l, i) => <div key={i} className="logpanel-line">{l}</div>)
         )}
         <div ref={bottomRef} />
       </div>
@@ -514,11 +556,38 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   )
 }
 
+const COPY_ICON = <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" /></svg>
+
+function IconCopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      className="icon-btn"
+      title={copied ? 'Copied' : `Copy ${label}`}
+      aria-label={`Copy ${label}`}
+      onClick={() =>
+        navigator.clipboard?.writeText(text).then(
+          () => {
+            setCopied(true)
+            window.setTimeout(() => setCopied(false), 1400)
+          },
+          () => {},
+        )
+      }
+    >
+      {copied ? '✓' : COPY_ICON}
+    </button>
+  )
+}
+
+const API_ACCESS_LABEL = { org: 'Everyone in the org', private: 'Only the key that created it' } as const
+
 function storageLabel(sb: SandboxDetailType): string {
   if (sb.storage_used_mb !== undefined) {
     return `${fmtMB(sb.storage_used_mb)} of ${sb.storage_mb ? fmtMB(sb.storage_mb) : '—'}`
   }
-  return sb.storage_mb ? `${fmtMB(sb.storage_mb)} (usage not reported)` : '—'
+  return sb.storage_mb ? fmtMB(sb.storage_mb) : '—'
 }
 
 export function InfoTab({
@@ -536,7 +605,7 @@ export function InfoTab({
     { key: 'ID', value: sandbox.id, copy: sandbox.id },
     { key: 'Template', value: sandbox.template },
     { key: 'Status', value: sandbox.status },
-    { key: 'API access', value: sandbox.visibility === 'private' ? 'Only the key that created it' : 'Everyone in the org' },
+    { key: 'API access', value: API_ACCESS_LABEL[sandbox.visibility ?? 'org'] },
     { key: 'Preview URL', value: previewUrl, copy: previewUrl },
     {
       key: 'Ports',
@@ -578,16 +647,61 @@ export function InfoTab({
 
 const MEM_WARN_RATIO = 0.85
 
-function formatUptime(seconds: number): string {
+function formatDuration(seconds: number, withSeconds = false): string {
   if (seconds < 60) return `${Math.floor(seconds)}s`
   const mins = Math.floor(seconds / 60)
-  if (mins < 60) return `${mins}m`
+  if (mins < 60) return withSeconds ? `${mins}m ${Math.floor(seconds % 60)}s` : `${mins}m`
   const hrs = Math.floor(mins / 60)
   return `${hrs}h ${mins % 60}m`
 }
 
-export function MetricsStrip({ id, status }: { id: string; status: string }) {
-  const [m, setM] = useState<SandboxMetrics | null>(null)
+const SPARK_SAMPLES = 40
+
+// Scaled to the window's own range, so a steady reading still shows its movement.
+function Sparkline({ points }: { points: number[] }) {
+  if (points.length < 2) return null
+  const low = Math.min(...points)
+  const span = Math.max(Math.max(...points) - low, 1)
+  const line = points
+    .map((v, i) => `${i ? 'L' : 'M'}${((i / (points.length - 1)) * 100).toFixed(1)},${(28 - ((v - low) / span) * 26).toFixed(1)}`)
+    .join('')
+  return (
+    <svg className="sbspark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
+      <path className="a" d={`${line}L100,30L0,30Z`} />
+      <path className="l" d={line} />
+    </svg>
+  )
+}
+
+function MetricValue({ text }: { text: string }) {
+  const [head, ...rest] = text.split(' / ')
+  return (
+    <span className="sbmetric-value">
+      <b>{head}</b>
+      {rest.length > 0 && <small> / {rest.join(' / ')}</small>}
+    </span>
+  )
+}
+
+const meterWidth = (ratio: number) => `${Math.min(100, Math.max(0, ratio * 100))}%`
+
+export function MetricsStrip({
+  id,
+  status,
+  createdAt,
+  expiresAt,
+  children,
+}: {
+  id: string
+  status: string
+  createdAt?: string
+  expiresAt?: string
+  children?: ReactNode
+}) {
+  const [sample, setSample] = useState<{ m: SandboxMetrics | null; at: number } | null>(null)
+  const [cpuHistory, setCpuHistory] = useState<number[]>([])
+  const [memHistory, setMemHistory] = useState<number[]>([])
+  const [now, setNow] = useState(() => Date.now())
   const isRunning = status === 'running'
 
   useEffect(() => {
@@ -595,23 +709,37 @@ export function MetricsStrip({ id, status }: { id: string; status: string }) {
     let alive = true
     const load = () => {
       getSandboxMetrics(id)
-        .then(r => { if (alive) setM(r) })
+        .then(r => {
+          if (!alive) return
+          setSample({ m: r, at: Date.now() })
+          if (typeof r?.cpu_pct === 'number') setCpuHistory(h => [...h, r.cpu_pct!].slice(-SPARK_SAMPLES))
+          if (typeof r?.mem_used_mib === 'number') setMemHistory(h => [...h, r.mem_used_mib!].slice(-SPARK_SAMPLES))
+        })
         .catch(() => {})
     }
     load()
-    const t = setInterval(load, 5000)
-    return () => { alive = false; clearInterval(t) }
+    const poll = setInterval(load, 5000)
+    const tick = setInterval(() => setNow(Date.now()), 1000)
+    return () => { alive = false; clearInterval(poll); clearInterval(tick) }
   }, [id, isRunning])
 
-  if (!isRunning) return null
+  if (!isRunning) return children ? <div className="metrics-strip">{children}</div> : null
 
+  const m = sample?.m ?? null
   const cpu = cpuReading(m)
   const mem = memReading(m)
   const disk = diskReading(m)
-  const uptime = m?.uptime_seconds
+  const uptime = m?.uptime_seconds != null && sample
+    ? m.uptime_seconds + Math.max(0, (now - sample.at) / 1000)
+    : null
 
   const memRatio = m?.mem_used_mib != null && m?.mem_mib ? m.mem_used_mib / m.mem_mib : null
   const memWarn = memRatio != null && memRatio >= MEM_WARN_RATIO
+  const diskRatio = m?.disk_used_mb != null && m?.disk_limit_mb ? m.disk_used_mb / m.disk_limit_mb : null
+
+  const expires = expiresAt ? Date.parse(expiresAt) : NaN
+  const secondsLeft = Number.isFinite(expires) ? (expires - now) / 1000 : null
+  const lifetime = createdAt ? (expires - Date.parse(createdAt)) / 1000 : NaN
 
   return (
     <div className="metrics-strip">
@@ -624,7 +752,10 @@ export function MetricsStrip({ id, status }: { id: string; status: string }) {
             : 'vCPU allocated to this sandbox. Utilization is not reported for this runtime.'}
         >
           <span className="sbmetric-label">{cpu.kind === 'utilisation' ? 'CPU' : 'CPU size'}</span>
-          <span className="sbmetric-value">{cpu.text}</span>
+          <div className="sbmetric-row">
+            <MetricValue text={cpu.text} />
+            {cpu.kind === 'utilisation' && <Sparkline points={cpuHistory} />}
+          </div>
         </div>
       )}
       {mem && (
@@ -635,25 +766,44 @@ export function MetricsStrip({ id, status }: { id: string; status: string }) {
             ? "Resident memory against the sandbox's memory cap"
             : 'Memory allocated to this sandbox. Usage is not reported for this runtime.'}
         >
-          <span className="sbmetric-label">{mem.kind === 'utilisation' ? 'Memory' : 'Memory size'}</span>
-          <span className="sbmetric-value">{mem.text}</span>
-          {memWarn && (
-            <span className="sbmetric-warning" role="status" data-testid="metric-mem-warning">
-              ⚠ near memory cap
-            </span>
-          )}
+          <span className="sbmetric-label">
+            {mem.kind === 'utilisation' ? 'Memory' : 'Memory size'}
+            {memWarn && (
+              <span className="sbmetric-warning" role="status" data-testid="metric-mem-warning">
+                ⚠ near memory cap
+              </span>
+            )}
+          </span>
+          <div className="sbmetric-row">
+            <MetricValue text={mem.text} />
+            {mem.kind === 'utilisation' && <Sparkline points={memHistory} />}
+          </div>
         </div>
       )}
       {disk && (
         <div className="sbmetric" data-testid="metric-disk" title="Writable-layer disk usage">
           <span className="sbmetric-label">Disk</span>
-          <span className="sbmetric-value">{disk.text}</span>
+          <div className="sbmetric-row"><MetricValue text={disk.text} /></div>
+          {diskRatio != null && <div className="sbmeter"><span style={{ width: meterWidth(diskRatio) }} /></div>}
         </div>
       )}
-      <div className="sbmetric" data-testid="metric-uptime">
+      <div
+        className="sbmetric"
+        data-testid="metric-uptime"
+        title={expiresAt ? `Expires ${formatDate(expiresAt)}` : undefined}
+      >
         <span className="sbmetric-label">Uptime</span>
-        <span className="sbmetric-value">{uptime != null ? formatUptime(uptime) : '—'}</span>
+        <div className="sbmetric-row">
+          <span className="sbmetric-value">
+            <b>{uptime != null ? formatDuration(uptime, true) : '—'}</b>
+            {secondsLeft != null && secondsLeft > 0 && <small> · {formatDuration(secondsLeft)} left</small>}
+          </span>
+        </div>
+        {secondsLeft != null && lifetime > 0 && (
+          <div className="sbmeter ttl"><span style={{ width: meterWidth(secondsLeft / lifetime) }} /></div>
+        )}
       </div>
+      {children}
     </div>
   )
 }
@@ -662,6 +812,22 @@ export default function SandboxDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
+  // Absent when the page is rendered outside the shell; the bar then sits in the page.
+  const topSlot = useOutletContext<HTMLElement | null>()
+
+  const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !(e.target as Element).closest?.('.menu-wrap')) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', close)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', close)
+    }
+  }, [menuOpen])
 
   const [tab, setTabRaw] = useState<Tab>('shell')
   // Mounted on first visit and then only hidden, so a tab switch keeps the shell and its history.
@@ -700,6 +866,7 @@ export default function SandboxDetail() {
   const [fetched, setFetched] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [transition, setTransition] = useState<'pausing' | 'resuming' | null>(null)
 
   // Cleared on a 404 too, so a destroyed sandbox is not polled until unmount.
   const pollRef = useRef<number | null>(null)
@@ -713,7 +880,7 @@ export default function SandboxDetail() {
       setFetched(true)
       setError(null)
     } catch (e) {
-      setError((e as Error).message)
+      setError(e instanceof ApiError ? e.message : 'Connection lost — retrying…')
       if (e instanceof ApiError && e.status === 404 && pollRef.current !== null) {
         window.clearInterval(pollRef.current)
         pollRef.current = null
@@ -827,135 +994,159 @@ export default function SandboxDetail() {
     { id: 'info', label: 'Info' },
   ]
 
+  const status = statusPill(transition ?? (sb.status || 'running'))
+  const lifecycle = (to: 'pausing' | 'resuming', run: () => Promise<unknown>, done: string) => {
+    setTransition(to)
+    void doAction(run, undefined, done).finally(() => setTransition(null))
+  }
+  const menuAction = (run: () => void) => () => { setMenuOpen(false); run() }
+
+  const bar = (
+    <>
+      <div className="detail-title">
+        <div className="bc">
+          <button className="back-link" onClick={() => navigate('/')}>Sandboxes</button>
+          <span className="sep">/</span>
+          <b className="detail-name">{sb.name || sb.template}</b>
+        </div>
+        <span className="pill" style={{ background: status.bg, color: status.fg }}>
+          <span className="pd" style={{ background: status.fg }} />
+          {status.label}
+        </span>
+        <span className="chip">{sb.template}</span>
+        <span className="detail-id">
+          {sb.id}
+          <IconCopyButton text={sb.id} label="sandbox ID" />
+        </span>
+      </div>
+
+      <div className="tr detail-actions">
+        {isRunning && (
+          <a href={openUrl} target="_blank" rel="noopener noreferrer" className="btn primary">
+            Open preview ↗
+          </a>
+        )}
+        <div className="menu-wrap">
+          <button
+            className="btn more"
+            aria-label="More actions"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            disabled={busy}
+            onClick={() => setMenuOpen(o => !o)}
+          >
+            {busy ? <span className="spinner" aria-hidden="true" /> : '⋯'}
+          </button>
+          {menuOpen && (
+            <div className="menu detail-menu">
+              {!IS_LOCAL_RUNTIME && (isRunning ? (
+                <button
+                  disabled={busy}
+                  onClick={menuAction(() => lifecycle('pausing', () => pauseSandbox(id), 'Paused'))}
+                >
+                  <svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14" /></svg>
+                  Pause
+                </button>
+              ) : (
+                <button
+                  disabled={busy}
+                  onClick={menuAction(() => lifecycle('resuming', () => resumeSandbox(id), 'Resumed'))}
+                >
+                  <svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" /></svg>
+                  Resume
+                </button>
+              ))}
+              {!IS_LOCAL_RUNTIME && (
+                <button
+                  disabled={busy}
+                  title="Copy this sandbox, memory and running processes included"
+                  onClick={menuAction(() => doAction(
+                    () => forkSandbox(id, sb.name ? `${sb.name}-fork` : undefined).then((f) => { navigate(`/sandbox/${f.id}`); return f }),
+                    undefined,
+                    'Forked',
+                  ))}
+                >
+                  <svg viewBox="0 0 24 24"><circle cx="7" cy="5" r="2" /><circle cx="17" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M7 7v2a3 3 0 0 0 3 3h4a3 3 0 0 0 3-3V7M12 12v5" /></svg>
+                  Fork
+                </button>
+              )}
+              <button
+                disabled={busy}
+                title="Extend TTL"
+                onClick={menuAction(() => doAction(() => refreshSandbox(id), undefined, 'TTL refreshed'))}
+              >
+                <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5" /></svg>
+                Refresh TTL
+              </button>
+              <hr />
+              <button
+                className="danger"
+                disabled={busy}
+                onClick={menuAction(() =>
+                  doAction(
+                    () => destroySandbox(id).then(() => navigate('/')),
+                    `Destroy sandbox ${sb.id}? This cannot be undone.`
+                  )
+                )}
+              >
+                <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg>
+                Destroy sandbox
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  )
+
   return (
     <div className="detail-wrap">
-      <div className="detail-header">
-        <button className="back-link" onClick={() => navigate('/')}>
-          ← Sandboxes
-        </button>
+      {topSlot ? createPortal(bar, topSlot) : <div className="detail-header">{bar}</div>}
 
-        <div className="detail-title">
-          <div className="ic" style={{ width: 36, height: 36, borderRadius: 10 }}>
-            <TemplateIcon template={sb.template} />
-          </div>
-          <div>
-            <div className="detail-name">{sb.name || sb.template}</div>
-            <div className="detail-id">{sb.id}</div>
-          </div>
-          {(() => { const p = statusPill(sb.status || 'running'); return (
-            <span className="pill" style={{ background: p.bg, color: p.fg }}>
-              <span className="pd" style={{ background: p.fg }} />
-              {p.label}
-            </span>
-          ) })()}
-          <span className="chip">{sb.template}</span>
-        </div>
+      {error && sandbox && <p className="lm-error" style={{ marginBottom: 14 }}>{error}</p>}
 
-        <div className="detail-actions">
-          {isRunning && (
-            <a
-              href={openUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn"
-            >
-              Open preview ↗
-            </a>
-          )}
-          {!IS_LOCAL_RUNTIME && (isRunning ? (
-            <button
-              className="btn"
-              disabled={busy}
-              onClick={() => doAction(() => pauseSandbox(id), undefined, 'Paused')}
-            >
-              Pause
-            </button>
-          ) : (
-            <button
-              className="btn"
-              disabled={busy}
-              onClick={() => doAction(() => resumeSandbox(id), undefined, 'Resumed')}
-            >
-              Resume
-            </button>
-          ))}
-          {!IS_LOCAL_RUNTIME && <>
-          <button
-            className="btn"
-            disabled={busy}
-            title="Copy this sandbox, memory and running processes included"
-            onClick={() => doAction(
-              () => forkSandbox(id, sb.name ? `${sb.name}-fork` : undefined).then((f) => { navigate(`/sandbox/${f.id}`); return f }),
-              undefined,
-              'Forked',
-            )}
-          >
-            Fork
-          </button>
-          <label
-            className="detail-access"
-            title="Who can open, exec in and destroy this sandbox through the API. It does not change who can open the preview URL."
-          >
-            API access
-            <select
-              className="sel"
-              disabled={busy}
-              value={isPrivate ? 'private' : 'org'}
-              onChange={e => { if ((e.target.value === 'private') !== isPrivate) void shareToggle() }}
-            >
-              <option value="org">Whole org</option>
-              <option value="private">Only my key</option>
-            </select>
-          </label>
-          {!previewAccessHidden && sb.public_preview !== undefined && (
+      <MetricsStrip id={id} status={sb.status} createdAt={sb.created_at} expiresAt={sb.expires_at}>
+        {!IS_LOCAL_RUNTIME && (
+          <>
             <label
-              className="detail-access"
-              title={`Whether the app preview is reachable without a token. Ports ${ENVD_TERMINAL_PORT} `
-                + `(terminal) and ${ENVD_DESKTOP_PORT} (desktop) always need one regardless of this setting.`}
+              className="sbmetric"
+              title="Who can open, exec in and destroy this sandbox through the API. It does not change who can open the preview URL."
             >
-              Preview
+              <span className="sbmetric-label">API access</span>
               <select
                 className="sel"
                 disabled={busy}
-                value={isPublicPreview ? 'public' : 'token'}
-                onChange={e => {
-                  const next = e.target.value === 'public'
-                  if (next !== isPublicPreview) void previewAccessToggle(next)
-                }}
+                value={isPrivate ? 'private' : 'org'}
+                onChange={e => { if ((e.target.value === 'private') !== isPrivate) void shareToggle() }}
               >
-                <option value="public">Public</option>
-                <option value="token">Token only</option>
+                <option value="org">{API_ACCESS_LABEL.org}</option>
+                <option value="private">{API_ACCESS_LABEL.private}</option>
               </select>
             </label>
-          )}
-          </>}
-          <button
-            className="btn"
-            disabled={busy}
-            onClick={() => doAction(() => refreshSandbox(id), undefined, 'TTL refreshed')}
-            title="Extend TTL"
-          >
-            Refresh TTL
-          </button>
-          <button
-            className="btn danger"
-            disabled={busy}
-            onClick={() =>
-              doAction(
-                () => destroySandbox(id).then(() => navigate('/')),
-                `Destroy sandbox ${sb.id}? This cannot be undone.`
-              )
-            }
-          >
-            Destroy
-          </button>
-        </div>
-        {error && sandbox && (
-          <p className="lm-error" style={{ marginTop: 10 }}>{error}</p>
+            {!previewAccessHidden && sb.public_preview !== undefined && (
+              <label
+                className="sbmetric"
+                title={`Whether the app preview is reachable without a token. Ports ${ENVD_TERMINAL_PORT} `
+                  + `(terminal) and ${ENVD_DESKTOP_PORT} (desktop) always need one regardless of this setting.`}
+              >
+                <span className="sbmetric-label">Preview</span>
+                <select
+                  className="sel"
+                  disabled={busy}
+                  value={isPublicPreview ? 'public' : 'token'}
+                  onChange={e => {
+                    const next = e.target.value === 'public'
+                    if (next !== isPublicPreview) void previewAccessToggle(next)
+                  }}
+                >
+                  <option value="public">Public</option>
+                  <option value="token">Token only</option>
+                </select>
+              </label>
+            )}
+          </>
         )}
-      </div>
-
-      <MetricsStrip id={id} status={sb.status} />
+      </MetricsStrip>
 
       <div className="tab-bar" role="tablist">
         {tabs.map(t => (
@@ -984,9 +1175,11 @@ export default function SandboxDetail() {
             status={sb.status}
             defaultPort={fetched ? previewPort : undefined}
             outcome={tplMeta?.outcome}
+            publicPreview={sb.public_preview}
+            onOpenTerminal={() => setTab('shell')}
           />
         )}
-        {tab === 'logs' && <LogsTab id={id} />}
+        {tab === 'logs' && <LogsTab id={id} onOpenTerminal={() => setTab('shell')} />}
         {tab === 'info' && <InfoTab sandbox={sb} previewPort={previewPort} onSlug={slug => setSandbox(prev => (prev ? { ...prev, slug: slug || undefined } : prev))} />}
       </div>
     </div>

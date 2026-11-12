@@ -53,6 +53,8 @@ type nodeCapabilities struct {
 	// TagNetworks means two sandboxes that named the same network tag can reach
 	// each other on this node. False means a create naming tags is refused here.
 	TagNetworks bool `json:"tag_networks"`
+	// Volumes means a create may attach standalone volumes (POST /v1/volumes).
+	Volumes bool `json:"volumes"`
 	// EgressDomains means a sandbox's egress rules may name a DOMAIN on this
 	// node, matched by TLS SNI on 443 and the HTTP Host header on 80. False
 	// means only addresses and CIDRs are enforceable here and a rule set naming
@@ -107,6 +109,16 @@ type nodeLimits struct {
 func (s *Server) SetLocalTemplates(fn func() []string) { s.localTemplates = fn }
 
 // handleCapabilities answers GET /v1/capabilities for this node.
+// handleWhoami names the caller on a node with no control plane, which is what
+// `pilldrops login --key` checks a key against.
+func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
+	principal := "key"
+	if operatorPrincipal(r) {
+		principal = "operator"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"org": orgID(r), "principal": principal})
+}
+
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	// Refuse rather than describe: a zero Caps would read as isolation_level "trusted".
 	if s.d == nil {
@@ -159,6 +171,7 @@ func buildNodeCapabilities(rd runtimeDescriber, local func() []string, plan enti
 		NestedDocker:         caps.NestedDocker,
 		Desktop:              caps.Desktop,
 		TagNetworks:          caps.TagNetworks,
+		Volumes:              caps.Volumes,
 		EgressDomains:        caps.EgressDomains,
 		Checkpoint:           caps.Checkpoint,
 		NamedSnapshot:        caps.NamedSnapshot,
@@ -167,7 +180,7 @@ func buildNodeCapabilities(rd runtimeDescriber, local func() []string, plan enti
 		WarmRestoreStorageMB: caps.WarmRestoreStorageMB,
 		Templates:            tmpl,
 		TemplatesEnumerated:  enumerated,
-		Features:             []string{},
+		Features:             nodeFeatures(caps),
 		Limits: nodeLimits{
 			MaxVCPU:       plan.MaxVCPU,
 			MaxMemMB:      plan.MaxMemMB,
@@ -177,4 +190,13 @@ func buildNodeCapabilities(rd runtimeDescriber, local func() []string, plan enti
 			NodeMaxActive: maxActive,
 		},
 	}, true
+}
+
+// nodeFeatures lists the optional groups this node serves: volumes need a
+// runtime that can attach them, so a Docker node does not offer the commands.
+func nodeFeatures(caps rt.Caps) []string {
+	if caps.Volumes {
+		return []string{"volume"}
+	}
+	return []string{}
 }

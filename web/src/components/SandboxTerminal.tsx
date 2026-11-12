@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -100,6 +100,14 @@ export default function SandboxTerminal({ wsPath, disabledReason, onReady }: Pro
     }
   }, [wsPath, disabledReason, gen])
 
+  const reconnect = useCallback(() => { setStatus('connecting'); setGen(g => g + 1) }, [])
+
+  useEffect(() => {
+    if (status !== 'closed') return
+    window.addEventListener('online', reconnect)
+    return () => window.removeEventListener('online', reconnect)
+  }, [status, reconnect])
+
   if (disabledReason) {
     return <div className="empty">{disabledReason}</div>
   }
@@ -111,7 +119,7 @@ export default function SandboxTerminal({ wsPath, disabledReason, onReady }: Pro
           {STATUS_LABEL[status]}
         </span>
         {status === 'closed' && (
-          <button className="link-btn" onClick={() => { setStatus('connecting'); setGen(g => g + 1) }}>
+          <button className="link-btn" onClick={reconnect}>
             Reconnect
           </button>
         )}

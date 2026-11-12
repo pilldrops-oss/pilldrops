@@ -170,7 +170,7 @@ func TestCapabilitiesEndpoint(t *testing.T) {
 		t.Errorf("scope = %q, want \"node\"", got.Scope)
 	}
 	if got.Features == nil || len(got.Features) != 0 {
-		t.Errorf("features = %#v, want [] on the wire: absent would read as a server too old to say", got.Features)
+		t.Errorf("features = %#v, want [] on the wire: this runtime attaches no volumes, and absent would read as a server too old to say", got.Features)
 	}
 	if got.Runtime != "process" {
 		t.Errorf("runtime = %q, want \"process\" — the test server boots the process runtime, "+
@@ -332,5 +332,44 @@ func TestCapabilitiesReportWarmRestoreStorageSize(t *testing.T) {
 				t.Error("warm_restore_storage_mb missing from the JSON document")
 			}
 		})
+	}
+}
+
+func TestWhoamiNamesTheKeyOnANode(t *testing.T) {
+	srv, key := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/whoami", nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("code %d", resp.StatusCode)
+	}
+	var who map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&who); err != nil {
+		t.Fatal(err)
+	}
+	if who["principal"] == "" || who["org"] == "" {
+		t.Errorf("whoami = %v, want a principal and an org", who)
+	}
+
+	anonymous, err := http.Get(srv.URL + "/v1/whoami")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer anonymous.Body.Close()
+	if anonymous.StatusCode != http.StatusUnauthorized {
+		t.Errorf("no key: code %d, want 401", anonymous.StatusCode)
+	}
+}
+
+func TestNodeFeaturesOfferVolumesOnlyWhereTheyAttach(t *testing.T) {
+	if got := nodeFeatures(rt.Caps{Volumes: true}); len(got) != 1 || got[0] != "volume" {
+		t.Errorf("a runtime with volumes: %v, want [volume]", got)
+	}
+	if got := nodeFeatures(rt.Caps{}); got == nil || len(got) != 0 {
+		t.Errorf("a runtime without volumes: %#v, want an empty list", got)
 	}
 }

@@ -118,3 +118,36 @@ func TestCreateSeparatesTheBareURLFromTheOneThatOpens(t *testing.T) {
 		t.Errorf("viewer_url %q is not url %q plus its token", viewer, plain)
 	}
 }
+
+// Nodes switch domain only when restarted, so for a while a node still mints
+// its links on the legacy domain. The caller must get them on the current
+// one, with a viewer_url, and never the node's own ?ptok=.
+func TestALegacyDomainNodeLinkIsMintedOnTheCurrentDomain(t *testing.T) {
+	s, _ := createFailureFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, `{"id":"sb-1","template":"base","state":"running",`+
+				`"url":"https://8000-sb-1.pilldrops.com/?ptok=the-node-hop-credential"}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	s.sandboxDomain = "pilldrops.app"
+	s.portalOrigin = "https://pilldrops.com"
+	s.setLegacyDomains([]string{"pilldrops.com"})
+
+	_, body := createLink(t, s)
+	if got := body["url"]; got != "https://8000-sb-1.pilldrops.app/" {
+		t.Errorf("url = %v, want it on pilldrops.app", got)
+	}
+	viewer, _ := body["viewer_url"].(string)
+	if !strings.HasPrefix(viewer, "https://8000-sb-1.pilldrops.app/?token=") {
+		t.Errorf("viewer_url = %q, want one minted on pilldrops.app", viewer)
+	}
+	for k, v := range body {
+		if link, _ := v.(string); strings.Contains(link, "ptok=") {
+			t.Errorf("%s relays the node's own credential: %s", k, link)
+		}
+	}
+}

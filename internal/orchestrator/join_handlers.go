@@ -52,6 +52,19 @@ func (s *Server) handleMintJoinToken(w http.ResponseWriter, r *http.Request) {
 			"unencrypted. Set SANDBOXD_SECRET_KEY, or NODE_BOOTSTRAP_SECRET to the same value)")
 		return
 	}
+	// A clustered control plane hands its bootstrap DSN to every node that
+	// joins; minted now, with none to hand out, the node writes
+	// SANDBOXD_DATABASE_URL= (empty) and refuses to start under
+	// SANDBOXD_PRODUCTION=1 — found only on the node, long after the operator
+	// walked away from this call. Refuse here instead.
+	if s.nodeToken != "" && s.bootstrapDSN == "" {
+		writeErr(w, 503, "orchestrator not configured: NODE_BOOTSTRAP_DSN is not set "+
+			"(refusing to mint a join token — a clustered control plane hands this Postgres DSN to "+
+			"every node at join, and a node that joins without one refuses to start under "+
+			"SANDBOXD_PRODUCTION=1. Set NODE_BOOTSTRAP_DSN, ideally to the least-privilege role from "+
+			"scripts/postgres-node-role.sql over sslmode=require)")
+		return
+	}
 	now := s.now()
 	tok := s.join.Mint(now, cluster.JoinTokenTTL)
 	orchURL := externalURL(r)
@@ -108,6 +121,14 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	taken := make([]string, 0, len(s.reg.Nodes()))
 	for _, n := range s.reg.Nodes() {
 		taken = append(taken, n.ID)
+	}
+	if st := s.st.Load(); st != nil {
+		if removedIDs, err := st.RemovedNodeIDs(r.Context()); err == nil {
+			taken = append(taken, removedIDs...)
+		} else {
+			s.logger.ErrorContext(r.Context(), "listing removed node ids failed; a re-joined machine "+
+				"could be allocated one by coincidence", "component", "orchestrator", "err", err)
+		}
 	}
 	id := s.join.AllocateName(body.SuggestedID, taken)
 

@@ -32,35 +32,51 @@ func overlaySizeMB(requested int) int {
 // filesystem size, which the guest cannot grow from inside.
 func createOverlay(sandboxID string, uid, sizeMB int, cfg Config) (string, error) {
 	path := filepath.Join(cfg.OverlayDir, sandboxID+".ext4")
+	if err := makeExt4(path, uid, overlaySizeMB(sizeMB)); err != nil {
+		return "", fmt.Errorf("overlay: %w", err)
+	}
+	return path, nil
+}
 
-	sizeMB = overlaySizeMB(sizeMB)
-
+// makeExt4 creates a sparse ext4 image of sizeMB at path, owned by uid and
+// readable by nobody else. On error nothing is left behind.
+func makeExt4(path string, uid, sizeMB int) error {
 	f, err := os.Create(path)
 	if err != nil {
-		return "", fmt.Errorf("create overlay file: %w", err)
+		return fmt.Errorf("create image file: %w", err)
 	}
 	_ = f.Close()
 
 	if err := os.Truncate(path, int64(sizeMB)<<20); err != nil {
 		_ = os.Remove(path)
-		return "", fmt.Errorf("truncate: %w", err)
+		return fmt.Errorf("truncate: %w", err)
 	}
 
 	if out, err := exec.CommandContext(context.Background(), "mkfs.ext4", "-F", "-q", path).CombinedOutput(); err != nil {
 		_ = os.Remove(path)
-		return "", fmt.Errorf("mkfs.ext4: %s: %w", strings.TrimSpace(string(out)), err)
+		return fmt.Errorf("mkfs.ext4: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
 	if err := os.Chown(path, uid, uid); err != nil {
 		_ = os.Remove(path)
-		return "", fmt.Errorf("chown overlay to %d: %w", uid, err)
+		return fmt.Errorf("chown image to %d: %w", uid, err)
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		_ = os.Remove(path)
-		return "", fmt.Errorf("chmod overlay: %w", err)
+		return fmt.Errorf("chmod image: %w", err)
 	}
+	return nil
+}
 
-	return path, nil
+// ownVolumes hands each attached volume to the VMM's uid. A volume belongs to
+// one sandbox at a time, so the chown takes it from the previous holder.
+func ownVolumes(paths []string, uid int) error {
+	for _, p := range paths {
+		if err := os.Chown(p, uid, uid); err != nil {
+			return fmt.Errorf("volume %s: %w", filepath.Base(p), err)
+		}
+	}
+	return nil
 }
 
 // copySparse copies src to dst preserving holes. An overlay is almost entirely

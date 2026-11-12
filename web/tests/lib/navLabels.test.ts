@@ -14,6 +14,10 @@ describe('breadcrumb labels', () => {
     expect(labelFor('domains', false)).toBe('Domains')
   })
 
+  it('labels Volumes as Volumes', () => {
+    expect(labelFor('volumes', false)).toBe('Volumes')
+  })
+
   it('gives every customer route its own label', () => {
     for (const route of CUSTOMER_ROUTES) {
       const label = labelFor(route, false)

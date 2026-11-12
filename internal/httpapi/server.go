@@ -228,6 +228,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	route("GET /v1/host", s.authAdmin(s.handleHost))
 	route("GET /v1/nodes", s.authAdmin(s.handleNodes))
 	route("GET /v1/capabilities", s.auth(s.handleCapabilities))
+	route("GET /v1/whoami", s.auth(s.handleWhoami))
 
 	route("POST /v1/sandboxes", s.auth(s.handleCreate))
 	route("GET /v1/sandboxes", s.auth(s.handleList))
@@ -285,6 +286,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.registerBackupRoutes(route)
 	s.registerSnapshotExportRoutes(route)
 	s.registerOpsRoutes(route)
+	s.registerVolumeRoutes(route)
 	s.registerIntegrationRoutes(route)
 	s.registerChatRoutes(route)
 	s.registerForwardRoutes(raw)

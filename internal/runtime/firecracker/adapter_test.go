@@ -17,6 +17,10 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/vm"
 )
 
+func (f *fakeBackend) VolumePath(id string) (string, error) { return "/vols/" + id + ".ext4", nil }
+func (f *fakeBackend) CreateVolume(string, int) error       { return nil }
+func (f *fakeBackend) DeleteVolume(string) error            { return nil }
+
 // setNetworks records the last membership push per vm id.
 func (f *fakeBackend) SetNetworks(id string, n rt.Networks) (string, error) {
 	if f.networks == nil {

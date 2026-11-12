@@ -161,10 +161,17 @@ func buildGoldenSnapshot(t *testing.T, m *Manager, cfg Config, tmpl string, prep
 	// The tap must go: every restore below claims its name.
 	TeardownVMNetwork(netw.TapName)
 
+	// Restore serves only a golden built at today's size against today's image.
+	digest, err := digestOf(filepath.Join(cfg.SnapshotDir, tmpl, "rootfs.squashfs"))
+	if err != nil {
+		t.Fatalf("digest of %s's rootfs: %v", tmpl, err)
+	}
 	id := goldenIdentity{
-		TapName:     netw.TapName,
-		VMIP:        netw.VMIP.String(),
-		OverlayBase: filepath.Base(overlay),
+		TapName:      netw.TapName,
+		VMIP:         netw.VMIP.String(),
+		OverlayBase:  filepath.Base(overlay),
+		StorageMB:    goldenStorageMB(cfg, tmpl),
+		RootfsDigest: digest,
 	}
 	if err := writeGoldenIdentity(snapDir, id); err != nil {
 		t.Fatalf("writeGoldenIdentity: %v", err)

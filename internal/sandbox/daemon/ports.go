@@ -49,7 +49,9 @@ func (d *Daemon) DetectPorts(ctx context.Context, id string, candidates []int) (
 		listeners, read = guestListeners(ctx, inst)
 	}
 	for port, loopbackOnly := range listeners {
-		if rt.IsPlatformPort(port) {
+		// A platform port is not a user app, unless the caller asked about it:
+		// the desktop template's declared preview port is the desktop port.
+		if _, asked := byPort[port]; !asked && rt.IsPlatformPort(port) {
 			continue
 		}
 		byPort[port] = PortStatus{Port: port, Listening: true, LoopbackOnly: loopbackOnly}

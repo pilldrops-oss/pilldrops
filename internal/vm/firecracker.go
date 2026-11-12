@@ -248,6 +248,14 @@ func (fc FirecrackerConfig) devices() (net.IP, string, []models.Drive, []firecra
 			IsReadOnly:   firecracker.Bool(false),
 		},
 	}
+	for i, v := range fc.Volumes {
+		drives = append(drives, models.Drive{
+			DriveID:      firecracker.String(fmt.Sprintf("vol%d", i)),
+			PathOnHost:   firecracker.String(v),
+			IsRootDevice: firecracker.Bool(false),
+			IsReadOnly:   firecracker.Bool(false),
+		})
+	}
 	nics := []firecracker.NetworkInterface{
 		{
 			StaticConfiguration: &firecracker.StaticNetworkConfiguration{

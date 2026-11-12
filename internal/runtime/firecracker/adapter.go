@@ -43,6 +43,10 @@ type vmBackend interface {
 	// SetNetworks replaces a sandbox's tag-network membership and returns the
 	// address peers reach it on.
 	SetNetworks(id string, n rt.Networks) (string, error)
+	// VolumePath, CreateVolume and DeleteVolume manage standalone volume images.
+	VolumePath(id string) (string, error)
+	CreateVolume(id string, sizeMB int) error
+	DeleteVolume(id string) error
 	ForkSandbox(ctx context.Context, parentID, childID string, vcpu, memMB int) (*vm.Sandbox, time.Duration, error)
 	ForkFromSnapshot(ctx context.Context, srcDir, childID string, vcpu, memMB int) (*vm.Sandbox, error)
 	// BootFromCapture boots a new sandbox out of a capture fetched from
@@ -132,6 +136,7 @@ func (r *fcRuntime) Capabilities() rt.Caps {
 	// Same condition: the partition is a rule in the host's netns table, and
 	// the shared bridge has no slot addresses to pair.
 	caps.TagNetworks = r.netns
+	caps.Volumes = true
 	// Stamping a new machine out of a capture reuses the baked tap name and
 	// guest address, which only a private namespace has room for: on the shared
 	// bridge the source's address is already live (vm.ErrForkNeedsNetNS).
@@ -180,6 +185,14 @@ func (r *fcRuntime) CheckIsolation(ctx context.Context) error {
 }
 
 func (r *fcRuntime) Boot(ctx context.Context, spec rt.BootSpec) (rt.Instance, error) {
+	var volumes []string
+	for _, v := range spec.Volumes {
+		p, err := r.be.VolumePath(v.ID)
+		if err != nil {
+			return nil, err
+		}
+		volumes = append(volumes, p)
+	}
 	sb, err := r.be.Create(ctx, vm.CreateRequest{
 		Template: spec.Template.Name,
 		UserID:   "sandboxd",
@@ -189,6 +202,7 @@ func (r *fcRuntime) Boot(ctx context.Context, spec rt.BootSpec) (rt.Instance, er
 		MemoryMB:  spec.MemMiB,
 		StorageMB: spec.StorageMB,
 		Egress:    spec.Egress,
+		Volumes:   volumes,
 	})
 	if err != nil {
 		return nil, err
@@ -196,8 +210,39 @@ func (r *fcRuntime) Boot(ctx context.Context, spec rt.BootSpec) (rt.Instance, er
 	if err := r.deliverIdentity(ctx, sb.ID, spec); err != nil {
 		return nil, err
 	}
-	return r.instance(ctx, sb, spec)
+	inst, err := r.instance(ctx, sb, spec)
+	if err != nil {
+		return nil, err
+	}
+	if err := mountVolumes(ctx, inst, spec.Volumes); err != nil {
+		_ = r.be.Destroy(ctx, sb.ID)
+		return nil, err
+	}
+	return inst, nil
 }
+
+// mountVolumes mounts each attached volume where the caller asked. Firecracker
+// names drives in attach order after the root image (vda) and overlay (vdb).
+// Paths were validated by the daemon to a plain absolute path.
+func mountVolumes(ctx context.Context, inst rt.Instance, vols []rt.VolumeMount) error {
+	for i, v := range vols {
+		dev := fmt.Sprintf("/dev/vd%c", 'c'+i)
+		res, err := inst.Exec(ctx, rt.ExecSpec{Cmd: "mkdir -p " + v.Path + " && mount " + dev + " " + v.Path})
+		if err != nil {
+			return fmt.Errorf("mount volume %s: %w", v.ID, err)
+		}
+		if res.ExitCode != 0 {
+			return fmt.Errorf("mount volume %s at %s: %s", v.ID, v.Path, strings.TrimSpace(res.Stderr))
+		}
+	}
+	return nil
+}
+
+// CreateVolume implements rt.Volumer.
+func (r *fcRuntime) CreateVolume(id string, sizeMB int) error { return r.be.CreateVolume(id, sizeMB) }
+
+// DeleteVolume implements rt.Volumer.
+func (r *fcRuntime) DeleteVolume(id string) error { return r.be.DeleteVolume(id) }
 
 // instance wraps a booted VM and pushes the create env into the guest before
 // anything can run there. A guest that cannot take its env is destroyed rather

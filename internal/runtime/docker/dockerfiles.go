@@ -106,7 +106,7 @@ RUN printf '%s\n' \
 	// Mirrors templates/node/Dockerfile.
 	"node": `FROM node:20-slim
 RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN npm install -g typescript tsx ts-node
+RUN npm install -g typescript@5 tsx ts-node @types/node@20 && mkdir /node_modules && ln -s "$(npm root -g)/@types" /node_modules/@types
 WORKDIR /workspace`,
 
 	// Desktop for computer-use agents. The screen itself is DesktopLayer,

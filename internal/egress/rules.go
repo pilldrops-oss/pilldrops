@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 // Rule-set size limits, matching what comparable providers publish.
@@ -239,4 +241,24 @@ func (r *Rules) HasDomains() bool {
 func (r *Rules) Validate() error {
 	_, _, err := r.Parse()
 	return err
+}
+
+// CheckWildcards refuses an allow wildcard over a public suffix ("*.co.uk",
+// "*.github.io"), which admits every site registered under it. Separate from
+// ParseEntry so it applies to rules as they arrive, not to ones already stored.
+func CheckWildcards(r *Rules) error {
+	if r == nil {
+		return nil
+	}
+	for _, raw := range r.Allow {
+		e, err := ParseEntry(raw)
+		if err != nil || !e.Wildcard {
+			continue
+		}
+		if suffix, _ := publicsuffix.PublicSuffix(e.Domain); suffix == e.Domain {
+			return fmt.Errorf("allow list: %q covers the public suffix %q, so it would allow every site "+
+				"registered under it; name the sites themselves, e.g. \"*.example.%s\"", raw, e.Domain, e.Domain)
+		}
+	}
+	return nil
 }

@@ -2,8 +2,9 @@
 
 **Open-source, self-hosted sandboxes for AI agents and untrusted code.**
 
-PillDrops gives every piece of code its own disposable Linux machine: a
-Firecracker microVM with its own kernel, created in one API call. Run
+PillDrops gives every piece of code its own disposable Linux machine, created
+in one API call: a microVM with its own kernel on a machine with KVM, or a
+container where KVM is not available. Run
 AI-generated code, host an app on a preview URL, give a coding agent a real
 computer, then pause it, copy it, roll it back or throw it away. It runs on
 your own hardware, from one laptop to a fleet.
@@ -20,9 +21,10 @@ with Sandbox.create(template="python-3.11") as sb:
 
 ## What you can do with it
 
-- **Run untrusted code safely.** Each sandbox is a microVM with its own kernel,
-  network namespace and resource limits, isolated from the host and from
-  other sandboxes.
+- **Run untrusted code safely.** On a KVM machine each sandbox is a microVM with
+  its own kernel, network namespace and resource limits, isolated from the host
+  and from other sandboxes. Without KVM it is a container, a weaker boundary;
+  [`docs/runtimes.md`](docs/runtimes.md) compares them.
 - **Run commands, code and files.** Execute shell commands or code snippets,
   read and write files, upload whole directories, open an interactive terminal.
 - **Host apps on a URL.** Start a server in a sandbox and get a preview URL for
@@ -34,6 +36,8 @@ with Sandbox.create(template="python-3.11") as sb:
 - **Checkpoints.** Save a sandbox and roll it back to that point in place.
 - **Snapshots.** Set a machine up once, save it, and start new sandboxes from it
   with everything already installed.
+- **Volumes.** Keep data on a disk that outlives the sandbox and attach it to
+  the next one.
 - **Control the network.** Allow or deny outbound traffic by domain or address,
   per sandbox.
 - **Bring your own image.** Use a template (Python, Node, Go, browsers,
@@ -48,7 +52,21 @@ with Sandbox.create(template="python-3.11") as sb:
 
 ### 1. Run a PillDrops server
 
-To try the API and dashboard on your own machine (macOS or Linux, needs Go):
+On a Linux server (x86_64, systemd):
+
+```bash
+curl -fsSL https://get.pilldrops.com | sudo sh
+```
+
+It uses Firecracker microVMs when the machine has KVM and Docker containers when
+it does not, starts the server on port 8080, and prints the dashboard address
+and where the API key is. The first dashboard visit creates the admin account.
+Run the same command again to upgrade. Docker needs a disk that can cap each
+container's storage (XFS with `pquota`); the installer says so if yours cannot.
+Put HTTPS in front before exposing the server to the internet.
+
+To try the API and dashboard on your own machine without isolation (macOS or
+Linux, needs Go):
 
 ```bash
 git clone https://github.com/pilldrops-oss/pilldrops && cd pilldrops
@@ -56,21 +74,10 @@ make dev          # http://localhost:8080 — dashboard at /dashboard, API docs 
 ```
 
 This development server runs sandbox commands **as your user, without
-isolation**, and only listens on localhost. For real isolation, run a node on
-Linux with KVM (Firecracker) or Docker:
+isolation**, and only listens on localhost.
 
-```bash
-make sandboxd
-export SANDBOXD_DATA=/var/lib/sandboxd
-sudo -E ./bin/sandboxd                        # serves on :8080
-sudo cat /var/lib/sandboxd/bootstrap.key      # your API key, for SDKs and the CLI
-```
-
-Open `http://<server>:8080/dashboard`: the first visit asks you to create the
-admin account (email and password), which signs you in from then on.
-
-`scripts/provision-node.sh` sets up a bare KVM host (Firecracker, kernel,
-templates). See [deployment](docs/deployment.md) for everything else.
+A fleet of nodes behind a control plane installs with one command from the CLI,
+`pilldrops cluster apply`; see [deployment](docs/deployment.md).
 
 ### 2. Install an SDK and point it at your server
 
@@ -79,7 +86,7 @@ pip install pilldrops              # Python
 npm install @pilldrops/sdk         # JavaScript / TypeScript
 npm install -g @pilldrops/cli      # CLI
 
-export PILLDROPS_API_URL=http://localhost:8080
+export PILLDROPS_API_URL=http://<server>:8080
 export PILLDROPS_API_KEY=<your key>          # not needed for make dev
 ```
 

@@ -52,9 +52,27 @@ describe('playwright report and logs (UC4)', () => {
     render(<LogsTab id="sb1" />)
     expect(await screen.findByText('RED done')).toBeInTheDocument()
     expect(screen.getByText('plain')).toBeInTheDocument()
-    const toggle = screen.getByRole('checkbox', { name: /auto-scroll/ })
+    const toggle = screen.getByRole('checkbox', { name: /auto-scroll/i })
     expect(toggle).toBeChecked()
     await userEvent.click(toggle)
     await waitFor(() => expect(toggle).not.toBeChecked())
+  })
+
+  it('shows its own copy for the server\'s no-app-log note, not the raw text', async () => {
+    Element.prototype.scrollIntoView = vi.fn()
+    vi.mocked(getSandboxLogs).mockResolvedValue({
+      lines: [], note: 'no app log yet — it captures the server started via `--start`/the start API',
+    })
+    const { container } = render(<LogsTab id="sb1" />)
+    await waitFor(() => expect(getSandboxLogs).toHaveBeenCalled())
+    expect(await screen.findByRole('heading', { name: 'No app logs yet' })).toBeInTheDocument()
+    expect(container.textContent).not.toContain('`')
+  })
+
+  it('keeps any other server note as the heading', async () => {
+    Element.prototype.scrollIntoView = vi.fn()
+    vi.mocked(getSandboxLogs).mockResolvedValue({ lines: [], note: 'sandbox is paused — logs return when it wakes' })
+    render(<LogsTab id="sb1" />)
+    expect(await screen.findByRole('heading', { name: /sandbox is paused/ })).toBeInTheDocument()
   })
 })

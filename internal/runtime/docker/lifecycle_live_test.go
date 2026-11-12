@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
@@ -242,10 +243,11 @@ func TestLiveAliveSeesAContainerThatDied(t *testing.T) {
 	old := deadConfirmAfter
 	deadConfirmAfter = 0
 	t.Cleanup(func() { deadConfirmAfter = old })
-	if dockerdStarted().IsZero() {
-		// With dockerd's start unknown every stop reads as a restart's, to revive.
+	if restartCasualty(time.Now(), dockerdStarted()) {
+		// With dockerd's start unknown, or within restartGrace of it as on a
+		// fresh CI runner, every stop reads as a restart's, to revive.
 		if lv.Alive() || !inst.(rt.Reviver).Casualty() {
-			t.Error("a stopped container under an unknown dockerd start is not a restart casualty")
+			t.Error("a stop with dockerd's start unknown or recent is not a restart casualty")
 		}
 	} else {
 		if !lv.Alive() {
@@ -286,6 +288,83 @@ func TestLiveProcsWithoutAShell(t *testing.T) {
 	for _, p := range procs {
 		if p.PID != 0 {
 			t.Errorf("%q listed with host pid %d, which Signal would send into the container", p.Cmd, p.PID)
+		}
+	}
+}
+
+// A service's own entrypoint is PID 1 and starts no envd, so its terminal
+// preview answered 503 "starting" for good. Needs PD_ENVD_PATH: a linux envd
+// built for the daemon's architecture.
+func TestLiveServiceSandboxHasATerminal(t *testing.T) {
+	if !fileExists(envdHostPath()) {
+		t.Skip("no envd binary at PD_ENVD_PATH")
+	}
+	r, err := New()
+	if err != nil {
+		t.Skipf("docker runtime unavailable: %v", err)
+	}
+	ctx := t.Context()
+	inst, err := r.Boot(ctx, rt.BootSpec{
+		SandboxID: liveSandboxID(t, "sb-live-svc"),
+		Template:  rt.Template{Name: "redis", Image: "redis:7-alpine", Ports: []int{6379}},
+		VCPU:      1, MemMiB: 256,
+	})
+	if err != nil {
+		t.Skipf("boot failed (image or daemon unavailable): %v", err)
+	}
+	token, _ := inst.(rt.TerminalAuthorizer).TerminalToken()
+	if token == "" {
+		t.Fatal("service sandbox has no terminal token: envd was not started")
+	}
+	target, err := inst.ListenTarget(rt.TerminalPort)
+	if err != nil {
+		t.Fatalf("terminal target: %v", err)
+	}
+	var lastErr error
+	for range 20 {
+		var resp *http.Response
+		if resp, lastErr = http.Get("http://" + target + "/"); lastErr == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+			lastErr = errors.New(resp.Status)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	t.Fatalf("terminal never answered on %s: %v", target, lastErr)
+}
+
+// The envd token lived only in the node process, so after a node restart an
+// adopted sandbox had none and its terminal answered 401.
+func TestLiveAdoptRecoversTheTerminalToken(t *testing.T) {
+	if !fileExists(envdHostPath()) {
+		t.Skip("no envd binary at PD_ENVD_PATH")
+	}
+	r, err := New()
+	if err != nil {
+		t.Skipf("docker runtime unavailable: %v", err)
+	}
+	ctx := t.Context()
+	for _, tmpl := range []rt.Template{
+		{Name: "base", Image: "alpine:3"},
+		{Name: "redis", Image: "redis:7-alpine", Ports: []int{6379}},
+	} {
+		id := liveSandboxID(t, "sb-live-adopt")
+		inst, err := r.Boot(ctx, rt.BootSpec{SandboxID: id, Template: tmpl, VCPU: 1, MemMiB: 256})
+		if err != nil {
+			t.Skipf("boot failed (image or daemon unavailable): %v", err)
+		}
+		want, _ := inst.(rt.TerminalAuthorizer).TerminalToken()
+		if want == "" {
+			t.Fatalf("%s: booted without a terminal token", tmpl.Name)
+		}
+		adopted, err := r.Adopt(ctx, id)
+		if err != nil {
+			t.Fatalf("%s: adopt: %v", tmpl.Name, err)
+		}
+		if got, _ := adopted.(rt.TerminalAuthorizer).TerminalToken(); got != want {
+			t.Errorf("%s: adopted terminal token = %q, want the one it booted with", tmpl.Name, got)
 		}
 	}
 }

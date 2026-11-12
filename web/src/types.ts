@@ -194,6 +194,14 @@ export interface CustomDomain {
   error: string
   record: string
   cname_target: string
+  /** True while the host's DNS still names the sandbox domain the platform moved off; `record` is the one to create. Absent on older servers. */
+  legacy_target?: boolean
+  /** The TXT record an A record or flattened apex needs beside the address match, as one line. Not needed with the CNAME in `record`. */
+  txt_record?: string
+  /** True once the host matches the platform only by address and lacks txt_record, so the record is needed now. */
+  txt_required?: boolean
+  /** Unix seconds until which the host keeps routing without txt_record; absent once it no longer does. */
+  txt_grace_ends_at?: number
   created_at: number
 }
 
@@ -645,6 +653,8 @@ export interface SandboxMetrics {
 export interface PortStatus {
   port: number
   listening: boolean
+  /** Bound to 127.0.0.1 only, so a preview link cannot reach it. */
+  loopback_only?: boolean
 }
 
 export interface SandboxPorts {
@@ -679,4 +689,14 @@ export interface ProjectRun {
   services?: RunService[]
   started_at: number
   ended_at?: number
+}
+
+export interface Volume {
+  id: string
+  name: string
+  size_mb: number
+  node_id?: string
+  /** The sandbox holding it; absent while detached. */
+  attached_to?: string
+  created_at: number
 }

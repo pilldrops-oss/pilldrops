@@ -23,6 +23,7 @@ func bootEnv(t *testing.T, kv map[string]string) {
 		"SANDBOXD_DEV", "SANDBOXD_DATABASE_URL", "ORCHESTRATOR_ARTIFACT_DIR",
 		"OTEL_EXPORTER_OTLP_ENDPOINT", "PORT",
 		"ORCHESTRATOR_ROLE", "REDIS_URL", "VAULT_SECRET_KEY", "ALLOW_PLAINTEXT_VAULT",
+		"PORTAL_ORIGIN", "PORTAL_SANDBOX_DOMAIN", "PORTAL_LEGACY_SANDBOX_DOMAINS",
 	} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
@@ -112,6 +113,33 @@ func unusableDir(t *testing.T) string {
 		t.Fatalf("seed: %v", err)
 	}
 	return filepath.Join(f, "artifacts")
+}
+
+// A dashboard on a host the legacy redirect would take could never be reached.
+func TestRunRefusesADashboardTheLegacyRedirectWouldTake(t *testing.T) {
+	bootEnv(t, map[string]string{
+		"PORTAL_SANDBOX_DOMAIN":         "pilldrops.app",
+		"PORTAL_LEGACY_SANDBOX_DOMAINS": "pilldrops.com",
+		"PORTAL_ORIGIN":                 "https://console.pilldrops.com",
+		// Past the guard, boot fails here instead of serving.
+		"ORCHESTRATOR_ARTIFACT_DIR": unusableDir(t),
+	})
+	err := run(t.Context(), func() {})
+	if err == nil || !strings.Contains(err.Error(), "PORTAL_ORIGIN host console.pilldrops.com") {
+		t.Fatalf("err = %v, want the refusal naming the dashboard host", err)
+	}
+}
+
+func TestRunRefusesLegacyDomainsWithNoDashboardOrigin(t *testing.T) {
+	bootEnv(t, map[string]string{
+		"PORTAL_SANDBOX_DOMAIN":         "pilldrops.app",
+		"PORTAL_LEGACY_SANDBOX_DOMAINS": "pilldrops.com",
+		"ORCHESTRATOR_ARTIFACT_DIR":     unusableDir(t),
+	})
+	err := run(t.Context(), func() {})
+	if err == nil || !strings.Contains(err.Error(), "PORTAL_ORIGIN") {
+		t.Fatalf("err = %v, want the PORTAL_ORIGIN refusal", err)
+	}
 }
 
 func TestRunRefusesAnEdgeWithNoRedis(t *testing.T) {

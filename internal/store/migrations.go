@@ -1932,6 +1932,132 @@ BEGIN SELECT RAISE(ABORT, 'sandboxes_state_known'); END`,
 	{
 		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
 		version: 70,
+		name:    "node_flags",
+		// Cordon and drain for a control plane with no Redis, whose node table is
+		// in memory. A node with neither flag has no row.
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS node_flags (
+				node_id  TEXT PRIMARY KEY,
+				cordoned INTEGER NOT NULL DEFAULT 0,
+				draining INTEGER NOT NULL DEFAULT 0
+			)`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS node_flags (
+				node_id  TEXT PRIMARY KEY,
+				cordoned BOOLEAN NOT NULL DEFAULT FALSE,
+				draining BOOLEAN NOT NULL DEFAULT FALSE
+			)`,
+		},
+	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 71,
+		name:    "removed_nodes",
+		// A node's credentials are derived from NODE_KEY_SECRET (nodeKeyFor,
+		// nodeHeartbeatToken), not stored, so there is nothing to delete that
+		// revokes them — the derivation still works forever. This table is what
+		// actually revokes a removed node: every credential check also refuses
+		// an id found here, and a re-join picks a fresh id rather than reusing
+		// (and un-revoking) one that is.
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS removed_nodes (
+				node_id    TEXT PRIMARY KEY,
+				zone       TEXT NOT NULL DEFAULT '',
+				removed_at INTEGER NOT NULL
+			)`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS removed_nodes (
+				node_id    TEXT PRIMARY KEY,
+				zone       TEXT NOT NULL DEFAULT '',
+				removed_at BIGINT NOT NULL
+			)`,
+		},
+	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 72,
+		name:    "volumes",
+		// A disk that outlives the sandbox it is attached to. It lives on one
+		// node, and attached_to is "" while no sandbox holds it.
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS volumes (
+				id          TEXT PRIMARY KEY,
+				org_id      TEXT NOT NULL,
+				name        TEXT NOT NULL DEFAULT '',
+				size_mb     INTEGER NOT NULL,
+				node_id     TEXT NOT NULL DEFAULT '',
+				attached_to TEXT NOT NULL DEFAULT '',
+				created_at  INTEGER NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS volumes_org ON volumes (org_id)`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS volumes (
+				id          TEXT PRIMARY KEY,
+				org_id      TEXT NOT NULL,
+				name        TEXT NOT NULL DEFAULT '',
+				size_mb     INTEGER NOT NULL,
+				node_id     TEXT NOT NULL DEFAULT '',
+				attached_to TEXT NOT NULL DEFAULT '',
+				created_at  BIGINT NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS volumes_org ON volumes (org_id)`,
+		},
+	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 73,
+		name:    "legacy_domain_uses",
+		// When each legacy sandbox domain last redirected anyone. Its preview
+		// hosts keep redirecting until store.LegacyUseWindow passes with no use.
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS legacy_domain_uses (
+				domain       TEXT PRIMARY KEY,
+				last_used_at INTEGER NOT NULL
+			)`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS legacy_domain_uses (
+				domain       TEXT PRIMARY KEY,
+				last_used_at BIGINT NOT NULL
+			)`,
+		},
+	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 74,
+		name:    "custom_domain_legacy_target",
+		// Nonzero while the row's DNS still names a legacy sandbox domain: when
+		// it last served traffic that way. The verifier stops accepting the old
+		// target store.LegacyUseWindow after it.
+		sqlite: []string{
+			`ALTER TABLE custom_domains ADD COLUMN legacy_target_seen_at INTEGER NOT NULL DEFAULT 0`,
+		},
+		postgres: []string{
+			`ALTER TABLE custom_domains ADD COLUMN IF NOT EXISTS legacy_target_seen_at BIGINT NOT NULL DEFAULT 0`,
+		},
+	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 75,
+		name:    "custom_domain_txt",
+		// A host that matches only by address also needs a TXT record holding
+		// txt_token. txt_required_at is when it becomes required; rows from
+		// before this get cron.TXTGrace from the verifier's first ask.
+		sqlite: []string{
+			`ALTER TABLE custom_domains ADD COLUMN txt_token TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE custom_domains ADD COLUMN txt_required_at INTEGER NOT NULL DEFAULT 0`,
+		},
+		postgres: []string{
+			`ALTER TABLE custom_domains ADD COLUMN IF NOT EXISTS txt_token TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE custom_domains ADD COLUMN IF NOT EXISTS txt_required_at BIGINT NOT NULL DEFAULT 0`,
+		},
+	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 76,
 		name:    "shares",
 		// One row per public link to a developer's local app. Rows stay after
 		// close so a name is never reassigned and a takedown has a record.

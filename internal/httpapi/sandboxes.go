@@ -89,6 +89,11 @@ func tenantMayBoot(org, tmpl, snapshot string) bool {
 // node-only fields.
 type createReq struct {
 	sandbox.Spec
+	// Volumes attach standalone volumes at boot: [{"id": "vol-…", "path": "/data"}].
+	Volumes []struct {
+		ID   string `json:"id"`
+		Path string `json:"path"`
+	} `json:"volumes,omitempty"`
 }
 
 // persistentCount counts an org's persistent sandboxes. A zero ExpiresAt is the
@@ -168,6 +173,10 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			}
 			body = mergePilldropsConfig(body, cfg)
 		}
+	}
+	if err := egress.CheckWildcards(body.Network); err != nil {
+		writeErr(w, http.StatusBadRequest, "network: "+err.Error())
+		return
 	}
 	// Here as well as in daemon.Create, which every boot path passes through:
 	// this one runs before the idempotency claim, so a refused create leaves no
@@ -361,6 +370,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		Network: res.Network,
 		// Validated by Spec.Validate; empty is the default and reaches no peer.
 		Networks: res.Networks,
+		Volumes:  volumeMounts(body),
 		// Set by the control plane's create-from-snapshot rewrite, which has
 		// already resolved the name to this node's template id and fixed the
 		// size; the node never resolves a snapshot name itself.
@@ -391,6 +401,16 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, daemon.ErrBadMoveID) {
 			writeErr(w, http.StatusConflict, err.Error())
+			return
+		}
+		if code := volumeStatus(err); code != 0 {
+			writeErr(w, code, err.Error())
+			return
+		}
+		// Checks the daemon makes at create, such as a volume's mount path.
+		var inv *sandbox.InvalidError
+		if errors.As(err, &inv) {
+			writeErr(w, http.StatusBadRequest, inv.Reason)
 			return
 		}
 		// A path-traversal-shaped id gets a bare 400, never the template inventory.
@@ -1076,7 +1096,12 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 	}
 	audit := map[string]any{}
 	if body.Slug != nil {
-		if err := sandbox.ValidSlug(*body.Slug); err != nil {
+		check := sandbox.AssignableSlug
+		// Re-sending the slug the sandbox already holds is not a new claim.
+		if cur, ok := s.d.Get(id); ok && cur.Slug == *body.Slug {
+			check = sandbox.ValidSlug
+		}
+		if err := check(*body.Slug); err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -1313,6 +1338,8 @@ func statusForErr(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, rt.ErrUnresumable):
 		return http.StatusGone
+	case volumeStatus(err) != 0:
+		return volumeStatus(err)
 	default:
 		return http.StatusServiceUnavailable
 	}

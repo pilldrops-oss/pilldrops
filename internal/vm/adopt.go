@@ -43,6 +43,7 @@ type adoptRecord struct {
 	NetNS       string        `json:"netns,omitempty"`
 	Token       string        `json:"token,omitempty"`
 	Egress      *egress.Rules `json:"egress,omitempty"`
+	Volumes     []string      `json:"volumes,omitempty"`
 }
 
 func (m *Manager) adoptPath(vmID string) string {
@@ -61,7 +62,7 @@ func (m *Manager) RecordOwner(vmID, owner string) error {
 	b, err := json.Marshal(adoptRecord{
 		Owner: owner, VMID: vmID, Template: sb.Template, RootfsPath: sb.RootfsPath,
 		OverlayPath: sb.OverlayPath, TapName: sb.TapName, VMIP: sb.VMIP, NodeAddr: sb.NodeAddr,
-		NetNS: sb.NetNS, Token: sb.Token, Egress: sb.Egress,
+		NetNS: sb.NetNS, Token: sb.Token, Egress: sb.Egress, Volumes: sb.Volumes,
 	})
 	if err != nil {
 		return err
@@ -141,10 +142,17 @@ func (m *Manager) AdoptOwned(owner string) (*Sandbox, bool) {
 		ID: rec.VMID, Template: rec.Template, RootfsPath: rec.RootfsPath, UserID: "sandboxd",
 		Machine: machine,
 		Envd:    client, OverlayPath: rec.OverlayPath, TapName: rec.TapName, VMIP: rec.VMIP,
-		NodeAddr: rec.NodeAddr, NetNS: rec.NetNS, Token: rec.Token, Egress: rec.Egress,
+		NodeAddr: rec.NodeAddr, NetNS: rec.NetNS, Token: rec.Token, Egress: rec.Egress, Volumes: rec.Volumes,
 		BootType: "adopted", CreatedAt: time.Now(),
 		// MemBase stays empty: without a lineage the next snapshot is a full one.
 		stopTimer: func() {},
+	}
+	// The name layer ran in the dead daemon, and the namespace still diverts
+	// 80/443 to it: without a new one every allowed domain is refused.
+	if rec.NetNS != "" {
+		if err := startNameLayer(rec.NetNS, netnsRunDir+"/"+rec.NetNS, rec.VMID, rec.Egress, m.log); err != nil {
+			m.log.Error("adopt_name_layer_failed", zap.String("vm_id", rec.VMID), zap.Error(err))
+		}
 	}
 	m.mu.Lock()
 	m.active[rec.VMID] = sb

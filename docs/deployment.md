@@ -13,6 +13,64 @@ a fresh one; see [SECURITY.md](../SECURITY.md#upgrading-an-existing-fleet).
 
 ---
 
+## One command: `pilldrops cluster apply`
+
+The [CLI](pilldrops-cli.md) (1.9.0 or later) installs a fleet over ssh from one
+config file, and running it again upgrades it or adds nodes. The rest of this
+page is what it sets up, for installing by hand or for knowing what you are
+running.
+
+```bash
+pilldrops cluster example > cluster.toml   # fill in hosts, domain, TLS, admin_email
+pilldrops cluster apply                    # first run takes a few minutes per node
+```
+
+You need:
+
+- Hosts running Ubuntu 24.04 or later on x86_64, reachable with
+  `ssh <host> sudo …` without a password prompt: one control host and at least
+  one node. Nodes with `/dev/kvm` run microVMs, others Docker containers. Each
+  needs an IPv4 address the others can reach (`private_ip`).
+- A domain whose `<domain>` and `*.<domain>` records you can point at the
+  control host, and either a Cloudflare API token for its zone (the wildcard
+  certificate comes from Let's Encrypt over DNS-01) or a wildcard certificate
+  you already have.
+- `ssh` and [`cosign`](https://docs.sigstore.dev/cosign/installation/) on the
+  machine you run it from, and a release `sandboxd/v1.2.1` or later.
+
+What it does, each step checking before it acts:
+
+1. Generates the secrets once into `cluster.secrets` next to `cluster.toml`
+   (mode 0600). Back that file up: a fleet cannot be recovered without it.
+2. Checks the signature over the release's `SHA256SUMS`; every host checks its
+   downloads, `source.tar.gz` included, against it.
+3. Control host: firewall first (ports 9090 and 5432 reachable only from
+   loopback and the nodes, IPv4 and IPv6), Postgres, the orchestrator as
+   `pilldrops-orchestrator.service`, the console's administrator (`admin_email`
+   with `ADMIN_PASSWORD` from the secrets, created before the domain is public),
+   then Caddy with the wildcard certificate and on-demand TLS for customer
+   domains.
+4. Waits for `https://<domain>/health`, printing the two DNS records to create.
+5. Each node: provisions it for its runtime, opens port 18080 to the control
+   host only, joins with a one-time token, and sets the preview domain.
+6. Waits until every node reports healthy.
+
+Running it again changes only what differs. A node already in the fleet is
+not joined again. A new `version` upgrades the control host, then each node in
+turn: cordoned, binaries swapped, restarted (its sandboxes are paused and
+resumed), uncordoned once it reports the new version. A node removed from
+`cluster.toml` is only named; `pilldrops cluster apply --prune` drains it,
+moving its sandboxes to other nodes, and removes it, or stops if any could not
+move.
+
+Not covered yet: object storage (so a paused sandbox does not survive losing
+its node), raw port forwarding, more than one orchestrator, and a release that
+changes the Firecracker or kernel pins (re-run `scripts/provision-node.sh` on
+each node). A Docker node needs a disk that can cap each container's storage;
+see *Host setup, per node*.
+
+---
+
 ## The shape
 
 ```
@@ -73,9 +131,18 @@ preview source gate would see one client for the whole internet.
 ### Customer domains (`myapp.customer.com`)
 
 A customer hostname is a row (`POST /v1/domains`), verified by DNS, and served
-by the same preview path as the platform wildcard. The certificate is the
-deployment's half of the job: put Caddy in front of the orchestrator with
-on-demand TLS and let it ask the platform which hosts are real.
+by the same preview path as the platform wildcard. The exact CNAME the API hands
+out verifies on its own. A host that only resolves to the same addresses, such
+as an A record or a flattened apex, also needs a TXT record at
+`_pilldrops-challenge.<host>` (a wildcard's at its base domain) holding the
+row's token, because a shared proxy's addresses match for every site behind it.
+The API returns that record as `txt_record`, and `txt_required` once an address
+match lacks it. A host attached before this check existed that routed by
+address keeps routing for 14 days from its first check after the upgrade
+(`txt_grace_ends_at`), then goes `pending` until the record exists.
+
+The certificate is the deployment's half of the job: put Caddy in front of the
+orchestrator with on-demand TLS and let it ask the platform which hosts are real.
 
 ```caddyfile
 {
@@ -113,6 +180,102 @@ on-demand TLS and let it ask the platform which hosts are real.
 - A customer who would rather keep TLS themselves can terminate it on their own
   proxy and point it at the platform host over plain HTTP; the row still has to
   verify before anything routes.
+
+### Moving previews to a new domain
+
+Previews belong on a domain of their own, not under the one that serves the
+dashboard and sign-in. Sandbox code on `x.example.com` can set cookies the
+dashboard on `example.com` receives, and a page at a slug such as
+`login.example.com` can get the whole domain flagged. To move previews from
+`example.com` to `example.app`:
+
+1. Point `example.app` and `*.example.app` where `*.example.com` points, with a
+   wildcard certificate.
+2. On the control plane and every edge replica, set
+   `PORTAL_SANDBOX_DOMAIN=example.app`, `PORTAL_LEGACY_SANDBOX_DOMAINS=example.com`
+   and `PORTAL_ORIGIN=https://example.com`, and restart them. The `PORTAL_ORIGIN`
+   host must be the apex or a reserved label such as `www` or `app`: startup
+   refuses one the redirect would take for a preview.
+3. Set the same three on the portal last, and restart it. The portal also
+   refuses a `PORTAL_ORCHESTRATOR_URL` the redirect would take.
+4. Set `SANDBOXD_SANDBOX_DOMAIN=example.app` on each node and restart it, any
+   time after the control plane: links a node still mints on the old domain are
+   rewritten to the new one.
+5. Leave `*.example.com` DNS in place. It now only redirects.
+6. Update webhook URLs and API clients that call preview hosts to the new
+   domain. The redirect does not carry them, as below.
+7. Check a preview the way a browser opens it, since a plain `curl` skips the
+   path-form redirect: `curl -sI -H "Sec-Fetch-Dest: document" https://<port>-<id>.example.app/`
+   must not answer `302` to its own URL. Then open a terminal and a preview
+   from the dashboard.
+
+What changes once it runs:
+
+- A sandbox paused before the switch keeps the old `PD_SANDBOX_DOMAIN` until it
+  is recreated; resuming does not change it. Old preview URLs it builds still
+  redirect while the legacy redirect lives.
+- Old preview links answer `308` to the new host with path and query kept, so
+  browsers, and links that carry their token in the URL such as `?token=`, keep
+  working. Webhook senders such as GitHub, Stripe and Slack do not follow
+  redirects, and HTTP clients drop `Authorization` when a redirect changes
+  domain, so webhook URLs and API clients that authenticate with a header must
+  be updated to the new domain. Cookies set on the old host do not carry over.
+  The redirect sets no cookie, and the legacy domain's preview hosts only
+  redirect and serve no content. Redirects last as long as they are used: each
+  replica records a use at most once per 10 minutes, and after 90 days with no
+  use old links answer `410` with a "this link has moved" page; a visit after
+  that does not bring them back.
+- When the `PORTAL_ORIGIN` host is outside `example.app`, `example.app` and
+  `www.example.app` redirect to `PORTAL_ORIGIN`, and any other host under
+  `example.app` that names no sandbox is a 404: the preview domain never serves
+  the dashboard. A `PORTAL_ORIGIN` on `example.app` or under it moves the
+  previews but leaves the dashboard beside them, and startup logs a warning. A
+  load balancer health check must probe the orchestrator's own host, not the
+  preview apex.
+- A browser opening the path form `/preview/<id>/<port>/` is sent to the host
+  form with `302`. API clients, the CLI's terminal and WebSockets keep the path form.
+- A customer domain is accepted on its old target only by an exact CNAME to the
+  legacy host, not by matching addresses, and only while it gets traffic; it
+  stops being accepted 90 days after its last request. Customers with a
+  flattened apex or an A record must update to the new target and add the TXT
+  record the Domains page shows. The Domains page asks the owner to create the
+  new record. New hosts under `example.app`, `example.com` or the dashboard's
+  registrable domain are refused.
+- With the dashboard off the preview domain, preview cookies are `SameSite=None;
+  Secure; Partitioned`, so a private preview keeps its access inside the
+  dashboard's iframe. A browser that blocks third-party cookies shows only the
+  first page there; "Open in new tab" works everywhere.
+- `FORWARD_PUBLIC_HOST` defaults to the new domain. Set it explicitly to keep
+  raw port forwards on the old one.
+
+## Volumes
+
+A volume is a disk that outlives the sandbox it is attached to (Firecracker
+nodes; `GET /v1/capabilities` reports `volumes`).
+
+```
+POST   /v1/volumes            {"name": "data", "size_mb": 10240}   # 256 MB - 100 GB
+POST   /v1/sandboxes          {"template": "base", "volumes": [{"id": "vol-…", "path": "/data"}]}
+GET    /v1/volumes            GET /v1/volumes/<id>
+DELETE /v1/volumes/<id>       # refused while a sandbox holds it
+```
+
+- The image is `volumes/<id>.ext4` beside the node's overlay directory. It is
+  attached as an extra drive and mounted by the node right after boot; up to
+  four per sandbox, at a plain absolute path outside the guest's system
+  directories.
+- One sandbox holds a volume at a time. Destroying the sandbox releases it, with
+  its data, for the next create.
+- A sandbox with a volume cold-boots (~1 s), and pause/resume keeps the mount.
+- **Refused while a volume is attached** (409): fork, backup, move, rehome and
+  publishing a named snapshot. Each would either have two machines write one
+  disk or leave the disk behind.
+- A checkpoint restore rolls back the sandbox's own disk, not the volume.
+- On a fleet a volume lives on the node that created it. The control plane
+  places a new volume on a node that reports `volumes`, sends its delete there,
+  and pins a create attaching it to that node: a 503 when that node is away or
+  full, a 409 when one create names volumes on two nodes. Listing reads the
+  shared database, so it works while the node is away.
 
 ## Raw port forwarding
 
@@ -263,9 +426,13 @@ link's byte totals are in the `shares` table.
 | `NODE_KEY_SECRET` | **yes** in a fleet | control-plane only, **never** on a node. Derives every per-node credential. The orchestrator **refuses to start** without it when `ORCHESTRATOR_TOKEN` is set |
 | `ORG_ASSERT_KEY` | **yes** in a fleet | Ed25519 seed (`openssl rand -hex 32`) that signs `X-Org-Override`; nodes get only the public half at join. The orchestrator **refuses to start** without it when `ORCHESTRATOR_TOKEN` is set. See *The two secrets that stop one node compromising the fleet* |
 | `VAULT_SECRET_KEY` | **yes** in a fleet | encrypts tenants' provider API keys (`vault_secrets`); control plane only, **never** on a node (`openssl rand -hex 32`). The orchestrator **refuses to start** without it when `ORCHESTRATOR_TOKEN` is set, unless `ALLOW_PLAINTEXT_VAULT=1` (dev only). See *At-rest keys* |
+| `NODE_BOOTSTRAP_DSN` | **yes** to join nodes | the Postgres DSN a joining node is handed, ideally the node role from *Give nodes their own database role*. Unset refuses to mint join tokens |
+| `NODE_BIN_DIR` | **yes** to join nodes | directory holding `sandboxd-linux`, `envd`, `pilldrops-join-linux` and their `SHA256SUMS`, served to `install.sh` under `/bin/`. `make node-bin` builds it, see *Publishing node binaries* |
+| `NODE_BOOTSTRAP_SECRET` | recommended in a fleet | handed to every node at join as its `SANDBOXD_SECRET_KEY`, which encrypts stored env at rest. Must equal the control plane's `SANDBOXD_SECRET_KEY` when that is set, or the control plane cannot read rows nodes write |
 | `SANDBOXD_DATABASE_URL` | **yes** in a fleet | Postgres. Without it the orchestrator still boots but serves **no** projects, threads, vault or launch stats, and **admission is disabled** — see the warning below |
 | `PORTAL_SANDBOX_DOMAIN` | for previews | the wildcard domain. Unset disables host ingress entirely, and with it custom domains (`GET /v1/capabilities` reports `custom_domains: false`) |
-| `PORTAL_ORIGIN` | when the portal is off `PORTAL_SANDBOX_DOMAIN` | the portal's origin, such as `https://app.example.com`. Previews allow being embedded only by the sandbox domain and this origin, so without it the dashboard's Preview tab shows "refused to connect" on a portal elsewhere. Anything but one origin refuses to start |
+| `PORTAL_ORIGIN` | when the portal is off `PORTAL_SANDBOX_DOMAIN`; **required** with `PORTAL_LEGACY_SANDBOX_DOMAINS` | the portal's origin, such as `https://app.example.com`. Previews allow being embedded only by the sandbox domain and this origin, so without it the dashboard's Preview tab shows "refused to connect" on a portal elsewhere. When its host is outside `PORTAL_SANDBOX_DOMAIN`, the sandbox domain's apex and `www` redirect here, any other host under it that names no sandbox is a 404, and preview error pages link here. Anything but one origin refuses to start. Set the same value on the portal |
+| `PORTAL_LEGACY_SANDBOX_DOMAINS` | when previews moved domain | comma-separated domains previews used to live on, such as `example.com`. Their `<port>-<id>` and `<slug>` hosts answer `308` to the same label under `PORTAL_SANDBOX_DOMAIN` and are never served; a `<port>-<id>` host or a valid sandbox slug under a legacy domain is a preview link, so any single-label host that is a valid sandbox slug, such as `blog` or `staging`, that reaches the control plane or portal is redirected. Left alone are the apex, the reserved labels (`www`, `api`, `app`, `dashboard`, `portal`, `mail`), the labels reserved for new sandbox names only (`login`, `auth`, `accounts`, `clerk`, `admin`, `docs`, `help`, `support`, `status`, `billing`, `share`, `agent`), which the redirect skips as well, so a sandbox that already holds one keeps it but is not redirected on the legacy domain, and any label that is neither a `<port>-<id>` host nor a valid slug (such as `agent-*`, one starting with a digit that is not a `<port>-<id>` host, one containing an underscore, one over 63 characters, or a multi-label host). Hosts whose own DNS points elsewhere never reach it and are unaffected; before setting this, check which hosts on the old domain are routed to the platform. Redirects last as long as they are used and stop 90 days after the last use. Needs `PORTAL_ORIGIN`. Set the same value on the control plane, edge replicas and the portal. See *Moving previews to a new domain* |
 | `POSTHOG_PROJECT_KEY` | no | turns on dashboard product analytics for this deployment; unset sends nothing. |
 | `POSTHOG_HOST` | when the PostHog project is not on the US cloud | where those events go, such as `https://eu.i.posthog.com`. Default `https://us.i.posthog.com`; a key sent to the wrong region is rejected and its events are lost. |
 | `TRUSTED_PROXY_CIDRS` | with a TLS terminator | comma-separated CIDRs whose `X-Forwarded-For` is believed. Unset means the header is ignored everywhere |
@@ -377,6 +544,31 @@ curl -X POST https://<domain>/v1/join \
 
 ---
 
+### Publishing node binaries
+
+`install.sh` and a host-prep flow fetch their binaries from `NODE_BIN_DIR`
+over `/bin/<name>`, served by `handleNodeBinary`. `make node-bin` builds the
+exact layout that directory must hold: `sandboxd-linux` (built from
+`./cmd/sandboxd-fleet` — the fleet node agent, **not** `./cmd/sandboxd`, the
+self-hosted server with a dashboard — a fleet node runs this from day one),
+`envd`, `pilldrops-join-linux`, `node-prep.tgz`, and a `SHA256SUMS` covering
+all four. Point `NODE_BIN_DIR` at `dist/node-bin/` and restart the
+orchestrator to publish a new set. `VERSION=<tag>` stamps
+`internal/nodeboot.Version` the same way `release.yml` does; unset, the
+binaries report `dev`.
+
+`node-prep.tgz` is `git archive HEAD` plus a guest CLI built from `CLI_REPO`
+(default `../pilldrops-cli`, the same convention as the Makefile's
+`cli-linux`), so an operator console can prepare a bare KVM host before join:
+fetch the tarball and `SHA256SUMS`, verify, extract, and run
+`scripts/provision-node.sh` with `BUILD_DIR` set to the extract directory —
+the tarball's top level is the repo root, so `scripts/provision-node.sh` is
+right there. `provision-node.sh` needed no change to run from such an
+extract: it never assumes a `.git` directory, and the bundled
+`bin/pilldrops-linux` satisfies the check that would otherwise require
+`CLI_REPO` on the host itself.
+
+
 ## Host setup, per node
 
 ### Provisioning a bare host
@@ -415,7 +607,7 @@ and its pins then had to be reconstructed from git history:
 | --- | --- | --- |
 | Firecracker + jailer | `v1.17.0` | verified against the release's own `.sha256.txt`. **Not `v1.7`:** its userfaultfd library rejects the ioctl flags a 6.x+ host kernel reports (`Unrecognized ioctl flags`), so lazy memory cannot run on it. Snapshots do not carry across the bump — see *Upgrading Firecracker* |
 | guest kernel | **`5.10.223`** (`firecracker-ci/v1.10/<arch>/vmlinux-5.10.223`) | **load-bearing.** A 6.1 kernel cold-boots the VM and then envd never comes up — the guest contract does not match. The CI bucket publishes no checksum, so the script's own self-computed sha256 is the trust anchor and every fetch fails closed. |
-| Go | `1.26.10` | must satisfy `go.mod`; checksum from go.dev/dl |
+| Go | `1.26.11` | must satisfy `go.mod`; checksum from go.dev/dl |
 
 The guest CLI (`bin/pilldrops-linux`) comes from the sibling `pilldrops-cli`
 repo, as in the Makefile's `cli-linux`; point `CLI_REPO=` at it or drop a
@@ -516,22 +708,24 @@ A production node refuses to start rather than run unsafely:
 > path under `/var/lib/...`). `FC_MEM_SNAPSHOTS=0` opts a node back out, and
 > then pause is a 500 and the idle timers never fire.
 >
-> **Not every intermittent resume failure was the shared node.** One of them is
-> the guest: a VM restored from a memory image intermittently stops executing
+> **Not every intermittent resume failure was the shared node.** One of them was
+> the guest: a VM restored from a memory image intermittently stopped executing
 > anything a timer drives — a 1 Hz timer inside it managed one tick in 303
-> seconds while its clock ran normally — and the stall lasts as long as that VM
+> seconds while its clock ran normally — and the stall lasted as long as that VM
 > had been alive when it was snapshotted, measured 1:1 up to 303.9 s on a
-> 300-second-old sandbox, on an idle node, with no standby anywhere in its life.
-> It is intermittent, and gets likelier with age: 0 of 3 at 30 s, 3 of 8 at
-> 86 s, 4 of 5 at 300 s. The node waits it out rather than declaring the guest
-> dead — a push that Firecracker acked and nothing answered proves the guest is
-> alive — so such a resume is **slow**, up to a quarter of an hour, not failed.
-> Before that rule a five-minute-old sandbox simply could not be resumed: the
-> same snapshot stalls the same length every time, so all three attempts failed
-> identically at the 120 s deadline. `hibernate_timeout` (4 h) drives this path
-> on every Firecracker node, so it is not a standby-only risk: a long-lived
-> sandbox is the *worst* case, not a safe one, and a resume of one can take
-> minutes.
+> 300-second-old sandbox. It was intermittent and likelier with age: 0 of 3 at
+> 30 s, 3 of 8 at 86 s, 4 of 5 at 300 s.
+>
+> **It does not reproduce on Firecracker v1.17.0 with host kernel 7.0.**
+> Measured 2026-10-11 on one node: 22 pause/resume cycles of `base` sandboxes,
+> 6 aged 120 s and 16 aged 300 s (8 of them running a 1 Hz timer loop), 0
+> stalled. Every resume took 67–300 ms and every credential push 9–33 ms. The
+> original measurement's Firecracker version and host kernel were not recorded,
+> so an older host may still stall. The node still waits a stall out rather
+> than declaring the guest dead — a push that Firecracker acked and nothing
+> answered proves the guest is alive — for up to a quarter of an hour, and logs
+> `resumed guest accepted the push but is not answering` when it does. That
+> line on a node is the signal the stall is back.
 >
 > **A rebaked template's goldens are rebuilt on their own.** A golden is a
 > memory image captured against one exact `rootfs.squashfs`, and the restored
@@ -648,19 +842,30 @@ which then boots store-less — and `admitBody` returns "allow" when the store i
 nil. Watch the boot logs for a store error on any replica; a fleet where one
 replica lost the race enforces no fleet-wide concurrency cap at all.
 
-**Restarting a node destroys every Firecracker sandbox on it.** The VMs survive
-the daemon — they are separate processes — but nothing can re-address them
-afterwards: `Boot` never passes the daemon's sandbox id down to the vm layer,
-the pairing between the two ids lives only in memory, and
-`fcRuntime.RecoverOrphans` returns nil. So `RecoverOrphans` reaps them on the
-way back up, logging `killing_orphan` with the reason.
+**Running Firecracker sandboxes survive a `sandboxd` restart or crash.**
 
-This is deliberate as of the orphan-recovery fix — the alternative is a live
-microVM holding its RAM that no API call can reach and no TTL will ever expire
-— but plan around it: **a `sandboxd` restart or crash is a full loss of that
-node's running sandboxes.** Drain a node before restarting it. Docker-backed
-nodes are not affected in the same way; `RecoverOrphans` there returns instances
-the daemon re-registers.
+- **A clean stop or restart** (`systemctl restart`, SIGTERM) pauses every
+  running sandbox to disk, memory included, and the next daemon resumes each one
+  on its next request (`Shutdown` in `internal/sandbox/daemon/restore.go`). A
+  sandbox whose pause fails is left running for the next daemon to adopt.
+- **A crash** (SIGKILL, OOM kill, panic) leaves the VMs running, because each is
+  a separate process. Every VM a sandbox runs on has an adoption record
+  (`<vm id>.adopt` in the token dir) naming the sandbox that owns it, written
+  when the VM is booted, restored or forked. On the way back up,
+  `RecoverOrphans` holds every VM with a record instead of killing it, the
+  daemon's restore adopts the ones its sandbox records say are running
+  (`vm_held_for_adoption`, then `vm_adopted`), and any held VM left unclaimed is
+  killed (`internal/vm/adopt.go`). A VM with no record — another daemon's, or a
+  template build's — is left alone. If writing the record fails, the node logs
+  `could not record which sandbox a VM belongs to` and that one sandbox is lost
+  on the next crash.
+
+Measured 2026-10-12 on one node: a clean restart resumed a sandbox from its
+pause snapshot with its files and uptime intact, and after a `kill -9` of
+`sandboxd` the same Firecracker process carried on and a guest process
+survived with no gap over 1.01 s in its 1 Hz tick log. Docker-backed nodes
+recover the same way through `RecoverOrphans`, which returns the containers the
+daemon re-registers.
 
 **Admission binds in exactly one of three states.** This is measured, not
 described — `TestAdmissionInTheThreeStatesAnOperatorCanBeIn` produces it, and
@@ -1015,7 +1220,7 @@ analytics tag into them; both are off unless set.
 
 | variable | control plane | node | protects |
 |---|:--:|:--:|---|
-| `SANDBOXD_SECRET_KEY` | yes | yes | sandbox env, webhook secrets |
+| `SANDBOXD_SECRET_KEY` | yes (defaults to `NODE_BOOTSTRAP_SECRET`) | yes | sandbox env, webhook secrets |
 | `VAULT_SECRET_KEY` | **yes** | **never** | `vault_secrets` — tenants' provider API keys |
 
 `VAULT_SECRET_KEY` is the one at-rest key the control plane keeps to itself, and

@@ -30,7 +30,7 @@ update=false
 pkgs=$(echo "$FLOORS" | cut -f1 | sed 's#^#./#' | tr '\n' ' ')
 
 # One `go test` invocation; separate ones re-link the world each time.
-out=$(go test $pkgs -cover -count=1 2>&1) || {
+out=$(go test $pkgs -cover -count=1 -timeout 30m 2>&1) || {
   echo "$out"
   echo "FAIL: tests did not pass, so coverage was not measured." >&2
   exit 1

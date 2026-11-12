@@ -122,6 +122,8 @@ anything is sent. Logged out, or against an older server that does not report
     pilldrops metrics <id>
     pilldrops usage
     pilldrops whoami | logout
+    pilldrops cluster example > cluster.toml     # operators: a fleet config to start from
+    pilldrops cluster apply [-f cluster.toml] [--prune]   # install, upgrade or update it over ssh (deployment.md)
 
 ## Raw port forwarding
 
@@ -167,6 +169,11 @@ skips the "press Enter when the record exists" pause for scripts.
 - A wildcard row (`*.vms.example.com`, no `--sandbox`) serves every sandbox of
   your org at `<port>-<id>.vms.example.com` or `<slug>.vms.example.com`. The
   bare domain never routes.
+- Where the DNS provider cannot create a CNAME, such as at a zone apex, an A
+  record or a flattened CNAME to the same addresses works too, with one more
+  record: a TXT record such as `_pilldrops-challenge.example.com TXT <token>`.
+  The host's pending reason and the Domains page show the exact one. A
+  wildcard's goes at its base domain. Without it the host stays `pending`.
 - HTTPS is the deployment's terminator, which asks the platform before issuing
   a certificate — a host that has not verified never gets one (docs/deployment.md).
 

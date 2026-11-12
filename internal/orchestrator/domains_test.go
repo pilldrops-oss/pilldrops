@@ -422,3 +422,79 @@ func TestWildcardHostDoesNotServePrivateSandboxes(t *testing.T) {
 		t.Errorf("public sandbox under the same wildcard = %d %q", w.Code, w.Body.String())
 	}
 }
+
+// Every row carries its TXT record, for an A record or flattened apex;
+// txt_required says when it is needed now, and the grace end while an older
+// row still routes without it.
+func TestDomainListShowsTheTXTRecordToCreate(t *testing.T) {
+	s, _ := domainServer(t)
+	now := time.Unix(1_000_000_000, 0)
+	s.now = func() time.Time { return now }
+	st := s.st.Load()
+	for _, host := range []string{"grace.example.com", "late.example.com", "cname.example.com", "*.vms.example.com"} {
+		body := `{"host":"` + host + `","sandbox_id":"sb1"}`
+		if strings.HasPrefix(host, "*.") {
+			body = `{"host":"` + host + `"}`
+		}
+		w := apiReq(t, s, "POST", "u:one", "/v1/domains", body)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create %s = %d (%s)", host, w.Code, w.Body.String())
+		}
+		var created map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+			t.Fatalf("decode create: %v", err)
+		}
+		if rec, _ := created["txt_record"].(string); !strings.HasPrefix(rec, "_pilldrops-challenge.") || created["txt_required"] != false {
+			t.Errorf("create %s: txt_record %v, txt_required %v, want the record, not yet required", host, created["txt_record"], created["txt_required"])
+		}
+	}
+	for host, at := range map[string]int64{
+		"grace.example.com": now.Add(time.Hour).Unix(),
+		"late.example.com":  now.Add(-time.Hour).Unix(),
+		"*.vms.example.com": now.Unix(),
+	} {
+		if err := st.SetDomainTXT(t.Context(), host, "", at); err != nil {
+			t.Fatalf("set txt %s: %v", host, err)
+		}
+	}
+
+	var list struct {
+		Domains []map[string]any `json:"domains"`
+	}
+	w := apiReq(t, s, "GET", "u:one", "/v1/domains", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatalf("list = %q %v", w.Body.String(), err)
+	}
+	rows := map[string]map[string]any{}
+	for _, d := range list.Domains {
+		rows[d["host"].(string)] = d
+	}
+	token := func(host string) string {
+		d, _, _ := st.GetDomain(t.Context(), host)
+		return d.TXTToken
+	}
+
+	if got, want := rows["grace.example.com"]["txt_record"], "_pilldrops-challenge.grace.example.com TXT "+token("grace.example.com"); got != want {
+		t.Errorf("grace txt_record = %v, want %q", got, want)
+	}
+	for _, host := range []string{"grace.example.com", "late.example.com", "*.vms.example.com"} {
+		if rows[host]["txt_required"] != true {
+			t.Errorf("%s txt_required = %v, want true", host, rows[host]["txt_required"])
+		}
+	}
+	if got := rows["grace.example.com"]["txt_grace_ends_at"]; got != float64(now.Add(time.Hour).Unix()) {
+		t.Errorf("grace txt_grace_ends_at = %v, want the deadline", got)
+	}
+	if got := rows["late.example.com"]["txt_record"]; got != "_pilldrops-challenge.late.example.com TXT "+token("late.example.com") {
+		t.Errorf("late txt_record = %v", got)
+	}
+	if _, ok := rows["late.example.com"]["txt_grace_ends_at"]; ok {
+		t.Errorf("late row carries a grace end after it passed: %v", rows["late.example.com"])
+	}
+	if got := rows["*.vms.example.com"]["txt_record"]; got != "_pilldrops-challenge.vms.example.com TXT "+token("*.vms.example.com") {
+		t.Errorf("wildcard txt_record = %v", got)
+	}
+	if got := rows["cname.example.com"]; got["txt_required"] != false || got["txt_record"] != "_pilldrops-challenge.cname.example.com TXT "+token("cname.example.com") {
+		t.Errorf("a row with no TXT requirement = %v, want the record offered but not required", got)
+	}
+}

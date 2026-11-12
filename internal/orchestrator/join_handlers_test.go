@@ -34,6 +34,7 @@ func mintToken(t *testing.T, srv *httptest.Server, key string) map[string]any {
 }
 
 func TestMintJoinTokenRequiresAdminAndReturnsCommand(t *testing.T) {
+	t.Setenv("NODE_BOOTSTRAP_DSN", "postgres://u:p@h:5432/db")
 	t.Setenv("NODE_BOOTSTRAP_SECRET", "sekret")
 	s := NewServer("adminkey", "nodetoken")
 	srv := httptest.NewServer(s.Routes())
@@ -244,6 +245,7 @@ func TestNodeBinaryServed(t *testing.T) {
 }
 
 func TestJoinRejectsBadTokenAndPlaintext(t *testing.T) {
+	t.Setenv("NODE_BOOTSTRAP_DSN", "postgres://u:p@h:5432/db")
 	t.Setenv("NODE_BOOTSTRAP_SECRET", "sekret")
 	s := NewServer("adminkey", "nodetoken")
 	srv := httptest.NewServer(s.Routes())
@@ -288,4 +290,87 @@ func TestMintJoinTokenRefusesWithoutBootstrapSecret(t *testing.T) {
 	if !strings.Contains(string(body), "NODE_BOOTSTRAP_SECRET") {
 		t.Fatalf("error does not name NODE_BOOTSTRAP_SECRET: %s", body)
 	}
+}
+
+// Without this, a clustered control plane hands a joining node an empty
+// postgres_dsn; the join itself succeeds and the node only discovers it is
+// unusable later, under SANDBOXD_PRODUCTION=1. Refuse at mint time instead.
+func TestMintJoinTokenRefusesWithoutBootstrapDSN(t *testing.T) {
+	t.Setenv("NODE_BOOTSTRAP_SECRET", "sekret")
+	t.Setenv("NODE_BOOTSTRAP_DSN", "")
+	s := NewServer("adminkey", "nodetoken") // nodeToken set: this is a clustered control plane
+	op := httptest.NewServer(s.Routes())
+	defer op.Close()
+
+	req, _ := http.NewRequest("POST", op.URL+"/v1/join-tokens", nil)
+	req.Header.Set("Authorization", "Bearer adminkey")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 409 && resp.StatusCode != 503 {
+		t.Fatalf("mint with no NODE_BOOTSTRAP_DSN = %d, want 409 or 503", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "NODE_BOOTSTRAP_DSN") {
+		t.Fatalf("error does not name NODE_BOOTSTRAP_DSN: %s", body)
+	}
+}
+
+// TestInstallScriptUnitMatchesPackaging guards against the two unit
+// definitions drifting apart: install.sh writes /etc/systemd/system/sandboxd.service
+// inline instead of shipping packaging/sandboxd.service, and a key present
+// there but missing (or different) here silently strands a node — wrong port,
+// no persistent data dir, Firecracker skipped. TEMPLATE and
+// SANDBOXD_SANDBOX_DOMAIN are site-specific and set per node at join time, not
+// hardcoded in either unit, so they are exempt.
+func TestInstallScriptUnitMatchesPackaging(t *testing.T) {
+	siteSpecific := map[string]bool{
+		"TEMPLATE":                true,
+		"SANDBOXD_SANDBOX_DOMAIN": true,
+	}
+
+	packaged, err := os.ReadFile("../../packaging/sandboxd.service")
+	if err != nil {
+		t.Fatalf("reading packaging/sandboxd.service: %v", err)
+	}
+	packagedEnv := environmentDirectives(string(packaged))
+	if len(packagedEnv) == 0 {
+		t.Fatal("packaging/sandboxd.service has no Environment= directives — test cannot validate anything")
+	}
+	installEnv := environmentDirectives(string(installScript))
+
+	for key, want := range packagedEnv {
+		if siteSpecific[key] {
+			continue
+		}
+		got, ok := installEnv[key]
+		if !ok {
+			t.Errorf("install.sh's inline unit is missing Environment=%s (packaging/sandboxd.service has %q)", key, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("install.sh's inline unit has %s=%q, packaging/sandboxd.service has %s=%q", key, got, key, want)
+		}
+	}
+}
+
+// environmentDirectives parses every `Environment=KEY=VALUE` line of a
+// systemd unit into a map. It ignores anything else in the file.
+func environmentDirectives(unit string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(unit, "\n") {
+		line = strings.TrimSpace(line)
+		rest, ok := strings.CutPrefix(line, "Environment=")
+		if !ok {
+			continue
+		}
+		key, value, ok := strings.Cut(rest, "=")
+		if !ok {
+			continue
+		}
+		out[key] = value
+	}
+	return out
 }

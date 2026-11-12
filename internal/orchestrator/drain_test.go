@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,5 +107,85 @@ func TestUncordonReturnsADrainedNodeToService(t *testing.T) {
 	call("uncordon")
 	if n, _ := s.reg.Node("node-a"); !n.Schedulable(now, cluster.NodeTTL) {
 		t.Fatal("uncordon left the node drained, so it can never take work again")
+	}
+}
+
+// TemplateSupport only ever looks at schedulable nodes, so an online node
+// that is cordoned looks identical to one that genuinely cannot boot the
+// template — both come back unsupported. The 400 must say nodes are
+// draining/cordoned in that case, not blame the template: the fix is
+// uncordoning a node, not adding template support.
+func TestCreateWhenEveryNodeIsCordonedNamesDrainingNotTemplate(t *testing.T) {
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(201)
+		w.Write([]byte(`{"id":"sb-1","status":"running"}`))
+	}))
+	defer node.Close()
+
+	s := fleetServer("apikey", "nodetoken")
+	srv := httptest.NewServer(s.Routes())
+	defer srv.Close()
+	op := httptest.NewServer(s.Routes())
+	defer op.Close()
+
+	hbWith(t, srv.URL, `{"id":"n1","url":"`+node.URL+`","runtime":"firecracker","isolation":true,`+
+		`"capacity":{"mem_total_mb":64000,"mem_available_mb":40000}}`)
+	if code, _ := getJSON(t, op, "POST", "/v1/nodes/n1/cordon"); code != 200 {
+		t.Fatalf("cordon = %d, want 200", code)
+	}
+
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/sandboxes", strings.NewReader(`{"template":"base"}`))
+	req.Header.Set("Authorization", "Bearer apikey")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 400 {
+		t.Fatalf("create on an all-cordoned fleet = %d (%s), want 400", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "draining or cordoned") {
+		t.Fatalf("400 body must say no node is accepting new sandboxes: %s", body)
+	}
+	if strings.Contains(string(body), "is not available on any online node") {
+		t.Fatalf("400 body still blames the template while every node is cordoned: %s", body)
+	}
+}
+
+// The old message is still correct, and still used, when a node is online
+// and schedulable but genuinely does not advertise the requested template.
+func TestCreateWithGenuinelyMissingTemplateStillBlamesTheTemplate(t *testing.T) {
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(201)
+		w.Write([]byte(`{"id":"sb-1","status":"running"}`))
+	}))
+	defer node.Close()
+
+	s := fleetServer("apikey", "nodetoken")
+	srv := httptest.NewServer(s.Routes())
+	defer srv.Close()
+
+	hbWith(t, srv.URL, `{"id":"n1","url":"`+node.URL+`","runtime":"firecracker","isolation":true,`+
+		`"templates":["base"],"capacity":{"mem_total_mb":64000,"mem_available_mb":40000}}`)
+
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/sandboxes", strings.NewReader(`{"template":"playwright"}`))
+	req.Header.Set("Authorization", "Bearer apikey")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 400 {
+		t.Fatalf("create(playwright) = %d (%s), want 400", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "playwright is not available on any online node") {
+		t.Fatalf("400 body must still blame the template when a schedulable node just lacks it: %s", body)
+	}
+	if strings.Contains(string(body), "draining or cordoned") {
+		t.Fatalf("400 body wrongly blames draining/cordoning when the node is schedulable: %s", body)
 	}
 }

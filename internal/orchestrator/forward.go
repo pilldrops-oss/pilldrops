@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -306,8 +307,15 @@ func (s *Server) previewLinks(r *http.Request, nodeURL string) (bare, viewer str
 		return bare, ""
 	}
 	u.RawQuery = ""
+	host := strings.ToLower(u.Hostname())
+	id, port, ok := proxy.ParseSandboxHost(host, strings.ToLower(s.sandboxDomain))
+	if !ok {
+		// A node not yet restarted onto the new domain: the caller gets the link on it anyway.
+		if id, port, ok = s.legacy.SandboxHost(host); ok {
+			u.Scheme, u.Host = "https", strconv.Itoa(port)+"-"+id+"."+strings.ToLower(s.sandboxDomain)
+		}
+	}
 	bare = u.String()
-	id, port, ok := proxy.ParseSandboxHost(strings.ToLower(u.Hostname()), strings.ToLower(s.sandboxDomain))
 	if !ok {
 		id, port, _, ok = proxy.ParsePreviewPath(u.Path)
 	}

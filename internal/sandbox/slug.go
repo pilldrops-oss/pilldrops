@@ -15,6 +15,29 @@ var reservedSlugs = map[string]bool{
 	"www": true, "api": true, "app": true, "dashboard": true, "portal": true, "mail": true,
 }
 
+// reservedForNewSlugs are refused for new assignments only. A sandbox that
+// held one before it was reserved keeps it, and it keeps routing, which is
+// why they are not in reservedSlugs: ValidSlug is also the routing parser.
+var reservedForNewSlugs = map[string]bool{
+	"login": true, "auth": true, "accounts": true, "clerk": true, "admin": true, "docs": true,
+	"help": true, "support": true, "status": true, "billing": true, "share": true, "agent": true,
+}
+
+// ReservedForNewSlugs reports whether s is a platform label no sandbox may
+// newly take, though one that already holds it keeps it.
+func ReservedForNewSlugs(s string) bool { return reservedForNewSlugs[s] }
+
+// AssignableSlug is ValidSlug for a slug a sandbox is about to take.
+func AssignableSlug(s string) error {
+	if err := ValidSlug(s); err != nil {
+		return err
+	}
+	if reservedForNewSlugs[s] {
+		return fmt.Errorf("slug %q is reserved", s)
+	}
+	return nil
+}
+
 // ValidLabel reports whether s is a lowercase label of at most max bytes:
 // [a-z0-9] first, then lowercase letters, digits and hyphens. One grammar for
 // network tags, checkpoint names and snapshot names, which differ only in max.

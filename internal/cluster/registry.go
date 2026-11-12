@@ -38,15 +38,54 @@ type Registry struct {
 	cached   []*Node
 	cachedAt time.Time
 
+	// routeCache keeps a placement for listTTL too. NodeFor runs on every
+	// sandbox request, and against a shared store each lookup is a round trip.
+	// Only hits are kept: a sandbox another replica just placed must resolve.
+	routeMu    sync.Mutex
+	routeCache map[string]cachedRoute
+
 	// routeFallback names a sandbox's node when the route catalog does not:
 	// a wiped or restarted Redis loses every route, and until the nodes'
 	// inventories rebuild them each sandbox would read as not found.
 	routeFallback func(sandboxID string) (nodeID string, ok bool)
+
+	saveFlags func(SavedNodeFlags)
 }
+
+type cachedRoute struct {
+	nodeID string
+	at     time.Time
+}
+
+const routeCacheMax = 100_000
 
 // SetRouteFallback installs where NodeFor looks after a route miss; the
 // control plane points it at the sandbox rows, which record the owning node.
 func (r *Registry) SetRouteFallback(f func(sandboxID string) (string, bool)) { r.routeFallback = f }
+
+// KeepFlags makes cordon and drain outlive a restart of an in-memory node table:
+// saved seeds the table, and save runs on every later change. It does nothing
+// for a shared table, whose flags already live outside the process.
+func (r *Registry) KeepFlags(saved []SavedNodeFlags, save func(SavedNodeFlags)) {
+	mem, ok := r.nodes.(*memNodeStore)
+	if !ok {
+		return
+	}
+	mem.seedFlags(saved)
+	r.saveFlags = save
+}
+
+// flagsChanged hands a node's current flags to KeepFlags' save.
+func (r *Registry) flagsChanged(id string) {
+	if r.saveFlags == nil {
+		return
+	}
+	saved := SavedNodeFlags{NodeID: id}
+	if n, ok, err := r.nodes.Get(id); err == nil && ok {
+		saved.Cordoned, saved.Draining = n.Cordoned, n.Draining
+	}
+	r.saveFlags(saved)
+}
 
 // NewRegistry builds a registry backed by in-memory stores.
 func NewRegistry() *Registry {
@@ -79,6 +118,18 @@ func logStoreErr(op string, err error) {
 func (r *Registry) list() []*Node {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
+	cached := r.fresh()
+	out := make([]*Node, len(cached))
+	for i, n := range cached {
+		c := *n
+		out[i] = &c
+	}
+	return out
+}
+
+// fresh returns the cached list itself, reloaded when older than listTTL, or
+// nil when the store is unreadable. The caller holds cacheMu.
+func (r *Registry) fresh() []*Node {
 	if r.cached == nil || time.Since(r.cachedAt) >= r.listTTL {
 		ns, err := r.nodes.List()
 		if err != nil {
@@ -87,12 +138,20 @@ func (r *Registry) list() []*Node {
 		}
 		r.cached, r.cachedAt = sortNodes(ns), time.Now()
 	}
-	out := make([]*Node, len(r.cached))
-	for i, n := range r.cached {
-		c := *n
-		out[i] = &c
+	return r.cached
+}
+
+// listedNode returns a copy of one node from the cached list.
+func (r *Registry) listedNode(id string) (*Node, bool) {
+	r.cacheMu.Lock()
+	defer r.cacheMu.Unlock()
+	for _, n := range r.fresh() {
+		if n.ID == id {
+			c := *n
+			return &c, true
+		}
 	}
-	return out
+	return nil, false
 }
 
 // invalidate drops the cached list after this replica changed a node.
@@ -183,6 +242,19 @@ func (r *Registry) TemplateSupport(req Request, now time.Time, ttl time.Duration
 	return supported, union
 }
 
+// AnySchedulable reports whether any node is healthy and neither cordoned
+// nor draining. It separates "no node is accepting new sandboxes" (every
+// online node drained or cordoned, a fleet-management state) from "no node
+// runs what was asked for" (a template, runtime or capability miss).
+func (r *Registry) AnySchedulable(now time.Time, ttl time.Duration) bool {
+	for _, n := range r.list() {
+		if n.Schedulable(now, ttl) {
+			return true
+		}
+	}
+	return false
+}
+
 // AnyByRuntime reports whether any schedulable node runs the given runtime.
 func (r *Registry) AnyByRuntime(runtime string, now time.Time, ttl time.Duration) bool {
 	for _, n := range r.list() {
@@ -230,6 +302,7 @@ const (
 	CapTagNetworks   Capability = "tag_networks"
 	CapEgressDomains Capability = "egress_domains"
 	CapNamedSnapshot Capability = "named_snapshot"
+	CapVolumes       Capability = "volumes"
 )
 
 // AnyWithCapability reports whether any schedulable node has the capability.
@@ -252,6 +325,10 @@ func (r *Registry) AnyWithCapability(c Capability, now time.Time, ttl time.Durat
 			if n.NamedSnapshot {
 				return true
 			}
+		case CapVolumes:
+			if n.Volumes {
+				return true
+			}
 		}
 	}
 	return false
@@ -262,6 +339,9 @@ func (r *Registry) SetCordon(id string, on bool) bool {
 	defer r.invalidate()
 	found, err := r.nodes.SetFlag(id, FlagCordoned, on)
 	logStoreErr("cordon", err)
+	if found {
+		r.flagsChanged(id)
+	}
 	return found
 }
 
@@ -270,6 +350,9 @@ func (r *Registry) SetDrain(id string, on bool) bool {
 	defer r.invalidate()
 	found, err := r.nodes.SetFlag(id, FlagDraining, on)
 	logStoreErr("drain", err)
+	if found {
+		r.flagsChanged(id)
+	}
 	return found
 }
 
@@ -282,7 +365,9 @@ func (r *Registry) Remove(id string) bool {
 	if !found {
 		return false
 	}
+	r.flagsChanged(id)
 	_, _ = r.routes.UnplaceNode(id)
+	r.forgetRoutes()
 	return true
 }
 
@@ -309,6 +394,9 @@ func (r *Registry) ReapDeadNodes(now time.Time, deadAfter time.Duration) []strin
 	}
 	for _, id := range reaped {
 		_, _ = r.routes.UnplaceNode(id)
+	}
+	if len(reaped) > 0 {
+		r.forgetRoutes()
 	}
 	sort.Strings(reaped)
 	return reaped
@@ -342,16 +430,53 @@ func (r *Registry) Node(id string) (*Node, bool) {
 // Place records that a sandbox now lives on a node.
 func (r *Registry) Place(sandboxID, nodeID string) {
 	_ = r.routes.Place(sandboxID, nodeID)
+	r.rememberRoute(sandboxID, nodeID)
 }
 
 // Unplace forgets a sandbox's placement.
 func (r *Registry) Unplace(sandboxID string) {
 	_ = r.routes.Unplace(sandboxID)
+	r.routeMu.Lock()
+	delete(r.routeCache, sandboxID)
+	r.routeMu.Unlock()
+}
+
+func (r *Registry) rememberRoute(sandboxID, nodeID string) {
+	if r.listTTL <= 0 {
+		return
+	}
+	r.routeMu.Lock()
+	if r.routeCache == nil || len(r.routeCache) >= routeCacheMax { // ponytail: wholesale reset, an LRU if it churns
+		r.routeCache = map[string]cachedRoute{}
+	}
+	r.routeCache[sandboxID] = cachedRoute{nodeID: nodeID, at: time.Now()}
+	r.routeMu.Unlock()
+}
+
+func (r *Registry) rememberedRoute(sandboxID string) (string, bool) {
+	r.routeMu.Lock()
+	defer r.routeMu.Unlock()
+	c, ok := r.routeCache[sandboxID]
+	if !ok || time.Since(c.at) >= r.listTTL {
+		return "", false
+	}
+	return c.nodeID, true
+}
+
+// forgetRoutes drops every cached placement after a node's routes were removed.
+func (r *Registry) forgetRoutes() {
+	r.routeMu.Lock()
+	r.routeCache = nil
+	r.routeMu.Unlock()
 }
 
 // NodeFor returns the node owning a sandbox; ok is false if the sandbox is
-// unknown or its node is gone.
+// unknown or its node is gone. With a shared store the answer may be up to
+// listTTL old: another replica's move or destroy shows after that.
 func (r *Registry) NodeFor(sandboxID string) (*Node, bool) {
+	if nodeID, ok := r.rememberedRoute(sandboxID); ok {
+		return r.routedNode(nodeID)
+	}
 	nodeID, ok, err := r.routes.NodeFor(sandboxID)
 	if err != nil || !ok {
 		if r.routeFallback == nil {
@@ -365,6 +490,18 @@ func (r *Registry) NodeFor(sandboxID string) (*Node, bool) {
 			_ = r.routes.Place(sandboxID, nodeID) // best-effort: the next miss just asks again
 		}
 		return n, ok
+	}
+	r.rememberRoute(sandboxID, nodeID)
+	return r.routedNode(nodeID)
+}
+
+// routedNode reads a node from the cached list when there is one, and from the
+// store when the list does not have it yet.
+func (r *Registry) routedNode(nodeID string) (*Node, bool) {
+	if r.listTTL > 0 {
+		if n, ok := r.listedNode(nodeID); ok {
+			return n, true
+		}
 	}
 	return r.Node(nodeID)
 }

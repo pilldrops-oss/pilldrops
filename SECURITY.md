@@ -56,6 +56,21 @@ What does ship is the part you can run:
 and containment checks against a live node; a probe that could not run reports
 as skipped with a reason, never as a pass.
 
+## Known limits
+
+Two things a self-hosted control plane does not do yet. Plan around them.
+
+- **The operator key works on the public port.** `ORCHESTRATOR_API_KEY` and the
+  operator routes (`/v1/nodes`, join tokens, `/metrics`) are served on the same
+  listener as the API. Anyone holding that key controls the fleet. Keep it out
+  of SDKs, sandboxes and shared shells, give customers their own keys
+  (`pilldrops keys create`), and restrict the port with a firewall if the
+  server is reachable from the internet.
+- **A request to a public preview wakes its sandbox.** An idle public sandbox
+  is resumed by the first request to its preview URL, with no check that a
+  person sent it. On a server open to the internet, leave long-lived public
+  previews off, or give them an idle timeout you can afford to have reset.
+
 ## Upgrading an existing fleet
 
 Before rolling a node onto a build newer than 2026-08-31: several hardening

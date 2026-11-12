@@ -18,15 +18,34 @@ class ExecResult:
         return f"ExecResult(exit={self.exit_code}, dur={self.dur:.2f}s)"
 
 
+# The sandbox domain a create in this run returned a host-form preview URL on.
+_learned_domain = None
+
+
+def _learn_domain(meta):
+    """Remember the domain of the first <port>-<id>.<domain> URL in a create response."""
+    global _learned_domain
+    for key in ("app_url", "url", "viewer_url"):
+        host = urlparse(meta.get(key) or "").hostname or ""
+        label, _, rest = host.partition(".")
+        port, dash, _ = label.partition("-")
+        if rest and dash and port.isdigit():
+            _learned_domain = rest
+            return
+
+
 def sandbox_domain():
     """The deployment's sandbox domain, where previews live as <port>-<id>.<domain>.
 
-    PILLDROPS_SANDBOX_DOMAIN, else the host of PILLDROPS_API_URL, else the host
-    of the CLI's stored login: the suite targets whatever deployment it is
-    pointed at, never a built-in one.
+    PILLDROPS_SANDBOX_DOMAIN, else the domain of a preview URL a create in this
+    run returned, else the host of PILLDROPS_API_URL, else the host of the CLI's
+    stored login: the suite targets whatever deployment it is pointed at, never
+    a built-in one, and previews may live on a different domain from the API.
     """
     if os.environ.get("PILLDROPS_SANDBOX_DOMAIN"):
         return os.environ["PILLDROPS_SANDBOX_DOMAIN"]
+    if _learned_domain:
+        return _learned_domain
     url = os.environ.get("PILLDROPS_API_URL")
     if not url:
         try:
@@ -66,6 +85,7 @@ class PDDriver:
             raise RuntimeError(f"pilldrops create failed: {r.stdout} {r.stderr}")
         self.meta = json.loads(r.stdout)
         self.sandbox_id = self.meta["id"]
+        _learn_domain(self.meta)
 
     def exec(self, cmd, timeout=300, envs=None):
         if envs:

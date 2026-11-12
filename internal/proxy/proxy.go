@@ -170,6 +170,11 @@ func Forward(w http.ResponseWriter, req *http.Request, target, targetPath, errBo
 // ForwardWithHeader is Forward plus headers set on the outbound request only,
 // so node-held credentials never appear on req.
 func ForwardWithHeader(w http.ResponseWriter, req *http.Request, target, targetPath, errBody string, extra http.Header) {
+	// The upstream can answer before the transport has finished with the
+	// request body; HTTP/1 otherwise closes that body as the response headers
+	// go out, the transport's write fails, and it tears down the conn mid-copy.
+	// HTTP/2 has no such close and reports ErrNotSupported, which is fine.
+	_ = http.NewResponseController(w).EnableFullDuplex()
 	origHost, origProto := req.Host, forwardedProto(req)
 	if req.Context().Value(controlPlaneHopKey{}) != nil {
 		origHost = cmp.Or(req.Header.Get("X-Forwarded-Host"), origHost)

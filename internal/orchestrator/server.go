@@ -28,6 +28,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/httpx"
 	"github.com/pilldrops-oss/pilldrops/internal/mcp"
 	"github.com/pilldrops-oss/pilldrops/internal/observability"
+	"github.com/pilldrops-oss/pilldrops/internal/proxy"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 	"github.com/pilldrops-oss/pilldrops/internal/webui"
 )
@@ -101,10 +102,17 @@ type Server struct {
 	// sandboxDomain is PORTAL_SANDBOX_DOMAIN; empty means previews share the
 	// dashboard's origin. See frameAncestorsPolicy.
 	sandboxDomain string
+	// legacy redirects preview hosts under PORTAL_LEGACY_SANDBOX_DOMAINS to
+	// sandboxDomain; nil when none is set.
+	legacy *proxy.LegacyDomains
 
 	// domains caches custom-domain routing decisions for customDomainTTL,
 	// negative answers included. Zero value ready.
 	domains routeCache
+
+	// legacyStamps throttles recording traffic on custom domains still on a
+	// legacy CNAME. Zero value ready.
+	legacyStamps stampThrottle
 
 	// maxBodyBytes (MAX_REQUEST_BYTES) bounds only the buffered-JSON endpoints,
 	// not the streamed proxies, which the node caps itself. See capBody.
@@ -222,6 +230,10 @@ func NewServer(apiKey, nodeToken string) *Server {
 		// nodes cannot reach the bucket's endpoint.
 		artifactDirect: time.Duration(config.Int("ORCHESTRATOR_ARTIFACT_DIRECT_SECONDS", 900)) * time.Second,
 	}
+	// cmd/orchestrator has already refused a bad value, so an error here means none is set.
+	if domains, err := proxy.ParseLegacyDomains(os.Getenv("PORTAL_LEGACY_SANDBOX_DOMAINS"), s.sandboxDomain, s.portalOrigin); err == nil && len(domains) > 0 {
+		s.setLegacyDomains(domains)
+	}
 	// Per-sandbox locks (a move and a destroy must not overlap) go wherever the
 	// replicas share state; one replica keeps them in process.
 	if l, err := cluster.NewLocks(os.Getenv("REDIS_URL")); err == nil {
@@ -266,6 +278,31 @@ func NewServer(apiKey, nodeToken string) *Server {
 	return s
 }
 
+// keepNodeFlags stores cordon and drain in the database when no Redis holds them,
+// so a restart does not put a node an operator took out back into service.
+func (s *Server) keepNodeFlags(st *store.Store) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := st.NodeFlags(ctx)
+	if err != nil {
+		slog.Error("could not read cordoned and draining nodes; they return to service",
+			"component", "orchestrator", "err", err)
+	}
+	saved := make([]cluster.SavedNodeFlags, 0, len(rows))
+	for _, row := range rows {
+		saved = append(saved, cluster.SavedNodeFlags{NodeID: row.NodeID, Cordoned: row.Cordoned, Draining: row.Draining})
+	}
+	s.reg.KeepFlags(saved, func(f cluster.SavedNodeFlags) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		row := store.NodeFlagsRow{NodeID: f.NodeID, Cordoned: f.Cordoned, Draining: f.Draining}
+		if err := st.SaveNodeFlags(ctx, row); err != nil {
+			slog.Error("node flags not saved; a restart would lose this change",
+				"component", "orchestrator", "node", f.NodeID, "err", err)
+		}
+	})
+}
+
 // SetStore wires the shared Postgres; nil falls back to proxying a node. It
 // also switches the console from the API-key prompt to its own accounts.
 func (s *Server) SetStore(st *store.Store) {
@@ -280,6 +317,7 @@ func (s *Server) SetStore(st *store.Store) {
 			}
 			return rec.NodeID, true
 		})
+		s.keepNodeFlags(st)
 	}
 	if s.ui != nil && st != nil {
 		s.ui.SetAdminStore(store.AccountsOf(st))
@@ -322,6 +360,7 @@ func (s *Server) Routes() http.Handler {
 	// Explicit: a fork registers a new sandbox id, which the proxy cannot place.
 	mux.HandleFunc("POST /v1/sandboxes/{id}/fork", s.auth(s.bySlug(s.handleFork)))
 	mux.HandleFunc("POST /v1/sandboxes/{id}/preview-access", s.auth(s.bySlug(s.handlePreviewAccess)))
+	s.registerVolumeRoutes(mux)
 	mux.HandleFunc("GET /v1/sandboxes/{id}/preview-status", s.auth(s.bySlug(s.handlePreviewStatus)))
 	mux.HandleFunc("GET /v1/sandboxes/{id}/metrics", s.auth(s.bySlug(s.handleSandboxMetrics)))
 	mux.HandleFunc("GET /v1/sandboxes/{id}/ports", s.auth(s.bySlug(s.handleSandboxPorts)))
