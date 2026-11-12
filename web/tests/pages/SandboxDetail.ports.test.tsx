@@ -88,6 +88,16 @@ describe('PreviewTab port detection', () => {
     expect(openTerminal).toHaveBeenCalled()
   })
 
+  it('loads the preview once a server that was still starting begins to listen', async () => {
+    getPortsMock
+      .mockResolvedValueOnce(portsResp([{ port: 8000, listening: false }]))
+      .mockResolvedValue(portsResp([{ port: 8000, listening: true }]))
+    const { container } = render(<PreviewTab id="sb1" status="running" defaultPort={8000} />)
+
+    expect(await screen.findByText('Nothing to preview yet')).toBeInTheDocument()
+    await waitFor(() => expect(container.querySelector('iframe')).not.toBeNull(), { timeout: 5000 })
+  }, 8000)
+
   // Detection probes a fixed candidate list, not the socket table.
   it('labels detected ports as a hint rather than a guarantee', async () => {
     getPortsMock.mockResolvedValue(portsResp([{ port: 3000, listening: true }]))

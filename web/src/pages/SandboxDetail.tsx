@@ -227,6 +227,7 @@ export function PreviewTab({
     setReloads(n => n + 1)
   }
 
+  const [probes, setProbes] = useState(0)
   const [detected, setDetected] = useState<PortStatus[] | null>(null)
   useEffect(() => {
     if (!isRunning) { setDetected(null); return }
@@ -235,11 +236,18 @@ export function PreviewTab({
       .then(r => { if (alive) setDetected(r.ports ?? []) })
       .catch(() => { if (alive) setDetected(null) })
     return () => { alive = false }
-  }, [id, isRunning, reloads])
+  }, [id, isRunning, reloads, probes])
 
   const listening = (detected ?? []).filter(p => p.listening)
   // Only a port the probe covered and heard nothing from; an unprobed port still loads.
   const nothingServing = (detected ?? []).some(p => String(p.port) === activePort && !p.listening)
+
+  // A starter is still booting right after launch, so keep looking until it listens.
+  useEffect(() => {
+    if (!nothingServing) return
+    const timer = window.setTimeout(() => setProbes(n => n + 1), 3000)
+    return () => window.clearTimeout(timer)
+  }, [nothingServing, detected])
 
   function chipTitle(p: PortStatus) {
     if (p.loopback_only) return 'Listens on 127.0.0.1 only, so a preview cannot reach it. Bind 0.0.0.0 to open it.'
