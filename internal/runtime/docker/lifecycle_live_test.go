@@ -334,3 +334,37 @@ func TestLiveServiceSandboxHasATerminal(t *testing.T) {
 	}
 	t.Fatalf("terminal never answered on %s: %v", target, lastErr)
 }
+
+// The envd token lived only in the node process, so after a node restart an
+// adopted sandbox had none and its terminal answered 401.
+func TestLiveAdoptRecoversTheTerminalToken(t *testing.T) {
+	if !fileExists(envdHostPath()) {
+		t.Skip("no envd binary at PD_ENVD_PATH")
+	}
+	r, err := New()
+	if err != nil {
+		t.Skipf("docker runtime unavailable: %v", err)
+	}
+	ctx := t.Context()
+	for _, tmpl := range []rt.Template{
+		{Name: "base", Image: "alpine:3"},
+		{Name: "redis", Image: "redis:7-alpine", Ports: []int{6379}},
+	} {
+		id := liveSandboxID(t, "sb-live-adopt")
+		inst, err := r.Boot(ctx, rt.BootSpec{SandboxID: id, Template: tmpl, VCPU: 1, MemMiB: 256})
+		if err != nil {
+			t.Skipf("boot failed (image or daemon unavailable): %v", err)
+		}
+		want, _ := inst.(rt.TerminalAuthorizer).TerminalToken()
+		if want == "" {
+			t.Fatalf("%s: booted without a terminal token", tmpl.Name)
+		}
+		adopted, err := r.Adopt(ctx, id)
+		if err != nil {
+			t.Fatalf("%s: adopt: %v", tmpl.Name, err)
+		}
+		if got, _ := adopted.(rt.TerminalAuthorizer).TerminalToken(); got != want {
+			t.Errorf("%s: adopted terminal token = %q, want the one it booted with", tmpl.Name, got)
+		}
+	}
+}

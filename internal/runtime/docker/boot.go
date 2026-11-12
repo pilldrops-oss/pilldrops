@@ -155,6 +155,13 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 	serviceTerminal := service && fileExists(envdHostPath())
 	if serviceTerminal {
 		base = append(base, "-v", envdHostPath()+":/usr/local/bin/envd:ro")
+		envdToken, _ = sbtoken.Mint()
+	}
+	// The token lives only in this process otherwise, and a node restart left
+	// every adopted sandbox's terminal answering 401. A label is node-side
+	// metadata: it never enters the container.
+	if envdToken != "" {
+		base = append(base, "--label", envdTokenLabel+"="+envdToken)
 	}
 	// Some storage drivers reject --storage-opt size; retried without it below.
 	runArgs := append([]string{}, base...)
