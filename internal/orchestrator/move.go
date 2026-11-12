@@ -128,12 +128,22 @@ func (s *Server) moveSandbox(ctx context.Context, st *store.Store, rec store.San
 	}
 
 	// A paused sandbox has nothing running to capture: wake it for the move and
-	// put it back to sleep on the other side.
+	// put it back to sleep on the other side, or where it was if the move fails.
 	wasPaused := rec.State == "paused"
+	moved := false
 	if wasPaused {
 		if err := s.nodeCall(ctx, from, http.MethodPost, "/v1/sandboxes/"+rec.ID+"/resume", org); err != nil {
 			return fail("resume", err)
 		}
+		defer func() {
+			if moved {
+				return
+			}
+			if err := s.nodeCall(context.WithoutCancel(ctx), from, http.MethodPost, "/v1/sandboxes/"+rec.ID+"/pause", org); err != nil {
+				s.log().Warn("a paused sandbox was woken for a move that failed and could not be paused again; it is running",
+					"component", "move", "sandbox", rec.ID, "from", from.ID, "err", err)
+			}
+		}()
 	}
 
 	// 1. Capture into the artifact store, synchronously.
@@ -189,6 +199,7 @@ func (s *Server) moveSandbox(ctx context.Context, st *store.Store, rec store.San
 		return fail("create", errors.New("the copy was not placed on another node"))
 	}
 	res.To = to.ID
+	moved = true
 
 	// 3. Evict the original. The copy is live and routed from here on.
 	if err := s.nodeCall(ctx, from, http.MethodDelete, "/v1/sandboxes/"+rec.ID+"?evict=1", org); err != nil {
