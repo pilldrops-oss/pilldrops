@@ -18,6 +18,7 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
+	"golang.org/x/sys/unix"
 
 	"github.com/pilldrops-oss/pilldrops/internal/auth/sbtoken"
 )
@@ -112,6 +113,17 @@ type resizeMsg struct {
 	Rows uint16 `json:"rows"`
 }
 
+// terminalStartDir is where a terminal opens when the client names no cwd:
+// $HOME, where exec and the Files tab start, when envd sits at the root as in
+// a Firecracker guest. "" keeps envd's own directory: on Docker that is the
+// workspace, and envd runs as the sandbox user, who cannot enter /root.
+func terminalStartDir(envdDir, home string) string {
+	if envdDir != "/" || unix.Access(home, unix.X_OK) != nil {
+		return ""
+	}
+	return home
+}
+
 // handleTerminalWS authorizes against hash, then bridges a WebSocket to a
 // login-shell PTY. The shell dies with the socket, so a reconnect starts fresh.
 //
@@ -141,10 +153,12 @@ func handleTerminalWS(w http.ResponseWriter, r *http.Request, hash string) {
 	if c := q.Get("cmd"); c != "" {
 		cmd = exec.Command(shell, "-lc", c)
 	}
-	// Unset means envd's own directory, as before: on Docker envd runs as the
-	// sandbox user, who cannot enter /root.
-	cmd.Dir = q.Get("cwd")
 	cmd.Env = append(buildSessionEnv(nil), "TERM=xterm-256color")
+	cmd.Dir = q.Get("cwd")
+	if cmd.Dir == "" {
+		wd, _ := os.Getwd() //nolint:errcheck // "" falls through to envd's own directory
+		cmd.Dir = terminalStartDir(wd, envLookup(cmd.Env, "HOME"))
+	}
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {

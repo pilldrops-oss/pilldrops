@@ -6,6 +6,10 @@ FROM node:20-bookworm-slim
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY bridge.js /app/bridge.js
 

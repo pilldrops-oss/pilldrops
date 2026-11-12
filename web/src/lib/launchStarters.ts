@@ -63,7 +63,7 @@ const PORT = process.env.PORT || 8000;
 
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end('<h1>🚀 Your Node sandbox is running</h1><p>Edit <code>server.js</code> and redeploy.</p>');
+  res.end('<h1>🚀 Your Node sandbox is running</h1><p>Edit <code>server.js</code> and save: it restarts on its own.</p>');
 }).listen(PORT, '0.0.0.0', () => console.log('listening on ' + PORT));
 `
 
@@ -81,7 +81,7 @@ func main() {
 		port = "8000"
 	}
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "<h1>🚀 Your Go sandbox is running</h1><p>Edit main.go and redeploy.</p>")
+		fmt.Fprint(w, "<h1>🚀 Your Go sandbox is running</h1><p>Edit main.go, then restart the server to see the change.</p>")
 	})
 	http.ListenAndServe("0.0.0.0:"+port, nil)
 }
@@ -95,15 +95,24 @@ go 1.22
 // Standard library only: a crate with no dependencies builds without reaching crates.io.
 const RUST_STARTER = `use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::time::Duration;
 
 fn main() {
     let port = std::env::var("PORT").unwrap_or_else(|_| "8000".into());
     let listener = TcpListener::bind(format!("0.0.0.0:{port}")).expect("bind $PORT");
     println!("listening on {port}");
-    let body = "<h1>🚀 Your Rust sandbox is running</h1><p>Edit main.rs and redeploy.</p>";
+    let body = "<h1>🚀 Your Rust sandbox is running</h1><p>Edit main.rs, then restart the server to see the change.</p>";
     for mut stream in listener.incoming().flatten() {
-        let mut request = [0u8; 1024];
-        let _ = stream.read(&mut request);
+        // Closing with request bytes unread resets the connection, which the preview proxy reports as a dead app.
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let mut head = Vec::new();
+        let mut chunk = [0u8; 4096];
+        while head.len() < 65536 && !head.windows(4).any(|w| w == b"\\r\\n\\r\\n") {
+            match stream.read(&mut chunk) {
+                Ok(n) if n > 0 => head.extend_from_slice(&chunk[..n]),
+                _ => break,
+            }
+        }
         let _ = write!(
             stream,
             "HTTP/1.1 200 OK\\r\\nContent-Type: text/html; charset=utf-8\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
@@ -161,6 +170,8 @@ export function starterStart(tpl: Template): string | undefined {
   const id = (tpl.id || '').toLowerCase()
   const lang = (tpl.language || '').toLowerCase()
   if (tpl.has_server) return undefined
+  // Watch mode, because the starter page says an edit shows up on save.
+  if (id === 'node') return 'node --watch server.js'
   if (
     ['code-interpreter', 'python', 'jupyter'].some(x => id.includes(x)) ||
     lang === 'python'
