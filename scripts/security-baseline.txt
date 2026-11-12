@@ -299,3 +299,6 @@ gosec|G404|internal/nodeboot/heartbeat.go
 #   procStarted refuses any pid that is not a positive integer.
 gosec|G304|cmd/envd/credential.go
 gosec|G304|internal/runtime/docker/dockerdstart_linux.go
+# G101: envdTokenLabel is the NAME of a container label ("sandboxd.envdtoken"),
+#   not a credential; the token itself is minted per sandbox at boot.
+gosec|G101|internal/runtime/docker/lifecycle.go
