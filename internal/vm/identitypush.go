@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/pilldrops-oss/pilldrops/internal/runtime"
 )
 
@@ -49,6 +51,14 @@ func (m *Manager) DeliverIdentity(sandboxID string, id runtime.Identity) error {
 	}
 	if err := pushToGuest(sb.Machine.ChrootRoot(), sandboxID, identityCommand(id), credPushDeadline); err != nil {
 		return fmt.Errorf("%w: %w", ErrIdentityPush, err)
+	}
+	// A created VM runs under its own id, which is what its hostname was set to;
+	// the guest should answer to the sandbox id the user sees. Cosmetic, so not fatal.
+	if id.SandboxID != "" && id.SandboxID != sandboxID {
+		cmd := fmt.Sprintf("%s %s", credSetHostCommand, id.SandboxID)
+		if err := pushToGuest(sb.Machine.ChrootRoot(), sandboxID, cmd, hostnamePushDeadline); err != nil {
+			m.log.Warn("guest_hostname_not_set", zap.String("sandbox_id", id.SandboxID), zap.Error(err))
+		}
 	}
 	return nil
 }
