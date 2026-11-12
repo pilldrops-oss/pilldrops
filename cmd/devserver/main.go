@@ -556,13 +556,41 @@ func hostPreview(domain string, rp http.Handler, next http.Handler, bySlug slugL
 	})
 }
 
+// shareHost sends the share and share-<name> hosts of share links to shareRP;
+// any other host goes to next.
+func shareHost(domain string, shareRP, next http.Handler) http.Handler {
+	if domain == "" || shareRP == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if _, ok := proxy.ParseShareHost(proxy.NormalizeHost(req.Host), domain); ok {
+			shareRP.ServeHTTP(w, req)
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
+}
+
+// shareHostProxy forwards a request to the orchestrator with its Host
+// untouched: the orchestrator's share front reads the link from the Host.
+// Returns nil if orchURL is unparseable.
+func shareHostProxy(orchURL string) http.Handler {
+	base, err := url.Parse(strings.TrimRight(orchURL, "/"))
+	if err != nil || base.Host == "" {
+		return nil
+	}
+	rp := httputil.NewSingleHostReverseProxy(base)
+	rp.FlushInterval = -1 // a shared app may stream
+	return rp
+}
+
 // portalHandler is the portal's host routing: legacy preview hosts redirect,
-// preview hosts go to the orchestrator, and everything else to the site,
-// except that with the dashboard elsewhere no other host under the sandbox
-// domain reaches it.
-func portalHandler(legacy *proxy.LegacyDomains, rp, site http.Handler, bySlug slugLookup) http.Handler {
-	return legacy.Wrap(hostPreview(portalSandboxDomain, rp,
-		legacy.SandboxDomainOnly(portalSandboxDomain, dashboardOrigin, site), bySlug))
+// share and preview hosts go to the orchestrator, and everything else to the
+// site, except that with the dashboard elsewhere no other host under the
+// sandbox domain reaches it.
+func portalHandler(legacy *proxy.LegacyDomains, rp, shareRP, site http.Handler, bySlug slugLookup) http.Handler {
+	return legacy.Wrap(shareHost(portalSandboxDomain, shareRP, hostPreview(portalSandboxDomain, rp,
+		legacy.SandboxDomainOnly(portalSandboxDomain, dashboardOrigin, site), bySlug)))
 }
 
 // pathPreviewRedirect sends a browser navigating the path form to the
@@ -3162,8 +3190,9 @@ func main() {
 
 	// In fleet mode /preview/... goes to the orchestrator, which
 	// reverse-proxies to the owning node; preview auth lives there too.
-	var previewRP http.Handler
+	var previewRP, shareRP http.Handler
 	if proxyMode {
+		shareRP = shareHostProxy(orchURL)
 		if previewRP = previewReverseProxy(orchURL); previewRP != nil {
 			pathRP := pathPreviewRedirect(previewRP)
 			r.Handle("/preview/{id}/{port}/*", pathRP)
@@ -3189,7 +3218,7 @@ func main() {
 		Handler: portalHandler(&proxy.LegacyDomains{
 			Current: portalSandboxDomain, Domains: legacyDomains,
 			Store: func() *pdstore.Store { return projectStore },
-		}, previewRP, r, storeSlugLookup(projectStore)),
+		}, previewRP, shareRP, r, storeSlugLookup(projectStore)),
 		// No WriteTimeout: it would cap every SSE stream (log feed, streaming
 		// exec). IdleTimeout and per-handler contexts bound the rest.
 		IdleTimeout: 60 * time.Second,

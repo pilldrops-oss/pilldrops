@@ -56,6 +56,27 @@ func ParseSlugHost(host, domain string) (slug string, ok bool) {
 	return label, true
 }
 
+// ShareLabel is the reserved label for share links that live on the sandbox
+// domain: share-<name>.<domain> is a link, share.<domain> the tunnel endpoint.
+const ShareLabel = "share"
+
+// ParseShareHost extracts the link name from share-<name>.<domain>. The bare
+// share.<domain> host is ok with no name. host must be NormalizeHost'd.
+func ParseShareHost(host, domain string) (name string, ok bool) {
+	label, ok := hostLabel(host, domain)
+	if !ok {
+		return "", false
+	}
+	if label == ShareLabel {
+		return "", true
+	}
+	name, found := strings.CutPrefix(label, ShareLabel+"-")
+	if !found || name == "" {
+		return "", false
+	}
+	return name, true
+}
+
 // ParseSandboxHost extracts the sandbox id and app port from <port>-<id>.<domain>.
 // host must have any :port stripped. Only the first hyphen splits port from id.
 func ParseSandboxHost(host, domain string) (id string, port int, ok bool) {

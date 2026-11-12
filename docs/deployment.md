@@ -396,12 +396,23 @@ port filters nothing. `network_advisories` says so on a domain-only allow list.
 `pilldrops share <port>` gives an app on a developer's own machine a public URL.
 The CLI connects outward, so that machine opens no port.
 
-1. Get a domain of its own. Startup refuses a `SHARE_DOMAIN` that equals, falls
-   under, contains or shares a registrable domain with `PORTAL_SANDBOX_DOMAIN` or
-   the `PORTAL_ORIGIN` host, because a reported phishing link must not take your
+1. Pick the domain. Either:
+   - **The sandbox domain.** Set `SHARE_DOMAIN` to the same value as
+     `PORTAL_SANDBOX_DOMAIN`. Links are `share-<name>.<domain>` and the CLI's
+     tunnel connects to `share.<domain>`, so the wildcard DNS record and
+     certificate that already serve previews cover them, and the portal forwards
+     both to the orchestrator. No sandbox can newly take a `share-` slug.
+   - **A domain of its own.** Links are `<name>.<domain>` and the tunnel connects
+     to the bare domain. Point the domain and `*.<domain>` at one replica, and
+     terminate TLS in front of it with a wildcard certificate for both.
+
+   Startup refuses any other `SHARE_DOMAIN` that falls under, contains or shares
+   a registrable domain with `PORTAL_SANDBOX_DOMAIN`, and any that overlaps the
+   `PORTAL_ORIGIN` host, because a reported phishing link must not take your
    main domain with it.
-2. Point the domain and `*.<domain>` at one replica, and terminate TLS in front of
-   it with a wildcard certificate for both. WebSockets must pass through.
+2. WebSockets must pass through to the replica that holds the tunnels. On the
+   sandbox domain that replica is the one the portal's `PORTAL_ORCHESTRATOR_URL`
+   reaches, so run a single replica or route the share hosts to it.
 3. On that replica set `SHARE_DOMAIN` and `SHARE_INGRESS=1`. On the others set the
    same `SHARE_DOMAIN` and `SHARE_INGRESS=remote`.
 4. Add the domain to the Public Suffix List, so one link's app cannot set cookies
@@ -440,7 +451,7 @@ link's byte totals are in the `shares` table.
 | `FORWARD_INGRESS` | on **exactly one** replica | `1` makes this replica bind the public ports of every port forward; `remote` on the API-only replicas declares that another one does. Unset everywhere means no ingress exists, and the forwards API refuses creates rather than serving an address nothing answers on — see *Raw port forwarding* |
 | `FORWARD_PUBLIC_HOST` | for port forwards | the hostname the endpoints are published under. Defaults to `PORTAL_SANDBOX_DOMAIN`; with neither set, `POST /forwards` is refused with `no_forward_host` |
 | `FORWARD_PORT_RANGE` | no | `lo-hi` public port range, default `40000-60000`. An unparseable value falls back to the default |
-| `SHARE_DOMAIN` | for share links | The domain share links live under; see *Share links* |
+| `SHARE_DOMAIN` | for share links | The domain share links live under: `PORTAL_SANDBOX_DOMAIN` or a domain of its own; see *Share links* |
 | `SHARE_INGRESS` | on **exactly one** replica | `1` makes this replica hold the tunnels; `remote` on the others declares that one does. Unset everywhere means the API refuses to create links |
 | `SHARE_MAX_PER_ORG` | no | Active links per org (default `5`, `0` off) |
 | `SHARE_MAX_CONNS` | no | Open connections per link (default `64`, `0` off) |

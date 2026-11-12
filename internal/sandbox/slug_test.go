@@ -53,6 +53,12 @@ func TestNewlyReservedSlugsAreRefusedOnlyForNewAssignments(t *testing.T) {
 	if err := AssignableSlug("myapp"); err != nil {
 		t.Errorf("AssignableSlug(myapp) = %v", err)
 	}
+	if err := ValidSlug("share-x"); err != nil {
+		t.Errorf("ValidSlug(share-x) = %v: an existing holder would stop routing", err)
+	}
+	if err := AssignableSlug("share-x"); err == nil {
+		t.Error("AssignableSlug(share-x) = nil: the share- prefix belongs to share links")
+	}
 	if err := AssignableSlug("www"); err == nil {
 		t.Error("AssignableSlug(www) = nil: the older reserved labels must still be refused")
 	}

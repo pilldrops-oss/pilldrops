@@ -61,15 +61,23 @@ func writeSharePage(w http.ResponseWriter, status int, title, message string) {
 }
 
 // shareFront answers everything under the share domain and passes the rest on.
+// On the sandbox domain it answers only the share and share-<name> hosts.
 // Outermost, because hostIngress returns early when no sandbox domain is set.
 func (s *Server) shareFront(next http.Handler) http.Handler {
 	domain := shareHost()
 	if domain == "" {
 		return next
 	}
+	onSandboxDomain := shareOnSandboxDomain()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := strings.TrimSuffix(proxy.NormalizeHost(r.Host), ".")
-		if host != domain && !strings.HasSuffix(host, "."+domain) {
+		name, ours := "", host == domain || strings.HasSuffix(host, "."+domain)
+		apex := host == domain
+		if onSandboxDomain {
+			name, ours = proxy.ParseShareHost(host, domain)
+			apex = name == ""
+		}
+		if !ours {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -78,14 +86,16 @@ func (s *Server) shareFront(next http.Handler) http.Handler {
 				"This server does not handle share links. Its operator should route this domain to the share ingress.")
 			return
 		}
-		if host == domain {
+		if apex {
 			s.serveShareApex(w, r)
 			return
 		}
-		name, ok := proxy.ParseSlugHost(host, domain)
-		if !ok {
-			http.NotFound(w, r)
-			return
+		if !onSandboxDomain {
+			var ok bool
+			if name, ok = proxy.ParseSlugHost(host, domain); !ok {
+				http.NotFound(w, r)
+				return
+			}
 		}
 		s.serveShareLink(w, r, name)
 	})

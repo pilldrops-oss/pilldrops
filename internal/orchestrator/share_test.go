@@ -157,7 +157,8 @@ func TestShareDomainGuard(t *testing.T) {
 	}{
 		{"", "sb.example.com", "", false},
 		{"pdshare.dev", "sb.example.com", "https://app.example.com", false},
-		{"sb.example.com", "sb.example.com", "", true},
+		{"sb.example.com", "sb.example.com", "", false},
+		{"sb.example.com", "sb.example.com", "https://app.example.com", true},
 		{"share.sb.example.com", "sb.example.com", "", true},
 		{"example.com", "sb.example.com", "", true},
 		{"share.app.example.com", "", "https://app.example.com", true},
