@@ -4,6 +4,7 @@ import { getClusterStats } from '../api'
 import type { ClusterStats, ZoneStat } from '../types'
 import { errText } from '../lib/errText'
 import MeterBar from '../components/MeterBar'
+import ObjectStoreCard from '../components/ObjectStoreCard'
 
 function zoneStatusStyle(status: string): { bg: string; fg: string; line: string } {
   switch (status) {
@@ -117,6 +118,8 @@ export default function System() {
           <Stat label="Headroom" value={String(stats.headroom_sandboxes)} />
         </div>
       </div>
+
+      <ObjectStoreCard />
 
       {stats.zones.length === 0 ? (
         <div className="panel"><div className="empty">No zones reporting yet.</div></div>

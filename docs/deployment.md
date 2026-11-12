@@ -1477,6 +1477,23 @@ S3-protocol store works; three were verified against the same code on
 Point the control plane and the nodes at **the same bucket**. Root images are
 only shared within one, and a pause archive's root image is looked up there.
 
+**Set it once.** Instead of putting the bucket in every machine's environment,
+an operator can save it on the control plane:
+
+```sh
+curl -X PUT "$ORCHESTRATOR_URL/v1/admin/object-store" -H "Authorization: Bearer $OPERATOR_KEY" \
+  -d '{"endpoint":"https://s3.eu-west-3.amazonaws.com","bucket":"…","region":"eu-west-3","access_key":"…","secret_key":"…"}'
+```
+
+The control plane writes, reads and deletes a test object first and saves only
+if all three work. The row is encrypted with `SANDBOXD_SECRET_KEY`, and saving
+is refused without that key. `GET` shows the endpoint, bucket, region and the
+last four characters of the access key; the secret key is never returned.
+`DELETE` removes it. The control plane that takes the request switches at once;
+other replicas and every node read the saved bucket when they start, so restart
+them. The environment wins: a control plane with `ORCHESTRATOR_ARTIFACT_*` set
+answers 409, and a node with `SANDBOXD_ARTIFACT_STORE` set keeps its own.
+
 **What is stored.** A memory image and a disk overlay are stored packed: only
 the 2 MiB blocks that hold data, with a `.header` block map. That header is
 format v3, which a node predating packing refuses rather than misreads, so

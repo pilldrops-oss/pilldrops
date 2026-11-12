@@ -114,6 +114,16 @@ export interface ScaleRecommendation {
   suggested_nodes: number
 }
 
+/** ObjectStoreView is GET /v1/admin/object-store. The secret key is write-only and never returned. */
+export interface ObjectStoreView {
+  configured: boolean
+  source?: 'env' | 'saved'
+  endpoint?: string
+  bucket?: string
+  region?: string
+  access_key_hint?: string
+}
+
 /** ClusterStats is GET /v1/cluster/stats. */
 export interface ClusterStats {
   nodes_total: number

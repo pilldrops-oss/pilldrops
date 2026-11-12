@@ -115,9 +115,13 @@ func sharedKinds() []string {
 }
 
 // OpenArtifactStore resolves, guards and constructs in one call so no caller
-// can skip the guard.
-func OpenArtifactStore(dataDir, orchURL, nodeKey string, client *http.Client) (artifact.StorageProvider, ArtifactStoreConfig, error) {
+// can skip the guard. saved is the bucket an operator saved on the control
+// plane, or nil; a clustered node uses it unless its own environment names a store.
+func OpenArtifactStore(dataDir, orchURL, nodeKey string, client *http.Client, saved *artifact.S3Options) (artifact.StorageProvider, ArtifactStoreConfig, error) {
 	cfg := ResolveArtifactStore(dataDir, orchURL, nodeKey)
+	if saved != nil && cfg.Clustered && !cfg.Explicit {
+		cfg.Kind, cfg.S3 = artifact.KindS3, *saved
+	}
 	if err := ArtifactStoreGuardError(cfg); err != nil {
 		return nil, cfg, err
 	}

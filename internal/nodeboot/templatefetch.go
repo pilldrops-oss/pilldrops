@@ -300,11 +300,11 @@ func backupCapableStore(k artifact.Kind) bool {
 // InstallTemplateSource opens this node's artifact store and installs the
 // lazy-fetch tiers: custom images for docker nodes, and templates for nodes
 // with an image directory.
-func InstallTemplateSource(ctx context.Context, dataDir, orchURL, nodeKey string, index BuildIndex) (ArtifactTiers, error) {
+func InstallTemplateSource(ctx context.Context, dataDir, orchURL, nodeKey string, index BuildIndex, saved *artifact.S3Options) (ArtifactTiers, error) {
 	noop := func(string) func() { return func() {} }
 	out := ArtifactTiers{PinTemplate: noop}
 
-	remote, cfg, err := OpenArtifactStore(dataDir, orchURL, nodeKey, nil)
+	remote, cfg, err := OpenArtifactStore(dataDir, orchURL, nodeKey, nil, saved)
 	if err != nil {
 		return out, err
 	}

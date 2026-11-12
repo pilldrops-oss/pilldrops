@@ -101,7 +101,7 @@ func TestOpenArtifactStoreNeedsACredentialWhenClustered(t *testing.T) {
 	t.Setenv("SANDBOXD_ARTIFACT_STORE", "")
 	t.Setenv("SANDBOXD_ARTIFACT_DIR", "")
 
-	_, _, err := OpenArtifactStore(t.TempDir(), "http://cp:9090", "", nil)
+	_, _, err := OpenArtifactStore(t.TempDir(), "http://cp:9090", "", nil, nil)
 	if err == nil {
 		t.Fatal("want an error when clustered with no node key")
 	}
@@ -114,7 +114,7 @@ func TestOpenArtifactStoreStandaloneWorksWithNoConfiguration(t *testing.T) {
 	t.Setenv("SANDBOXD_ARTIFACT_STORE", "")
 	t.Setenv("SANDBOXD_ARTIFACT_DIR", "")
 
-	store, cfg, err := OpenArtifactStore(t.TempDir(), "", "", nil)
+	store, cfg, err := OpenArtifactStore(t.TempDir(), "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("a single node must work with no artifact configuration at all: %v", err)
 	}
@@ -164,5 +164,27 @@ func TestBackupStoreWarningAgreesWithBackupCapable(t *testing.T) {
 	if !backupCapableStore(artifact.KindFS) ||
 		BackupStoreWarning(ArtifactStoreConfig{Kind: artifact.KindFS, Dir: "/d"}) == "" {
 		t.Error("fs must take backups AND warn that they share the node's fate")
+	}
+}
+
+func TestOpenArtifactStoreUsesTheSavedBucketUnlessEnvNamesAStore(t *testing.T) {
+	t.Setenv("SANDBOXD_ARTIFACT_STORE", "")
+	t.Setenv("SANDBOXD_ARTIFACT_DIR", "")
+	saved := &artifact.S3Options{Endpoint: "https://s3.example.com", Bucket: "b", AccessKey: "AK", SecretKey: "SK"}
+
+	_, cfg, err := OpenArtifactStore(t.TempDir(), "http://cp:9090", "nodekey", nil, saved)
+	if err != nil || cfg.Kind != artifact.KindS3 || cfg.S3.Bucket != "b" {
+		t.Fatalf("clustered: kind = %q bucket = %q err = %v, want the saved bucket", cfg.Kind, cfg.S3.Bucket, err)
+	}
+	if _, cfg, _ := OpenArtifactStore(t.TempDir(), "", "", nil, saved); cfg.Kind != artifact.KindFS {
+		t.Fatalf("standalone: kind = %q, want fs", cfg.Kind)
+	}
+	t.Setenv("SANDBOXD_ARTIFACT_STORE", "s3")
+	t.Setenv("SANDBOXD_ARTIFACT_S3_ENDPOINT", "https://other.example.com")
+	t.Setenv("SANDBOXD_ARTIFACT_S3_BUCKET", "env-bucket")
+	t.Setenv("SANDBOXD_ARTIFACT_S3_ACCESS_KEY", "AK")
+	t.Setenv("SANDBOXD_ARTIFACT_S3_SECRET_KEY", "SK")
+	if _, cfg, err := OpenArtifactStore(t.TempDir(), "http://cp:9090", "nodekey", nil, saved); err != nil || cfg.S3.Bucket != "env-bucket" {
+		t.Fatalf("env: bucket = %q err = %v, want the environment's", cfg.S3.Bucket, err)
 	}
 }

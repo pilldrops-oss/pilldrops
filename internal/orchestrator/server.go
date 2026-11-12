@@ -128,6 +128,9 @@ type Server struct {
 	// SetArtifactStore may run while Routes() is serving; nil means
 	// unconfigured and the publish routes refuse.
 	artifacts atomic.Pointer[artifact.StorageProvider]
+	// artifactsSaved reports that artifacts came from the saved object store,
+	// not the environment.
+	artifactsSaved atomic.Bool
 	// artifactDirect is how long a presigned URL a node is redirected to stays
 	// valid; zero serves artifact bytes through this process instead.
 	artifactDirect time.Duration
@@ -365,6 +368,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/sandboxes/{id}/metrics", s.auth(s.bySlug(s.handleSandboxMetrics)))
 	mux.HandleFunc("GET /v1/sandboxes/{id}/ports", s.auth(s.bySlug(s.handleSandboxPorts)))
 	mux.HandleFunc("GET /v1/cluster/stats", s.authOperator(s.handleClusterStats))
+	mux.HandleFunc("GET /v1/admin/object-store", s.authOperator(s.handleObjectStoreGet))
+	mux.HandleFunc("PUT /v1/admin/object-store", s.authOperator(s.handleObjectStorePut))
+	mux.HandleFunc("DELETE /v1/admin/object-store", s.authOperator(s.handleObjectStoreDelete))
 	mux.HandleFunc("POST /v1/nodes/{id}/cordon", s.auth(s.handleCordon))
 	mux.HandleFunc("POST /v1/nodes/{id}/uncordon", s.auth(s.handleUncordon))
 	mux.HandleFunc("POST /v1/nodes/{id}/drain", s.auth(s.handleDrain))
