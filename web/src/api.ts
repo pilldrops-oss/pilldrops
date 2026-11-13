@@ -41,6 +41,9 @@ import type {
   SandboxMetrics,
   SandboxPorts,
   DeployProgress,
+  Webhook,
+  WebhookDelivery,
+  WebhookTest,
 } from './types'
 
 function getKey(): string {
@@ -414,6 +417,19 @@ export const addDomain = (host: string, sandboxId?: string, port?: number) =>
   request<CustomDomain>('POST', '/v1/domains', { host, sandbox_id: sandboxId || undefined, port })
 export const removeDomain = (host: string) =>
   request<void>('DELETE', `/v1/domains/${encodeURIComponent(host)}`, undefined)
+
+export const listWebhooks = () =>
+  request<{ webhooks: Webhook[] | null; deliverable_events: string[] }>('GET', '/v1/webhooks', undefined)
+export const addWebhook = (url: string, events: string[]) =>
+  request<{ webhook: Webhook; secret: string }>('POST', '/v1/webhooks', { url, events })
+export const deleteWebhook = (hookID: string) =>
+  request<{ deleted: string }>('DELETE', `/v1/webhooks/${hookID}`, undefined)
+export const testWebhook = (hookID: string) =>
+  request<WebhookTest>('POST', `/v1/webhooks/${hookID}/test`, undefined)
+export const setWebhookEnabled = (hookID: string, enabled: boolean) =>
+  request<{ id: string; enabled: boolean }>('POST', `/v1/webhooks/${hookID}/toggle`, { enabled })
+export const listWebhookDeliveries = () =>
+  request<{ deliveries: WebhookDelivery[] | null }>('GET', '/v1/webhooks/deliveries', undefined)
 
 export const getLimits = () =>
   request<LimitsInfo>('GET', '/v1/limits', undefined)

@@ -302,3 +302,9 @@ gosec|G304|internal/runtime/docker/dockerdstart_linux.go
 # G101: envdTokenLabel is the NAME of a container label ("sandboxd.envdtoken"),
 #   not a credential; the token itself is minted per sandbox at boot.
 gosec|G101|internal/runtime/docker/lifecycle.go
+
+# Sandbox webhooks. G115: the event's unix time stored in the delivery's
+# sequence column and read back. G404: retry-backoff jitter, not a credential.
+gosec|G115|internal/httpapi/sandboxwebhook.go
+gosec|G115|internal/store/sandboxwebhooks.go
+gosec|G404|internal/httpapi/webhookdispatch.go

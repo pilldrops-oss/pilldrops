@@ -141,6 +141,15 @@ function UserNav() {
             Domains
           </NavLink>
         )}
+        <NavLink to="/webhooks" className={({ isActive }) => isActive ? 'on' : ''}>
+          <svg viewBox="0 0 24 24">
+            <circle cx="6" cy="17" r="2.5" />
+            <circle cx="18" cy="17" r="2.5" />
+            <circle cx="12" cy="6" r="2.5" />
+            <path d="M10.7 8.2 7.2 14.8M13.3 8.2l3.5 6.6M8.5 17h7" />
+          </svg>
+          Webhooks
+        </NavLink>
         <NavLink to="/usage" className={({ isActive }) => isActive ? 'on' : ''}>
           <svg viewBox="0 0 24 24">
             <path d="M4 19V9M10 19V4M16 19v-7M22 19H2" />

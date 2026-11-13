@@ -1102,6 +1102,120 @@
         }
       }
     },
+    "/v1/webhooks": {
+      "get": {
+        "summary": "List sandbox event webhooks",
+        "description": "Org-level webhooks that report lifecycle events for every sandbox in the org. Never returns signing secrets. Also returns the signature scheme and `deliverable_events`, the event names a webhook can subscribe to.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a sandbox event webhook",
+        "description": "Body: `{\"url\": \"https://...\", \"events\": [\"sandbox.ended\"]}`. Events: `sandbox.created`, `sandbox.ended`, `sandbox.paused`, `sandbox.resumed`, `sandbox.checkpointed`, `sandbox.forked`, `sandbox.restarted`, `sandbox.crashed`, `sandbox.out_of_memory`, `sandbox.unreachable`.\n\nEach delivery is a signed POST of `{id, type, at, sandbox: {id, template}, data}`. `sandbox.ended` carries `data.reason` (`destroyed`, `exited` or `out_of_memory`), `started_at`, `ran_seconds`, `vcpu` and `memory_mb`. `id` is the same on every retry, so use it to drop repeats.\n\nThe URL is SSRF-validated at creation and at send time. The signing secret is returned ONCE and never again. An org can hold 20 webhooks.",
+        "responses": {
+          "201": {
+            "description": "Created; carries the signing secret once"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{hookID}": {
+      "delete": {
+        "summary": "Delete a sandbox event webhook",
+        "parameters": [
+          {
+            "name": "hookID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{hookID}/test": {
+      "post": {
+        "summary": "Send one signed test delivery",
+        "description": "Rate limited to 5 per minute per hook. A failure at your endpoint is reported as 200 with `ok: false`.",
+        "parameters": [
+          {
+            "name": "hookID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The probe result, including a failure at your endpoint"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{hookID}/toggle": {
+      "post": {
+        "summary": "Pause or resume a sandbox event webhook",
+        "description": "Body: `{\"enabled\": false}`. A paused webhook queues nothing. Resuming clears the failure count, which also turns a webhook that was disabled automatically back on.",
+        "parameters": [
+          {
+            "name": "hookID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/deliveries": {
+      "get": {
+        "summary": "Recent sandbox event deliveries",
+        "description": "The last 50 deliveries across the org's webhooks, in every state (`pending`, `sent`, `failed`), newest first. Deliveries are kept for 30 days.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/v1/whoami": {
       "get": {
         "summary": "Name the caller: the principal kind and the org it acts for (control plane)",

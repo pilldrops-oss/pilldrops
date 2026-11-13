@@ -196,7 +196,7 @@ func buildNodeCapabilities(rd runtimeDescriber, local func() []string, plan enti
 // runtime that can attach them, so a Docker node does not offer the commands.
 func nodeFeatures(caps rt.Caps) []string {
 	if caps.Volumes {
-		return []string{"volume"}
+		return []string{"volume", "webhook"}
 	}
-	return []string{}
+	return []string{"webhook"}
 }

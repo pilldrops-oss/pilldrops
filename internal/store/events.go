@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 )
 
 // EventRecord is one sandbox lifecycle event plus the org's running-sandbox
@@ -16,7 +17,7 @@ type EventRecord struct {
 	At          int64  `json:"at"`
 }
 
-// RecordEvent appends a lifecycle event.
+// RecordEvent appends a lifecycle event and queues it for the org's webhooks.
 func (s *Store) RecordEvent(ctx context.Context, r EventRecord) error {
 	if r.OrgID == "" {
 		r.OrgID = "default"
@@ -26,7 +27,13 @@ func (s *Store) RecordEvent(ctx context.Context, r EventRecord) error {
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		r.OrgID, r.SandboxID, r.Event, r.Template, r.ActiveAfter, r.At,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := s.enqueueSandboxWebhooks(ctx, r); err != nil {
+		return fmt.Errorf("queue sandbox webhooks: %w", err)
+	}
+	return nil
 }
 
 // ListEvents returns an org's recent events, newest first.

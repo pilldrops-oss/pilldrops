@@ -65,10 +65,11 @@ func NewWebhookSecret() string {
 	return "whsec_" + hex.EncodeToString(b[:])
 }
 
-// CreateAgentWebhook stores a hook and returns it with its secret, once.
+// CreateAgentWebhook stores a hook and returns it with its secret, once. An
+// empty sandbox id makes it an org-level hook for sandbox lifecycle events.
 func (s *Store) CreateAgentWebhook(ctx context.Context, w AgentWebhook, secret string) (AgentWebhook, error) {
-	if w.SandboxID == "" || w.URL == "" {
-		return AgentWebhook{}, fmt.Errorf("sandbox id and url are required")
+	if w.URL == "" {
+		return AgentWebhook{}, fmt.Errorf("url is required")
 	}
 	if secret == "" {
 		return AgentWebhook{}, fmt.Errorf("a signing secret is required")
@@ -98,7 +99,8 @@ func (s *Store) CreateAgentWebhook(ctx context.Context, w AgentWebhook, secret s
 	return w, nil
 }
 
-// ListAgentWebhooks returns a sandbox's hooks, never including the secret.
+// ListAgentWebhooks returns a sandbox's hooks, or the org-level ones for an
+// empty sandbox id, never including the secret.
 func (s *Store) ListAgentWebhooks(ctx context.Context, orgID, sandboxID string) ([]AgentWebhook, error) {
 	rows, err := s.db.QueryContext(ctx, s.rebind(`SELECT id, sandbox_id, org_id, url, events, enabled,
 		consecutive_failures, disabled_reason, created_at, created_by, last_at, last_status
@@ -255,6 +257,41 @@ func (s *Store) ListFailedDeliveries(ctx context.Context, orgID, sandboxID strin
 	if err != nil {
 		return nil, err
 	}
+	return scanDeliveries(rows)
+}
+
+// ClaimDueDeliveries leases pending deliveries that are due by pushing next_at
+// forward. The conditional update gives each row to one caller, so several nodes
+// can poll without a leader, and a crashed attempt comes back when the lease ends.
+func (s *Store) ClaimDueDeliveries(ctx context.Context, now time.Time, lease time.Duration, limit int) ([]AgentWebhookDelivery, error) {
+	rows, err := s.db.QueryContext(ctx, s.rebind(`SELECT id, webhook_id, sandbox_id, org_id, event_type,
+		event_seq, attempts, state, last_status, last_error, next_at, created_at, updated_at
+		FROM agent_webhook_deliveries
+		WHERE state = ? AND next_at <= ?
+		ORDER BY next_at ASC LIMIT ?`), string(DeliveryPending), now.Unix(), limit)
+	if err != nil {
+		return nil, err
+	}
+	due, err := scanDeliveries(rows)
+	if err != nil {
+		return nil, err
+	}
+	claimed := due[:0]
+	for _, d := range due {
+		res, err := s.db.ExecContext(ctx, s.rebind(`UPDATE agent_webhook_deliveries SET next_at = ?
+			WHERE id = ? AND state = ? AND next_at = ?`),
+			now.Add(lease).Unix(), d.ID, string(DeliveryPending), unixOrZero(d.NextAt))
+		if err != nil {
+			return claimed, err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			claimed = append(claimed, d)
+		}
+	}
+	return claimed, nil
+}
+
+func scanDeliveries(rows *sql.Rows) ([]AgentWebhookDelivery, error) {
 	defer rows.Close()
 
 	var out []AgentWebhookDelivery
@@ -289,7 +326,9 @@ func truncErr(s string) string {
 // deliveries. Unlike turns, events and approvals, hooks are configuration, not
 // history, and cannot fire once the machine is gone.
 func (s *Store) DeleteAgentWebhooksForSandbox(ctx context.Context, sandboxID string) error {
-	if _, err := s.exec(ctx, `DELETE FROM agent_webhook_deliveries WHERE sandbox_id = ?`, sandboxID); err != nil {
+	// By hook, not by sandbox: an org-level hook's deliveries name this sandbox too.
+	if _, err := s.exec(ctx, `DELETE FROM agent_webhook_deliveries
+		WHERE webhook_id IN (SELECT id FROM agent_webhooks WHERE sandbox_id = ?)`, sandboxID); err != nil {
 		return err
 	}
 	_, err := s.exec(ctx, `DELETE FROM agent_webhooks WHERE sandbox_id = ?`, sandboxID)

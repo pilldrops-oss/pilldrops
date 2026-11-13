@@ -225,6 +225,32 @@ export interface Capabilities {
   custom_domains: boolean
 }
 
+/** Webhook is one of the org's sandbox-event webhooks; the signing secret is only in the create reply. */
+export interface Webhook {
+  id: string
+  url: string
+  events: string[]
+  enabled: boolean
+  consecutive_failures: number
+  disabled_reason?: string
+  last_at?: string
+  last_status?: number
+}
+
+export interface WebhookDelivery {
+  id: string
+  webhook_id: string
+  sandbox_id: string
+  event_type: string
+  state: 'pending' | 'sent' | 'failed'
+  attempts: number
+  last_status?: number
+  last_error?: string
+  created_at: string
+}
+
+export interface WebhookTest { ok: boolean; status: number; error?: string }
+
 /** VaultSecret is GET /v1/secrets: names only for sealed secrets, never any part of the value. */
 export interface VaultSecret {
   name: string

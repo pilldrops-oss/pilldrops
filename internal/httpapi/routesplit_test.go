@@ -41,7 +41,7 @@ func registeredRoutes(t *testing.T) []string {
 // TestEveryRouteSurvivedTheSplit pins the total declared in source, ignoring
 // build tags. Exact rather than a floor so an added route forces a decision on where it goes.
 func TestEveryRouteSurvivedTheSplit(t *testing.T) {
-	const want = 86 // -13: functions and the /v1/cron jobs API moved to the cloud product, +1 whoami, +4 volumes
+	const want = 91 // -13: functions and the /v1/cron jobs API moved to the cloud product, +1 whoami, +4 volumes, +5 org webhooks
 	got := registeredRoutes(t)
 	if len(got) != want {
 		t.Errorf("the node registers %d routes, expected %d.\n\n"+
@@ -127,12 +127,13 @@ var featureRegistrars = []string{
 	"opsroutes.go",
 	"volumes.go",
 	"checkpoints.go",
+	"sandboxwebhook.go",
 }
 
 // TestCoreRouteCountIsPinned stops the core growing back; a route added to
 // server.go instead of its registrar leaves the total unchanged, so only this count notices.
 func TestCoreRouteCountIsPinned(t *testing.T) {
-	const wantCore = 52 // -1: channels, which had no bridge left to report on, +1 whoami
+	const wantCore = 51 // -1: channels, which had no bridge left to report on, +1 whoami, -1 webhooks moved to its registrar
 	got := routesInFile(t, "server.go")
 	if len(got) != wantCore {
 		t.Errorf("server.go registers %d routes, expected %d.\n\n"+

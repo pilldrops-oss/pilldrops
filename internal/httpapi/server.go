@@ -274,7 +274,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 	route("GET /v1/sandboxes/{id}/process/list", s.auth(s.handleProcList))
 	route("POST /v1/sandboxes/{id}/process/signal", s.auth(s.handleProcSignal))
 	route("GET /v1/members", s.auth(s.handleUnbuilt))
-	route("GET /v1/webhooks", s.auth(s.handleUnbuilt))
 	route("GET /v1/builds", s.auth(s.handleUnbuilt))
 	route("GET /v1/limits", s.auth(s.handleEntitlements))
 	// Org-blind inventory for the orchestrator's placement reconciler.
@@ -289,6 +288,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.registerVolumeRoutes(route)
 	s.registerIntegrationRoutes(route)
 	s.registerChatRoutes(route)
+	s.registerWebhookRoutes(route)
 	s.registerForwardRoutes(raw)
 
 	// No API key on the preview proxy, so throttle per IP and require an

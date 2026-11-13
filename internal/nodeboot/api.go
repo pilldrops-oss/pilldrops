@@ -50,6 +50,7 @@ func NewNodeAPI(ctx context.Context, d *daemon.Daemon, st *store.Store, dataDir,
 	// /v1/capabilities and the heartbeat must report the same local templates.
 	api.SetLocalTemplates(LocalTemplates(d.RuntimeName(), templates.PublishedIDs))
 	api.StartCronSweeper()
+	api.StartWebhookDelivery()
 	return api
 }
 
