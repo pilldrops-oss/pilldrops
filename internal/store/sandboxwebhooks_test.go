@@ -37,7 +37,7 @@ func TestADueDeliveryIsClaimedByOneCallerUntilTheLeaseEnds(t *testing.T) {
 	}
 }
 
-func TestALifecycleEventQueuesOneDeliveryPerSubscribedHook(t *testing.T) {
+func TestEachLifecycleEventQueuesOneDeliveryPerSubscribedHook(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		checkLifecycleEventFanOut(t, openTempStore(t), "acme")
 	})
@@ -80,9 +80,10 @@ func checkLifecycleEventFanOut(t *testing.T, s *Store, org string) {
 	}
 	hook("sandbox.ended")
 
-	ev := EventRecord{OrgID: org, SandboxID: "sb-1", Event: "created", At: time.Now().Unix()}
+	// Two of the same event inside one second are two events, not a retry.
+	at := time.Now().Unix()
 	for range 2 {
-		if err := s.RecordEvent(ctx, ev); err != nil {
+		if err := s.RecordEvent(ctx, EventRecord{OrgID: org, SandboxID: "sb-1", Event: "created", Template: "python", At: at}); err != nil {
 			t.Fatalf("record event: %v", err)
 		}
 	}
@@ -92,15 +93,29 @@ func checkLifecycleEventFanOut(t *testing.T, s *Store, org string) {
 		t.Fatalf("list deliveries: %v", err)
 	}
 	var hooks []string
+	seqs := map[uint64]bool{}
 	for _, d := range got {
 		hooks = append(hooks, d.WebhookID)
-		if d.EventType != "sandbox.created" || d.EventSeq != uint64(ev.At) || d.State != DeliveryPending || d.SandboxID != "sb-1" {
-			t.Errorf("delivery %+v, want a pending sandbox.created for sb-1 at seq %d", d, ev.At)
+		seqs[d.EventSeq] = true
+		if d.EventType != "sandbox.created" || d.State != DeliveryPending || d.SandboxID != "sb-1" {
+			t.Errorf("delivery %+v, want a pending sandbox.created for sb-1", d)
+		}
+		gotAt, template, err := s.SandboxEvent(ctx, org, "sb-1", int64(d.EventSeq))
+		if err != nil || gotAt != at || template != "python" {
+			t.Errorf("event %d reads back as %d %q (%v), want %d python", d.EventSeq, gotAt, template, err, at)
 		}
 	}
+	want = append(want, want...)
 	slices.Sort(hooks)
 	slices.Sort(want)
 	if !slices.Equal(hooks, want) {
-		t.Errorf("deliveries went to %v, want one each for the enabled subscribed hooks %v", hooks, want)
+		t.Errorf("deliveries went to %v, want two each (one per event) for the enabled subscribed hooks", hooks)
+	}
+	if len(seqs) != 2 {
+		t.Errorf("the two events share sequence numbers %v, want one each", seqs)
+	}
+	// A delivery queued before event ids were used carries the event time.
+	if gotAt, template, err := s.SandboxEvent(ctx, org, "sb-1", at); err != nil || gotAt != at || template != "python" {
+		t.Errorf("an old time-keyed delivery reads back as %d %q (%v), want %d python", gotAt, template, err, at)
 	}
 }

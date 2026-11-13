@@ -283,9 +283,13 @@ type sandboxWebhookBody struct {
 }
 
 func (s *Server) sandboxWebhookBody(ctx context.Context, d store.AgentWebhookDelivery) ([]byte, error) {
-	at := int64(d.EventSeq)
+	at, template, err := s.st.SandboxEvent(ctx, d.OrgID, d.SandboxID, int64(d.EventSeq))
+	if err != nil {
+		return nil, err
+	}
 	body := sandboxWebhookBody{ID: d.ID, Type: d.EventType, At: time.Unix(at, 0).UTC()}
 	body.Sandbox.ID = d.SandboxID
+	body.Sandbox.Template = template
 	if d.EventType == "sandbox.ended" {
 		h, found, err := s.st.GetHistory(ctx, d.SandboxID)
 		if err != nil {
@@ -305,12 +309,6 @@ func (s *Server) sandboxWebhookBody(ctx context.Context, d store.AgentWebhookDel
 				"memory_mb":   h.MemMiB,
 			}
 		}
-	} else {
-		template, err := s.st.SandboxEventTemplate(ctx, d.OrgID, d.SandboxID, at)
-		if err != nil {
-			return nil, err
-		}
-		body.Sandbox.Template = template
 	}
 	return json.Marshal(body)
 }

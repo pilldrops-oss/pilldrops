@@ -81,10 +81,11 @@ func (s *Store) enqueueSandboxWebhooks(ctx context.Context, r EventRecord) error
 		}
 		var idb [10]byte
 		_, _ = rand.Read(idb[:])
-		// The event time stands in for the sequence number agent events have.
+		// The event's row id stands in for the sequence number agent events have:
+		// unlike its time, it tells apart two of the same event in one second.
 		values = append(values, "(?,?,?,?,?,?,0,?,0,'',?,?,?)")
 		args = append(args, "whd_"+hex.EncodeToString(idb[:]), h.ID, r.SandboxID, r.OrgID,
-			name, r.At, string(DeliveryPending), now, now, now)
+			name, r.ID, string(DeliveryPending), now, now, now)
 	}
 	if len(values) == 0 {
 		return nil
@@ -100,16 +101,21 @@ func (s *Store) enqueueSandboxWebhooks(ctx context.Context, r EventRecord) error
 	return nil
 }
 
-// SandboxEventTemplate returns the template recorded with a sandbox's event at
-// a given time, or "" when the event is no longer stored.
-func (s *Store) SandboxEventTemplate(ctx context.Context, orgID, sandboxID string, at int64) (string, error) {
-	var template string
-	err := s.queryRow(ctx, `SELECT template FROM sandbox_events
-		WHERE org_id = ? AND sandbox_id = ? AND at = ? LIMIT 1`, orgID, sandboxID, at).Scan(&template)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+// SandboxEvent returns the time and template of the sandbox event a delivery
+// was queued for. Deliveries queued before event ids were used carry the event
+// time instead, so a seq that names no event is read as one.
+func (s *Store) SandboxEvent(ctx context.Context, orgID, sandboxID string, seq int64) (at int64, template string, err error) {
+	err = s.queryRow(ctx, `SELECT at, template FROM sandbox_events
+		WHERE id = ? AND org_id = ? AND sandbox_id = ?`, seq, orgID, sandboxID).Scan(&at, &template)
+	if !errors.Is(err, sql.ErrNoRows) {
+		return at, template, err
 	}
-	return template, err
+	err = s.queryRow(ctx, `SELECT template FROM sandbox_events
+		WHERE org_id = ? AND sandbox_id = ? AND at = ? LIMIT 1`, orgID, sandboxID, seq).Scan(&template)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = nil
+	}
+	return seq, template, err
 }
 
 // SetAgentWebhookEnabled pauses or resumes a hook. Resuming clears the failure
