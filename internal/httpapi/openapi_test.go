@@ -33,7 +33,7 @@ func TestOpenAPISpecServed(t *testing.T) {
 	}
 
 	paths, _ := spec["paths"].(map[string]any)
-	for _, p := range []string{"/health", "/v1/sandboxes", "/v1/sandboxes/{id}", "/v1/sandboxes/{id}/exec", "/v1/audit"} {
+	for _, p := range []string{"/health", "/v1/sandboxes", "/v1/sandboxes/{id}", "/v1/sandboxes/{id}/exec", "/v1/audit", "/v1/sandboxes/{id}/backups", "/v1/sandboxes/{id}/backups/{bkp}/restore"} {
 		if _, ok := paths[p]; !ok {
 			t.Errorf("spec missing path %s", p)
 		}
