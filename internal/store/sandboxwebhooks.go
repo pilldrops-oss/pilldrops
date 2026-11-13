@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -67,17 +70,32 @@ func (s *Store) enqueueSandboxWebhooks(ctx context.Context, r EventRecord) error
 	if err != nil || name == "" {
 		return err
 	}
+	// One statement for every hook: this runs inside sandbox create and other
+	// lifecycle calls, so a round trip per hook made them slower.
+	now := time.Now().Unix()
+	var values []string
+	var args []any
 	for _, h := range hooks {
 		if !h.Enabled || !slices.Contains(h.Events, name) {
 			continue
 		}
+		var idb [10]byte
+		_, _ = rand.Read(idb[:])
 		// The event time stands in for the sequence number agent events have.
-		if _, _, err := s.EnqueueDelivery(ctx, AgentWebhookDelivery{
-			WebhookID: h.ID, SandboxID: r.SandboxID, OrgID: r.OrgID,
-			EventType: name, EventSeq: uint64(r.At), NextAt: time.Now(),
-		}); err != nil {
-			return fmt.Errorf("queue %s for webhook %s: %w", name, h.ID, err)
-		}
+		values = append(values, "(?,?,?,?,?,?,0,?,0,'',?,?,?)")
+		args = append(args, "whd_"+hex.EncodeToString(idb[:]), h.ID, r.SandboxID, r.OrgID,
+			name, r.At, string(DeliveryPending), now, now, now)
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	_, err = s.exec(ctx, `INSERT INTO agent_webhook_deliveries
+		(id, webhook_id, sandbox_id, org_id, event_type, event_seq, attempts, state,
+		 last_status, last_error, next_at, created_at, updated_at)
+		VALUES `+strings.Join(values, ",")+`
+		ON CONFLICT (webhook_id, sandbox_id, event_seq, event_type) DO NOTHING`, args...)
+	if err != nil {
+		return fmt.Errorf("queue %s: %w", name, err)
 	}
 	return nil
 }
