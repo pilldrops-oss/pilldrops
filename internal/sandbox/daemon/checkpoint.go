@@ -386,7 +386,7 @@ func (d *Daemon) RestoreCheckpoint(ctx context.Context, id, name string) (took t
 	inst := sb.inst
 	u := sb.meter.sample(d.clock.Now())
 	sb.meter.freeze(d.clock.Now())
-	orgID, template := sb.OrgID, sb.Template
+	orgID, template, image, ports := sb.OrgID, sb.Template, sb.Image, sb.Ports
 	startCmd, startEnv := sb.StartCmd, sb.Env
 	vcpu, memMiB, storageMB := sb.VCPU, sb.MemMiB, sb.StorageMB
 	d.mu.Unlock()
@@ -405,7 +405,7 @@ func (d *Daemon) RestoreCheckpoint(ctx context.Context, id, name string) (took t
 	t0 := d.clock.Now()
 	newInst, err := engine.RestoreCheckpoint(restoreCtx, inst, rt.SnapshotRef{Path: dir, Name: name}, rt.BootSpec{
 		SandboxID: id,
-		Template:  rt.Template{Name: template},
+		Template:  rt.Template{Name: template, Image: image, Ports: ports},
 		VCPU:      vcpu, MemMiB: memMiB, StorageMB: storageMB,
 	})
 	if err != nil {

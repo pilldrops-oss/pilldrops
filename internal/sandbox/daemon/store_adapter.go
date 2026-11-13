@@ -45,6 +45,28 @@ func unmarshalTags(s string) []string {
 	return out
 }
 
+func marshalPorts(ports []int) string {
+	if len(ports) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(ports)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func unmarshalPorts(s string) []int {
+	if s == "" {
+		return nil
+	}
+	var out []int
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
 // unmarshalEnv returns an empty map on blank or invalid input.
 func unmarshalEnv(s string) map[string]string {
 	m := map[string]string{}
@@ -86,6 +108,7 @@ func (a StoreAdapter) SaveSandbox(ctx context.Context, rec PersistedSandbox) err
 		Visibility:           rec.Visibility,
 		CreatedAt:            rec.CreatedAt, ExpiresAt: rec.ExpiresAt, UpdatedAt: rec.UpdatedAt,
 		PauseArchive: rec.PauseArchive,
+		Image:        rec.Image, Ports: marshalPorts(rec.Ports),
 	})
 }
 
@@ -195,6 +218,7 @@ func persistedOf(r store.SandboxRecord) PersistedSandbox {
 		Visibility:           r.Visibility,
 		CreatedAt:            r.CreatedAt, ExpiresAt: r.ExpiresAt, UpdatedAt: r.UpdatedAt,
 		PauseArchive: r.PauseArchive,
+		Image:        r.Image, Ports: unmarshalPorts(r.Ports),
 	}
 }
 

@@ -57,6 +57,10 @@ type SandboxRecord struct {
 	// archive only when the ids match, so one left behind by an earlier pause
 	// can never come back as the sandbox's state. Empty on any non-paused row.
 	PauseArchive string
+	// Image is the caller-supplied image the sandbox booted from ("" for a
+	// template's own), and Ports a JSON array of the ports it declared.
+	Image string
+	Ports string
 }
 
 // ErrSlugTaken is returned by SaveSandbox when another live sandbox holds the slug.
@@ -88,8 +92,8 @@ func (s *Store) SaveSandbox(ctx context.Context, r SandboxRecord) error {
 	// An empty incoming node_id leaves the stored owner alone, so a call site
 	// that forgets to carry the id cannot un-own a live sandbox.
 	_, err = s.exec(ctx,
-		`INSERT INTO sandboxes (id, template, name, slug, org_id, node_id, state, snapshot, start_cmd, public_port, vcpu, mem_mib, storage_mb, idle_timeout, hibernate_timeout, backup_retention, env, identity_hash, networks, created_by, visibility, created_at, expires_at, updated_at, pause_archive)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO sandboxes (id, template, name, slug, org_id, node_id, state, snapshot, start_cmd, public_port, vcpu, mem_mib, storage_mb, idle_timeout, hibernate_timeout, backup_retention, env, identity_hash, networks, created_by, visibility, created_at, expires_at, updated_at, pause_archive, image, ports)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   template=excluded.template, name=excluded.name, slug=excluded.slug, org_id=excluded.org_id, state=excluded.state,
 		   node_id=CASE WHEN excluded.node_id = '' THEN sandboxes.node_id ELSE excluded.node_id END,
@@ -100,8 +104,9 @@ func (s *Store) SaveSandbox(ctx context.Context, r SandboxRecord) error {
 		   env=excluded.env, identity_hash=excluded.identity_hash, networks=excluded.networks,
 		   created_by=CASE WHEN excluded.created_by = '' THEN sandboxes.created_by ELSE excluded.created_by END,
 		   visibility=CASE WHEN excluded.visibility = '' THEN sandboxes.visibility ELSE excluded.visibility END,
-		   expires_at=excluded.expires_at, updated_at=excluded.updated_at, pause_archive=excluded.pause_archive`,
-		r.ID, r.Template, r.Name, r.Slug, r.OrgID, r.NodeID, r.State, r.Snapshot, r.StartCmd, r.PublicPort, r.VCPU, r.MemMiB, r.StorageMB, r.IdleTimeoutSecs, r.HibernateTimeoutSecs, r.BackupRetentionSecs, r.Env, r.IdentityHash, r.Networks, r.CreatedBy, r.Visibility, r.CreatedAt, r.ExpiresAt, r.UpdatedAt, r.PauseArchive,
+		   expires_at=excluded.expires_at, updated_at=excluded.updated_at, pause_archive=excluded.pause_archive,
+		   image=excluded.image, ports=excluded.ports`,
+		r.ID, r.Template, r.Name, r.Slug, r.OrgID, r.NodeID, r.State, r.Snapshot, r.StartCmd, r.PublicPort, r.VCPU, r.MemMiB, r.StorageMB, r.IdleTimeoutSecs, r.HibernateTimeoutSecs, r.BackupRetentionSecs, r.Env, r.IdentityHash, r.Networks, r.CreatedBy, r.Visibility, r.CreatedAt, r.ExpiresAt, r.UpdatedAt, r.PauseArchive, r.Image, r.Ports,
 	)
 	if slugConflict(err) {
 		return fmt.Errorf("%w: %q", ErrSlugTaken, r.Slug)
@@ -186,7 +191,7 @@ func (s *Store) IsPublicPreview(ctx context.Context, id string) (bool, error) {
 }
 
 // sandboxCols is the column list every sandbox-record read shares.
-const sandboxCols = `id, template, name, slug, org_id, node_id, state, snapshot, start_cmd, public_port, vcpu, mem_mib, storage_mb, idle_timeout, hibernate_timeout, backup_retention, env, identity_hash, networks, created_by, visibility, created_at, expires_at, updated_at, pause_archive`
+const sandboxCols = `id, template, name, slug, org_id, node_id, state, snapshot, start_cmd, public_port, vcpu, mem_mib, storage_mb, idle_timeout, hibernate_timeout, backup_retention, env, identity_hash, networks, created_by, visibility, created_at, expires_at, updated_at, pause_archive, image, ports`
 
 // querySandboxes runs a sandbox SELECT and decrypts each row's env. where is
 // appended verbatim, so it must be a constant, never caller data.
@@ -194,7 +199,7 @@ func (s *Store) querySandboxes(ctx context.Context, where string, args ...any) (
 	return collectRows(ctx, s, `SELECT `+sandboxCols+` FROM sandboxes `+where, args,
 		func(rows *sql.Rows, r *SandboxRecord) error {
 			if err := rows.Scan(&r.ID, &r.Template, &r.Name, &r.Slug, &r.OrgID, &r.NodeID, &r.State, &r.Snapshot,
-				&r.StartCmd, &r.PublicPort, &r.VCPU, &r.MemMiB, &r.StorageMB, &r.IdleTimeoutSecs, &r.HibernateTimeoutSecs, &r.BackupRetentionSecs, &r.Env, &r.IdentityHash, &r.Networks, &r.CreatedBy, &r.Visibility, &r.CreatedAt, &r.ExpiresAt, &r.UpdatedAt, &r.PauseArchive); err != nil {
+				&r.StartCmd, &r.PublicPort, &r.VCPU, &r.MemMiB, &r.StorageMB, &r.IdleTimeoutSecs, &r.HibernateTimeoutSecs, &r.BackupRetentionSecs, &r.Env, &r.IdentityHash, &r.Networks, &r.CreatedBy, &r.Visibility, &r.CreatedAt, &r.ExpiresAt, &r.UpdatedAt, &r.PauseArchive, &r.Image, &r.Ports); err != nil {
 				return err
 			}
 			var err error

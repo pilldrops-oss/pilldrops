@@ -2094,4 +2094,18 @@ BEGIN SELECT RAISE(ABORT, 'sandboxes_state_known'); END`,
 			`CREATE INDEX IF NOT EXISTS shares_org ON shares (org_id)`,
 		},
 	},
+	{
+		version: 77,
+		name:    "sandbox_image",
+		// What a caller-supplied image booted with, so a resume, restore or fork
+		// boots the same thing. Empty on rows created before this.
+		sqlite: []string{
+			`ALTER TABLE sandboxes ADD COLUMN image TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE sandboxes ADD COLUMN ports TEXT NOT NULL DEFAULT ''`,
+		},
+		postgres: []string{
+			`ALTER TABLE sandboxes ADD COLUMN IF NOT EXISTS image TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE sandboxes ADD COLUMN IF NOT EXISTS ports TEXT NOT NULL DEFAULT ''`,
+		},
+	},
 }

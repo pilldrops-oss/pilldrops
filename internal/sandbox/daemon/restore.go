@@ -254,6 +254,8 @@ func (d *Daemon) sandboxFromRecord(r PersistedSandbox, now time.Time) *Sandbox {
 		CreatedBy:        r.CreatedBy,
 		Visibility:       r.Visibility,
 		pauseArchive:     r.PauseArchive,
+		Image:            r.Image,
+		Ports:            r.Ports,
 		// The meter restarts at zero; durable totals live in the store.
 		meter: newMeter(vcpu, memMiB, r.StorageMB, now),
 	}
