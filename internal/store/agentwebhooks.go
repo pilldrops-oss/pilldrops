@@ -291,12 +291,20 @@ func (s *Store) ListFailedDeliveries(ctx context.Context, orgID, sandboxID strin
 // ClaimDueDeliveries leases pending deliveries that are due by pushing next_at
 // forward. The conditional update gives each row to one caller, so several nodes
 // can poll without a leader, and a crashed attempt comes back when the lease ends.
-func (s *Store) ClaimDueDeliveries(ctx context.Context, now time.Time, lease time.Duration, limit int) ([]AgentWebhookDelivery, error) {
-	rows, err := s.db.QueryContext(ctx, s.rebind(`SELECT id, webhook_id, sandbox_id, org_id, event_type,
+// Deliveries for skipHooks are left alone.
+func (s *Store) ClaimDueDeliveries(ctx context.Context, now time.Time, lease time.Duration, limit int, skipHooks []string) ([]AgentWebhookDelivery, error) {
+	q := `SELECT id, webhook_id, sandbox_id, org_id, event_type,
 		event_seq, attempts, state, last_status, last_error, next_at, created_at, updated_at
 		FROM agent_webhook_deliveries
-		WHERE state = ? AND next_at <= ?
-		ORDER BY next_at ASC LIMIT ?`), string(DeliveryPending), now.Unix(), limit)
+		WHERE state = ? AND next_at <= ?`
+	args := []any{string(DeliveryPending), now.Unix()}
+	if len(skipHooks) > 0 {
+		q += ` AND webhook_id NOT IN (?` + strings.Repeat(",?", len(skipHooks)-1) + `)`
+		for _, id := range skipHooks {
+			args = append(args, id)
+		}
+	}
+	rows, err := s.db.QueryContext(ctx, s.rebind(q+` ORDER BY next_at ASC LIMIT ?`), append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}

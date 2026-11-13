@@ -17,7 +17,7 @@ func TestADueDeliveryIsClaimedByOneCallerUntilTheLeaseEnds(t *testing.T) {
 
 	claim := func(at time.Time) int {
 		t.Helper()
-		got, err := st.ClaimDueDeliveries(t.Context(), at, time.Minute, 10)
+		got, err := st.ClaimDueDeliveries(t.Context(), at, time.Minute, 10, nil)
 		if err != nil {
 			t.Fatalf("claim: %v", err)
 		}
