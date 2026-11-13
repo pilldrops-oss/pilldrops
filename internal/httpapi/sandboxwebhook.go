@@ -23,6 +23,8 @@ var webhookTestLimiter = newRateLimiter(5.0/60.0, 5)
 // maxOrgWebhooks bounds how many requests one lifecycle event can fan out to.
 const maxOrgWebhooks = 20
 
+const webhookLimitMessage = "webhook limit reached: delete one before adding another"
+
 func (s *Server) registerWebhookRoutes(route func(string, http.Handler)) {
 	route("GET /v1/webhooks", s.auth(s.handleWebhooks))
 	route("POST /v1/webhooks", s.auth(s.handleWebhooks))
@@ -72,7 +74,7 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(hooks) >= maxOrgWebhooks {
-		writeErr(w, http.StatusConflict, "webhook limit reached: delete one before adding another")
+		writeErr(w, http.StatusConflict, webhookLimitMessage)
 		return
 	}
 	// SSRF check at create time too, so the refusal is visible to the caller.
@@ -95,7 +97,11 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 	secret := store.NewWebhookSecret()
 	hook, err := s.st.CreateAgentWebhook(r.Context(), store.AgentWebhook{
 		OrgID: orgID(r), URL: req.URL, Events: req.Events, CreatedBy: keyIDOf(r),
-	}, secret)
+	}, secret, maxOrgWebhooks)
+	if errors.Is(err, store.ErrWebhookLimit) {
+		writeErr(w, http.StatusConflict, webhookLimitMessage)
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

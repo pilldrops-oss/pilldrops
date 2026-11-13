@@ -65,9 +65,14 @@ func NewWebhookSecret() string {
 	return "whsec_" + hex.EncodeToString(b[:])
 }
 
+// ErrWebhookLimit reports that the org or sandbox already holds its limit of hooks.
+var ErrWebhookLimit = errors.New("webhook limit reached")
+
 // CreateAgentWebhook stores a hook and returns it with its secret, once. An
 // empty sandbox id makes it an org-level hook for sandbox lifecycle events.
-func (s *Store) CreateAgentWebhook(ctx context.Context, w AgentWebhook, secret string) (AgentWebhook, error) {
+// A limit above zero caps the hooks sharing its org and sandbox id; count and
+// insert share one transaction serialized per org.
+func (s *Store) CreateAgentWebhook(ctx context.Context, w AgentWebhook, secret string, limit int) (AgentWebhook, error) {
 	if w.URL == "" {
 		return AgentWebhook{}, fmt.Errorf("url is required")
 	}
@@ -87,16 +92,39 @@ func (s *Store) CreateAgentWebhook(ctx context.Context, w AgentWebhook, secret s
 	if err != nil {
 		return AgentWebhook{}, fmt.Errorf("encrypt webhook secret: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, s.rebind(`INSERT INTO agent_webhooks
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AgentWebhook{}, err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+
+	if limit > 0 {
+		// SQLite serializes writers already; Postgres needs the lock.
+		if s.dialect == dialectPostgres {
+			if _, err := tx.ExecContext(ctx, s.rebind(`SELECT pg_advisory_xact_lock(hashtext(?))`),
+				"webhooks:"+w.OrgID); err != nil {
+				return AgentWebhook{}, err
+			}
+		}
+		var held int
+		if err := tx.QueryRowContext(ctx, s.rebind(
+			`SELECT COUNT(*) FROM agent_webhooks WHERE org_id = ? AND sandbox_id = ?`),
+			w.OrgID, w.SandboxID).Scan(&held); err != nil {
+			return AgentWebhook{}, err
+		}
+		if held >= limit {
+			return AgentWebhook{}, ErrWebhookLimit
+		}
+	}
+	if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO agent_webhooks
 		(id, sandbox_id, org_id, url, secret_enc, events, enabled, consecutive_failures,
 		 disabled_reason, created_at, created_by, last_at, last_status)
 		VALUES (?,?,?,?,?,?,?,0,'',?,?,0,0)`),
 		w.ID, w.SandboxID, w.OrgID, w.URL, enc, strings.Join(w.Events, " "),
-		true, w.CreatedAt.Unix(), w.CreatedBy)
-	if err != nil {
+		true, w.CreatedAt.Unix(), w.CreatedBy); err != nil {
 		return AgentWebhook{}, err
 	}
-	return w, nil
+	return w, tx.Commit()
 }
 
 // ListAgentWebhooks returns a sandbox's hooks, or the org-level ones for an
