@@ -474,6 +474,10 @@ func (d *Daemon) destroy(ctx context.Context, id string, evict bool, exitState s
 			d.log().Warn("destroy: archived snapshot delete failed", "sandbox_id", id, "error", err)
 		}
 	}
+	// Not after a crash: the backups are then the only copy of the owner's data.
+	if dead == nil {
+		d.dropBackups(ctx, orgID, id)
+	}
 	d.liveStats.forget(id)
 	d.diskSample.forget(id)
 	d.revokeAgentTokens(ctx, id)
