@@ -165,13 +165,6 @@ func (s *Server) handleWebhookDelete(w http.ResponseWriter, r *http.Request) {
 //	POST /v1/webhooks/{hookID}/test
 func (s *Server) handleWebhookTest(w http.ResponseWriter, r *http.Request) {
 	hookID := r.PathValue("hookID")
-	if !webhookTestLimiter.allow("whtest:" + hookID) {
-		w.Header().Set("Retry-After", "60")
-		writeErr(w, http.StatusTooManyRequests,
-			"test sends are limited; this endpoint makes the server call your endpoint on demand")
-		return
-	}
-
 	hooks, err := s.st.ListAgentWebhooks(r.Context(), orgID(r), "")
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -180,6 +173,13 @@ func (s *Server) handleWebhookTest(w http.ResponseWriter, r *http.Request) {
 	i := slices.IndexFunc(hooks, func(h store.AgentWebhook) bool { return h.ID == hookID })
 	if i < 0 {
 		writeErr(w, http.StatusNotFound, "no such webhook")
+		return
+	}
+	// Charged only once the hook is the caller's, so another org cannot spend it.
+	if !webhookTestLimiter.allow("whtest:" + hookID) {
+		w.Header().Set("Retry-After", "60")
+		writeErr(w, http.StatusTooManyRequests,
+			"test sends are limited; this endpoint makes the server call your endpoint on demand")
 		return
 	}
 	secret, err := s.st.AgentWebhookSecret(r.Context(), hookID)

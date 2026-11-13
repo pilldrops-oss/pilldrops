@@ -231,3 +231,17 @@ func TestWebhookCreateRefusesBodiesThatAreNotSmallJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestAnotherOrgCannotSpendAHooksTestBudget(t *testing.T) {
+	srv, key, _, st, _ := newCronSandboxWithAPI(t)
+	other, err := st.CreateAgentWebhook(t.Context(),
+		store.AgentWebhook{OrgID: "org-other", URL: testWebhookURL, Events: []string{"sandbox.ended"}}, "secret", 0)
+	if err != nil {
+		t.Fatalf("create the other org's hook: %v", err)
+	}
+	for i := range 7 {
+		if code, out := do(t, "POST", srv+"/v1/webhooks/"+other.ID+"/test", key, ""); code != http.StatusNotFound {
+			t.Fatalf("probe %d of another org's hook = %d %v, want 404", i+1, code, out)
+		}
+	}
+}
