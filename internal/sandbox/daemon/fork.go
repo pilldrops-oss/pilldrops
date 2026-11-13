@@ -71,6 +71,7 @@ func (d *Daemon) Fork(ctx context.Context, parentID string, spec ForkSpec) (res 
 		return ForkResult{}, fmt.Errorf("cannot fork from state %s", st)
 	}
 	template, orgID := parent.Template, parent.OrgID
+	image, ports := parent.Image, parent.Ports
 	vcpu, memMiB, storageMB := parent.VCPU, parent.MemMiB, parent.StorageMB
 	startCmd, idle := parent.StartCmd, parent.IdleTimeout
 	env := make(map[string]string, len(parent.Env))
@@ -102,7 +103,7 @@ func (d *Daemon) Fork(ctx context.Context, parentID string, spec ForkSpec) (res 
 	ident, identHash := d.identityFor(id)
 	inst, info, err := forker.Fork(forkCtx, src, rt.BootSpec{
 		SandboxID: id,
-		Template:  rt.Template{Name: template},
+		Template:  rt.Template{Name: template, Image: image, Ports: ports},
 		VCPU:      vcpu, MemMiB: memMiB, StorageMB: storageMB,
 		Identity: ident,
 	})
@@ -128,6 +129,7 @@ func (d *Daemon) Fork(ctx context.Context, parentID string, spec ForkSpec) (res 
 		CreatedAt: now, ExpiresAt: expiresAt, LastActiveAt: now,
 		PublicPort: publicPort, StartCmd: startCmd, Env: env,
 		VCPU: vcpu, MemMiB: memMiB, StorageMB: storageMB,
+		Image: image, Ports: ports,
 		IdleTimeout:  idle,
 		IdentityHash: identHash,
 		// Same env, same egress, same networks: a copy of the sandbox, and a

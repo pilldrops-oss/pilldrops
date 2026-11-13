@@ -350,3 +350,16 @@ func TestSandboxPauseArchiveRoundTrips(t *testing.T) {
 		t.Fatalf("a resumed row still names archive %q", got.PauseArchive)
 	}
 }
+
+func TestSandboxImageAndPortsRoundTrip(t *testing.T) {
+	st := openTestStore(t)
+	rec := SandboxRecord{ID: "sb-img", OrgID: "o", Template: "base", State: "running",
+		Image: "example/app:1", Ports: "[8080]", CreatedAt: 1, UpdatedAt: 1, ExpiresAt: 9e9}
+	if err := st.SaveSandbox(t.Context(), rec); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := st.SandboxByID(t.Context(), "sb-img")
+	if err != nil || !ok || got.Image != "example/app:1" || got.Ports != "[8080]" {
+		t.Fatalf("image, ports = %q, %q (%v %v), want example/app:1, [8080]", got.Image, got.Ports, ok, err)
+	}
+}

@@ -114,6 +114,7 @@ func (d *Daemon) Rehome(ctx context.Context, id, org string) error {
 	if _, err := d.Create(ctx, CreateSpec{
 		ID: id, OrgID: r.OrgID, Template: tmpl, Snapshot: tmpl,
 		VCPU: r.VCPU, MemMiB: r.MemMiB, StorageMB: r.StorageMB,
+		Image: r.Image, Ports: r.Ports,
 	}); err != nil {
 		// Holding rootfs.squashfs, it would be listed to tenants as a template;
 		// the archive keeps the capture for a retry.

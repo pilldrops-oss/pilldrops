@@ -96,6 +96,9 @@ type PersistedSandbox struct {
 	// PauseArchive is the id of the archived pause this paused record's state
 	// is, "" for none; see store.SandboxRecord.PauseArchive.
 	PauseArchive string
+	// Image and Ports are what the create request declared; see Sandbox.
+	Image string
+	Ports []int
 }
 
 // Sandbox is the daemon's in-memory view of one sandbox. Fields are guarded by
@@ -119,8 +122,10 @@ type Sandbox struct {
 	LastActiveAt time.Time
 	// PublicPort is the app port declared via StartServer; 0 means the preview proxy imposes no restriction.
 	PublicPort int
-	// Ports are the request-declared ports published at boot on a single-port
-	// runtime. In-memory only: a restart falls back to the catalogue's ports.
+	// Image is the caller-supplied image the sandbox booted from, "" for the
+	// template's own. Ports are the request-declared ports published at boot
+	// on a single-port runtime. Both are sent again on every re-boot.
+	Image string
 	Ports []int
 	// BootType and BootMs are how this sandbox came up in this process; see
 	// SandboxInfo. Not persisted: a sandbox adopted after a restart did not boot.
@@ -263,6 +268,7 @@ func (d *Daemon) recordOf(sb *Sandbox) PersistedSandbox {
 		// Only a paused sandbox is its archive: a running one has moved on, so
 		// every save of it clears the id, and a rehome then refuses the archive.
 		PauseArchive: pauseArchiveOf(sb),
+		Image:        sb.Image, Ports: sb.Ports,
 	}
 }
 

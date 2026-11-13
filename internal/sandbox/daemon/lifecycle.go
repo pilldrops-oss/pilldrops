@@ -232,7 +232,7 @@ func (d *Daemon) ResumeTimed(ctx context.Context, id string) (took time.Duration
 	}
 	sb.State = StateResuming
 	snap := sb.Snapshot
-	template := sb.Template
+	template, image, ports := sb.Template, sb.Image, sb.Ports
 	startCmd := sb.StartCmd
 	startEnv := sb.Env
 	vcpu := sb.VCPU
@@ -264,7 +264,7 @@ func (d *Daemon) ResumeTimed(ctx context.Context, id string) (took time.Duration
 	restoreCtx, restoreSpan := observability.StartInternal(ctx, "runtime.Restore", attribute.String("sandbox_id", id))
 	inst, err := d.cfg.Runtime.Restore(restoreCtx, snap, rt.BootSpec{
 		SandboxID: id,
-		Template:  rt.Template{Name: template},
+		Template:  rt.Template{Name: template, Image: image, Ports: ports},
 		VCPU:      vcpu, MemMiB: memMiB, StorageMB: storageMB,
 	})
 	observability.End(restoreSpan, err)

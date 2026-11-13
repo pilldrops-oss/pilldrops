@@ -288,3 +288,30 @@ func TestPlatformCapturesAreNotTheOwnersCheckpoints(t *testing.T) {
 		t.Fatalf("the %dth owner save = %v, want ErrCheckpointLimit", MaxCheckpoints+1, err)
 	}
 }
+
+// A caller's own image on a plain template is in no catalogue: only the record
+// can say what to boot again.
+func TestRestoresKeepACallerSuppliedImageAndPorts(t *testing.T) {
+	d, fake := newCheckpointDaemon(t)
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "base", Image: "example/app:1", Ports: []int{8080}, OrgID: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := d.Pause(ctx, sb.ID); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if err := d.Resume(ctx, sb.ID); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	spec, _ := fake.LastBootSpec()
+	if spec.Template.Image != "example/app:1" || len(spec.Template.Ports) != 1 || spec.Template.Ports[0] != 8080 {
+		t.Errorf("resume booted with image=%q ports=%v, want example/app:1 [8080]", spec.Template.Image, spec.Template.Ports)
+	}
+	d.mu.Lock()
+	rec := d.recordOf(d.boxes[sb.ID])
+	d.mu.Unlock()
+	if rec.Image != "example/app:1" || len(rec.Ports) != 1 || rec.Ports[0] != 8080 {
+		t.Errorf("record keeps image=%q ports=%v, want example/app:1 [8080]", rec.Image, rec.Ports)
+	}
+}
