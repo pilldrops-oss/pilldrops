@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
+	"mime"
 	"net/http"
 	"slices"
 	"strconv"
@@ -24,6 +26,32 @@ var webhookTestLimiter = newRateLimiter(5.0/60.0, 5)
 const maxOrgWebhooks = 20
 
 const webhookLimitMessage = "webhook limit reached: delete one before adding another"
+
+// webhookBodyLimit bounds a webhook create or toggle body; a real one is a few
+// hundred bytes.
+const webhookBodyLimit = 64 << 10
+
+// decodeWebhookBody decodes a JSON webhook request, writing a 415, 413 or 400
+// and returning false when it is not one. An empty body is fine.
+func decodeWebhookBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	if ct := r.Header.Get("Content-Type"); ct != "" {
+		if mt, _, err := mime.ParseMediaType(ct); err != nil || mt != "application/json" {
+			writeErr(w, http.StatusUnsupportedMediaType, "content type must be application/json")
+			return false
+		}
+	}
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, webhookBodyLimit)).Decode(v)
+	var tooLarge *http.MaxBytesError
+	switch {
+	case errors.As(err, &tooLarge):
+		writeErr(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return false
+	case err != nil && !errors.Is(err, io.EOF):
+		writeErr(w, http.StatusBadRequest, "invalid json body")
+		return false
+	}
+	return true
+}
 
 func (s *Server) registerWebhookRoutes(route func(string, http.Handler)) {
 	route("GET /v1/webhooks", s.auth(s.handleWebhooks))
@@ -69,8 +97,7 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 		URL    string   `json:"url"`
 		Events []string `json:"events"`
 	}
-	if !decodeBody(r, &req) {
-		writeErr(w, http.StatusBadRequest, "invalid json body")
+	if !decodeWebhookBody(w, r, &req) {
 		return
 	}
 	if len(hooks) >= maxOrgWebhooks {
@@ -192,8 +219,7 @@ func (s *Server) handleWebhookToggle(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Enabled bool `json:"enabled"`
 	}
-	if !decodeBody(r, &body) {
-		writeErr(w, http.StatusBadRequest, "invalid json body")
+	if !decodeWebhookBody(w, r, &body) {
 		return
 	}
 	if err := s.st.SetAgentWebhookEnabled(r.Context(), orgID(r), "", hookID, body.Enabled); err != nil {

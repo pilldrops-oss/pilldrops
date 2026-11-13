@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -192,5 +193,41 @@ func TestASlowReceiverDoesNotHoldUpOtherHooks(t *testing.T) {
 	api.deliverDueWebhooks(ctx, time.Now(), nil)
 	if got := len(sent); got != 2 {
 		t.Errorf("the slow hook got %d deliveries after its receiver recovered, want 2", got)
+	}
+}
+
+func TestWebhookCreateRefusesBodiesThatAreNotSmallJSON(t *testing.T) {
+	srv, key, _, _, _ := newCronSandboxWithAPI(t)
+	post := func(contentType, body string) int {
+		t.Helper()
+		req, _ := http.NewRequest("POST", srv+"/v1/webhooks", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	valid := `{"url":"` + testWebhookURL + `","events":["sandbox.ended"]}`
+	padded := `{"url":"` + testWebhookURL + `","events":["sandbox.ended"],"pad":"` + strings.Repeat("x", webhookBodyLimit) + `"}`
+
+	for name, c := range map[string]struct {
+		contentType, body string
+		want              int
+	}{
+		"plain text":          {"text/plain", valid, http.StatusUnsupportedMediaType},
+		"form encoded":        {"application/x-www-form-urlencoded", "url=x", http.StatusUnsupportedMediaType},
+		"over the limit":      {"application/json", padded, http.StatusRequestEntityTooLarge},
+		"broken json":         {"application/json", `{"url":`, http.StatusBadRequest},
+		"json with a charset": {"application/json; charset=utf-8", valid, http.StatusCreated},
+		"no content type":     {"", valid, http.StatusCreated},
+	} {
+		if got := post(c.contentType, c.body); got != c.want {
+			t.Errorf("%s: status %d, want %d", name, got, c.want)
+		}
 	}
 }
