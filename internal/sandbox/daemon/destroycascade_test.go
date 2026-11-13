@@ -62,7 +62,7 @@ func TestDeleteSandboxCascades(t *testing.T) {
 		}
 		if _, err := st.CreateAgentWebhook(ctx, store.AgentWebhook{
 			SandboxID: sandbox, OrgID: org, URL: "https://example.invalid/hook", Enabled: true,
-		}, "secret"); err != nil {
+		}, "secret", 0); err != nil {
 			t.Fatalf("webhook: %v", err)
 		}
 	}
