@@ -700,6 +700,152 @@
         }
       }
     },
+    "/v1/sandboxes/{id}/backups": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Back up a sandbox",
+        "description": "Capture the sandbox and upload the capture to the node's object store, so it survives the loss of the node. Returns once the sandbox is running again, with status \"pending\"; poll the list until the backup is \"ready\" or \"failed\". A capture identical to the last ready backup stores no bytes of its own and lists with deduped: true and its parent_id. Backups expire after the sandbox's retention, or the deployment default, and are deleted with the sandbox.",
+        "responses": {
+          "202": {
+            "description": "Started: id, status (\"pending\"), snapshot_kind (\"memory\" or \"disk\"), bytes, created_at, and paused_ms, how long the sandbox stood still for the capture."
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "backup_in_flight: a backup of this sandbox is already running."
+          },
+          "501": {
+            "description": "backups_need_object_store: this node has no object store, or its runtime cannot capture."
+          }
+        }
+      },
+      "get": {
+        "summary": "List backups",
+        "description": "A sandbox's backups, newest first. Each has id, status (\"pending\", \"ready\" or \"failed\"), bytes, snapshot_kind and created_at, and when set ready_at, expires_at, sha256, parent_id with deduped: true, and error.",
+        "responses": {
+          "200": {
+            "description": "{backups: [...]}"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "description": "backups_need_object_store: this node has no object store, or its runtime cannot capture."
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/backups/{bkp}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "bkp",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "delete": {
+        "summary": "Remove a backup",
+        "description": "Delete one backup's stored object and its record.",
+        "responses": {
+          "200": {
+            "description": "{status: deleted, id}"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "backup_referenced: a later deduped backup still points at this one's bytes."
+          },
+          "501": {
+            "description": "backups_need_object_store: this node has no object store, or its runtime cannot capture."
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/backups/{bkp}/restore": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "bkp",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Restore a backup in place",
+        "description": "Overwrite the sandbox's disk with the backup's: same id, URL, token and address, and everything written since the backup is lost. Because it destroys current data, the body must say confirm: true; without it nothing changes.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "confirm"
+                ],
+                "properties": {
+                  "confirm": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{status: running, id, restore_ms}"
+          },
+          "400": {
+            "description": "confirm_required, or the body is not valid JSON."
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "backup_not_ready: the backup is still pending or failed."
+          },
+          "501": {
+            "description": "backups_need_object_store: this node has no object store, or its runtime cannot capture."
+          },
+          "503": {
+            "description": "The node's isolation preflight failed, so it refuses to restore."
+          }
+        }
+      }
+    },
     "/v1/sandboxes/{id}/files": {
       "parameters": [
         {
