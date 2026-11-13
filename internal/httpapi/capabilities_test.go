@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -169,8 +170,8 @@ func TestCapabilitiesEndpoint(t *testing.T) {
 	if got.Scope != "node" {
 		t.Errorf("scope = %q, want \"node\"", got.Scope)
 	}
-	if got.Features == nil || len(got.Features) != 0 {
-		t.Errorf("features = %#v, want [] on the wire: this runtime attaches no volumes, and absent would read as a server too old to say", got.Features)
+	if !slices.Equal(got.Features, []string{"webhook"}) {
+		t.Errorf("features = %#v, want [webhook] on the wire: this runtime attaches no volumes, and absent would read as a server too old to say", got.Features)
 	}
 	if got.Runtime != "process" {
 		t.Errorf("runtime = %q, want \"process\" — the test server boots the process runtime, "+
@@ -366,10 +367,10 @@ func TestWhoamiNamesTheKeyOnANode(t *testing.T) {
 }
 
 func TestNodeFeaturesOfferVolumesOnlyWhereTheyAttach(t *testing.T) {
-	if got := nodeFeatures(rt.Caps{Volumes: true}); len(got) != 1 || got[0] != "volume" {
-		t.Errorf("a runtime with volumes: %v, want [volume]", got)
+	if got := nodeFeatures(rt.Caps{Volumes: true}); !slices.Equal(got, []string{"volume", "webhook"}) {
+		t.Errorf("a runtime with volumes: %v, want [volume webhook]", got)
 	}
-	if got := nodeFeatures(rt.Caps{}); got == nil || len(got) != 0 {
-		t.Errorf("a runtime without volumes: %#v, want an empty list", got)
+	if got := nodeFeatures(rt.Caps{}); !slices.Equal(got, []string{"webhook"}) {
+		t.Errorf("a runtime without volumes: %#v, want [webhook]", got)
 	}
 }
