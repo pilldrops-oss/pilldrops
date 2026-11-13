@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -115,5 +116,81 @@ func TestSandboxLifecycleEventsReachAnOrgWebhook(t *testing.T) {
 	}
 	if code, _ := do(t, "DELETE", srv+"/v1/webhooks/"+hookID, key, ""); code != http.StatusOK {
 		t.Errorf("delete = %d", code)
+	}
+}
+
+func TestASlowReceiverDoesNotHoldUpOtherHooks(t *testing.T) {
+	srv, key, id, _, api := newCronSandboxWithAPI(t)
+	ctx := t.Context()
+
+	const slowURL, fastURL = "https://192.0.2.1/slow", "https://192.0.2.1/fast"
+	for _, url := range []string{slowURL, fastURL} {
+		if code, out := do(t, "POST", srv+"/v1/webhooks", key,
+			`{"url":"`+url+`","events":["sandbox.paused"]}`); code != http.StatusCreated {
+			t.Fatalf("create hook = %d %v", code, out)
+		}
+	}
+
+	var slowCalls atomic.Int32
+	release := make(chan struct{})
+	sent := make(chan string, 8)
+	orig := webhookSend
+	t.Cleanup(func() { webhookSend = orig })
+	webhookSend = func(_ context.Context, url, _, _ string, _ []byte) (int, error) {
+		if url == slowURL {
+			slowCalls.Add(1)
+			<-release
+		}
+		sent <- url
+		return http.StatusOK, nil
+	}
+	pause := func(at int64) {
+		t.Helper()
+		if err := api.st.RecordEvent(ctx, store.EventRecord{
+			OrgID: "default", SandboxID: id, Event: "paused", Template: "python", At: at,
+		}); err != nil {
+			t.Fatalf("record: %v", err)
+		}
+	}
+	awaitFast := func() {
+		t.Helper()
+		select {
+		case url := <-sent:
+			if url != fastURL {
+				t.Fatalf("sent to %s while the slow receiver was still held", url)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the fast hook waited on the slow receiver")
+		}
+	}
+
+	snd := &webhookSender{busy: map[string]bool{}}
+	now := time.Now()
+	pause(now.Unix())
+	api.startDueWebhooks(ctx, time.Now(), nil, snd)
+	awaitFast()
+
+	// The slow hook is still in flight: a later round serves the fast hook and
+	// leaves the slow hook's next delivery queued behind its first.
+	pause(now.Unix() + 1)
+	inFlight := func() int {
+		snd.mu.Lock()
+		defer snd.mu.Unlock()
+		return len(snd.busy)
+	}
+	for inFlight() > 1 { // the fast worker has sent but may not have finished
+		time.Sleep(time.Millisecond)
+	}
+	api.startDueWebhooks(ctx, time.Now(), nil, snd)
+	awaitFast()
+	if got := slowCalls.Load(); got != 1 {
+		t.Errorf("the slow hook had %d deliveries in flight, want 1 at a time", got)
+	}
+
+	close(release)
+	snd.wg.Wait()
+	api.deliverDueWebhooks(ctx, time.Now(), nil)
+	if got := len(sent); got != 2 {
+		t.Errorf("the slow hook got %d deliveries after its receiver recovered, want 2", got)
 	}
 }
