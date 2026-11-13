@@ -22,11 +22,11 @@ func (s *Store) RecordEvent(ctx context.Context, r EventRecord) error {
 	if r.OrgID == "" {
 		r.OrgID = "default"
 	}
-	_, err := s.exec(ctx,
+	err := s.queryRow(ctx,
 		`INSERT INTO sandbox_events (org_id, sandbox_id, event, template, active_after, at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
 		r.OrgID, r.SandboxID, r.Event, r.Template, r.ActiveAfter, r.At,
-	)
+	).Scan(&r.ID)
 	if err != nil {
 		return err
 	}
