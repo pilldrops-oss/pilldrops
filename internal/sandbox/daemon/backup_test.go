@@ -541,6 +541,65 @@ func TestDeleteBackupGuards(t *testing.T) {
 	}
 }
 
+// A backup restores only onto its own sandbox, so one that outlived it could
+// be neither used nor deleted, only charged for.
+func TestDestroyReclaimsTheSandboxBackups(t *testing.T) {
+	d, _, st, blobs := newBackupDaemon(t)
+	ctx := t.Context()
+	doomed, kept := createRunning(t, d), createRunning(t, d)
+
+	first, _ := d.Backup(ctx, doomed.ID)
+	waitBackup(t, st, first.ID)
+	second, _ := d.Backup(ctx, doomed.ID)
+	if deduped := waitBackup(t, st, second.ID); deduped.ParentID != first.ID {
+		t.Fatalf("expected the second capture to dedupe; got %+v", deduped)
+	}
+	other, _ := d.Backup(ctx, kept.ID)
+	otherReady := waitBackup(t, st, other.ID)
+
+	if err := d.Destroy(ctx, doomed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if rows, _ := st.ListSandboxBackups(ctx, "default", doomed.ID); len(rows) != 0 {
+		t.Fatalf("backups outlived their sandbox: %+v", rows)
+	}
+	if rows, _ := st.ListSandboxBackups(ctx, "default", kept.ID); len(rows) != 1 {
+		t.Fatalf("another sandbox's backups = %+v, want its one", rows)
+	}
+	blobs.mu.Lock()
+	defer blobs.mu.Unlock()
+	if _, ok := blobs.objects[otherReady.ObjectKey]; !ok || len(blobs.objects) != 1 {
+		t.Fatalf("objects left = %d, want only the other sandbox's", len(blobs.objects))
+	}
+}
+
+// A crash is not a delete: what the sandbox last backed up is all that is left
+// of it, so it stays until retention takes it.
+func TestACrashKeepsTheSandboxBackups(t *testing.T) {
+	d, _, st, blobs := newBackupDaemon(t)
+	ctx := t.Context()
+	sb := createRunning(t, d)
+	started, _ := d.Backup(ctx, sb.ID)
+	ready := waitBackup(t, st, started.ID)
+
+	d.mu.Lock()
+	d.boxes[sb.ID].inst = deadVMM{d.boxes[sb.ID].inst}
+	d.mu.Unlock()
+	d.scanExits(ctx)
+
+	if _, ok := d.Get(sb.ID); ok {
+		t.Fatal("the crashed sandbox was not reaped")
+	}
+	if rows, _ := st.ListSandboxBackups(ctx, "default", sb.ID); len(rows) != 1 {
+		t.Fatalf("backups after a crash = %+v, want the one taken", rows)
+	}
+	blobs.mu.Lock()
+	defer blobs.mu.Unlock()
+	if _, ok := blobs.objects[ready.ObjectKey]; !ok {
+		t.Error("the crash removed the backup's object")
+	}
+}
+
 // A runtime that cannot capture, and a node with no object store, both refuse
 // clearly rather than failing somewhere deeper.
 func TestBackupRefusalsNameWhatIsMissing(t *testing.T) {

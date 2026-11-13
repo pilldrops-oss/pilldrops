@@ -1396,6 +1396,12 @@ whose digest matched the previous one stores no bytes of its own and restores
 through its parent. `DELETE` refuses those with 409 `backup_referenced`, and a
 `pending` one with 409 `backup_in_flight`.
 
+Deleting a sandbox, or letting it expire, deletes its backups with it: a
+restore only goes back onto the same sandbox, so they could no longer be used.
+A sandbox that crashed keeps its backups until retention reclaims them, and so
+does one that was lost with its node. One still uploading when the sandbox is
+deleted is left for retention as well.
+
 ### When a node dies
 
 The control plane reaps a node it has not heard from for two minutes

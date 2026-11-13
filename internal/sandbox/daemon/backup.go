@@ -461,28 +461,58 @@ func (d *Daemon) PruneBackups(ctx context.Context, defaultDays int) (int, error)
 	}
 	pruned := 0
 	for _, b := range expired {
-		if b.Status == store.BackupPending {
-			continue // a capture is still writing it
+		if d.reclaimBackup(ctx, b) {
+			pruned++
 		}
-		if b.ObjectKey != "" {
-			if err := d.cfg.Blobs.Delete(ctx, b.ObjectKey); err != nil && !isMissingObject(err) {
-				// Leave the row: it is the only pointer at the object, and
-				// dropping it would make the bytes unreclaimable.
-				d.log().Warn("could not reclaim a backup object", "backup", b.ID,
-					"key", b.ObjectKey, "error", err)
-				continue
-			}
-		}
-		if err := d.cfg.Backups.DeleteBackup(ctx, b.OrgID, b.ID); err != nil {
-			d.log().Warn("could not remove an expired backup row", "backup", b.ID, "error", err)
-			continue
-		}
-		pruned++
 	}
 	if pruned > 0 {
 		d.log().Info("reclaimed expired backups", "count", pruned)
 	}
 	return pruned, nil
+}
+
+// reclaimBackup removes one backup, the object first and then the row, and
+// reports whether it went. A failure is logged and left for the next prune.
+func (d *Daemon) reclaimBackup(ctx context.Context, b store.Backup) bool {
+	if b.Status == store.BackupPending {
+		return false // a capture is still writing it
+	}
+	if b.ObjectKey != "" {
+		if err := d.cfg.Blobs.Delete(ctx, b.ObjectKey); err != nil && !isMissingObject(err) {
+			// Leave the row: it is the only pointer at the object, and
+			// dropping it would make the bytes unreclaimable.
+			d.log().Warn("could not reclaim a backup object", "backup", b.ID,
+				"key", b.ObjectKey, "error", err)
+			return false
+		}
+	}
+	if err := d.cfg.Backups.DeleteBackup(ctx, b.OrgID, b.ID); err != nil {
+		d.log().Warn("could not remove a backup row", "backup", b.ID, "error", err)
+		return false
+	}
+	return true
+}
+
+// dropBackups reclaims the backups of a sandbox its owner deleted or let
+// expire. A restore only goes back onto the same sandbox, so once it is gone
+// they can be neither used nor deleted by their owner, only charged for.
+func (d *Daemon) dropBackups(ctx context.Context, orgID, id string) {
+	if d.backupsReady() != nil {
+		return
+	}
+	backups, err := d.cfg.Backups.ListSandboxBackups(ctx, orgID, id)
+	if err != nil {
+		d.log().Warn("destroy: could not list the sandbox's backups", "sandbox_id", id, "error", err)
+		return
+	}
+	// Deduped rows first: the row they restore from cannot go while they point at it.
+	for _, deduped := range []bool{true, false} {
+		for _, b := range backups {
+			if (b.ParentID != "") == deduped {
+				d.reclaimBackup(ctx, b)
+			}
+		}
+	}
 }
 
 // SetBackupRetention records how long this sandbox's backups are kept. Zero
