@@ -83,7 +83,7 @@ func (r *Runtime) RestoreCheckpoint(ctx context.Context, inst rt.Instance, src r
 		return nil, fmt.Errorf("checkpoint image %s is gone", tag)
 	}
 	if i, ok := inst.(*dockerInstance); ok {
-		_, _, _, _ = dockerOut(ctx, "rm", "-f", i.cid)
+		_, _, _, _ = dockerOut(ctx, "rm", "-f", "-v", i.cid)
 	}
 	return r.bootImage(ctx, spec, tag)
 }

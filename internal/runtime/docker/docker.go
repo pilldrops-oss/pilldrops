@@ -116,6 +116,8 @@ func imageFor(name string) string {
 type Runtime struct {
 	pulled   sync.Map // image -> struct{}, so an image is inspected/pulled once
 	building sync.Map // enriched-image tag -> struct{}, so only one build runs at a time
+	// volumelessMu lets only one volume-free image copy be made at a time.
+	volumelessMu sync.Mutex
 	// imageAllowlist and imageRequireDigest mirror internal/httpapi's tenant
 	// image policy (this package cannot import httpapi). They apply only to
 	// tenant-supplied images, never to platform template pulls, or an

@@ -24,6 +24,12 @@ func (r *Runtime) bootImage(ctx context.Context, spec rt.BootSpec, img string) (
 	// A service image runs its own entrypoint; a toolbox image is overridden
 	// with `sleep infinity` and exec'd into.
 	service := serviceTemplate(spec)
+	if service {
+		var err error
+		if img, err = r.volumelessImage(ctx, img); err != nil {
+			return nil, err
+		}
+	}
 	base := []string{
 		"run", "-d",
 		"--label", "sandboxd=1",

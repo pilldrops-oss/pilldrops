@@ -657,7 +657,7 @@ func (i *dockerInstance) Snapshot(ctx context.Context, dst rt.SnapshotRef) error
 }
 
 func (i *dockerInstance) Stop(ctx context.Context) error {
-	_, se, code, err := dockerOut(ctx, "rm", "-f", i.cid)
+	_, se, code, err := dockerOut(ctx, "rm", "-f", "-v", i.cid)
 	if err != nil || code != 0 {
 		return fmt.Errorf("remove container: %w %s", err, strings.TrimSpace(se))
 	}
