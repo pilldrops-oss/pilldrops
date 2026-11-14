@@ -62,11 +62,22 @@ var ErrBlockedTarget = errors.New("webhook target is not allowed")
 // and cloud providers route internal endpoints through.
 var cgNAT = func() *net.IPNet { _, n, _ := net.ParseCIDR("100.64.0.0/10"); return n }()
 
+// nat64 are the well-known and local-use NAT64 prefixes: through a NAT64
+// gateway, 64:ff9b::a00:1 reaches 10.0.0.1, which the IPv4 checks never see.
+var nat64 = func() []*net.IPNet {
+	var nets []*net.IPNet
+	for _, c := range []string{"64:ff9b::/96", "64:ff9b:1::/48"} {
+		_, n, _ := net.ParseCIDR(c)
+		nets = append(nets, n)
+	}
+	return nets
+}()
+
 // blockedIP reports whether an address must never be dialed for a customer-supplied URL.
 func blockedIP(ip net.IP) bool {
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsInterfaceLocalMulticast() ||
-		cgNAT.Contains(ip)
+		cgNAT.Contains(ip) || nat64[0].Contains(ip) || nat64[1].Contains(ip)
 }
 
 // ResolveAndPin validates a webhook URL and returns the IPs it may be dialed on.
