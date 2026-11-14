@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
@@ -250,14 +251,22 @@ type privateGrantRequest struct {
 	Target    string `json:"target"`
 }
 
-// stripPrivate removes the control-plane-only "private" key before the body goes to a node.
+// hasPrivateTargets reports whether a stored private_targets list names any target.
+func hasPrivateTargets(raw string) bool { return raw != "" && raw != "[]" }
+
+// stripPrivate removes the control-plane-only "private" key before the body goes
+// to a node. Any spelling: the node's JSON decoding matches keys case-insensitively.
 func stripPrivate(w http.ResponseWriter, body []byte) ([]byte, bool) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return nil, false
 	}
-	delete(fields, "private")
+	for k := range fields {
+		if strings.EqualFold(k, "private") {
+			delete(fields, k)
+		}
+	}
 	out, _ := json.Marshal(fields)
 	return out, true
 }

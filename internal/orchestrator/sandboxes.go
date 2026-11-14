@@ -211,7 +211,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// placement stays unfiltered and the node answers 501 as it does today.
 	// Carry a tri-state through the heartbeat if that case starts mattering.
 	place := cluster.Request{VCPU: req.VCPU, MemMB: memMB, Zone: req.Zone, Runtime: runtime, Template: canonTemplate,
-		Avoid: []string{move.from}}
+		Avoid: []string{move.from}, PrivateAccess: move.private}
 	if fromSnapshot == nil {
 		place.NoBuild = s.noReadyBuild(r.Context(), canonTemplate)
 	}
@@ -742,6 +742,12 @@ func (s *Server) handleSandboxRename(w http.ResponseWriter, r *http.Request) {
 		}
 		body = b
 	}
+	// Only pushPrivate sets a node's private targets; grants are the API for them.
+	if len(body) > 0 {
+		if body, ok = stripPrivate(w, body); !ok {
+			return
+		}
+	}
 	resp, err := s.forward(r.Context(), node, "PATCH", "/v1/sandboxes/"+id, body, r.Header.Get("Content-Type"), fastOrg(r))
 	if err != nil {
 		writeErr(w, 502, "node request failed: "+err.Error())
@@ -820,7 +826,11 @@ func (s *Server) lostSandbox(r *http.Request, id string) (store.SandboxRecord, b
 }
 
 // moveCtx marks a create as the second half of a move: it may carry an id and
-// must not land on the node it is leaving.
-type moveCtx struct{ from string }
+// must not land on the node it is leaving. private holds the sandbox to nodes
+// that can carry its stored private targets.
+type moveCtx struct {
+	from    string
+	private bool
+}
 
 type moveCtxKey struct{}

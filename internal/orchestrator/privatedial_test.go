@@ -242,3 +242,46 @@ func TestPrivateSlotCutBeforeUpstream(t *testing.T) {
 		t.Fatal("close did not close the upstream")
 	}
 }
+
+func TestPrivateDialOpensPerSecondAnswers429(t *testing.T) {
+	prev := privateOpensPerSecond
+	privateOpensPerSecond = 1
+	t.Cleanup(func() { privateOpensPerSecond = prev })
+	ts := newConnectorTestServer(t)
+	node := ts.fakeNode(t, true)
+	ts.grantDB(t)
+	_ = ts.nodeDial(t, node.key, "sb1", "db", 5432).Close()
+	if got := ts.nodeDialStatus(t, node.key, "sb1", "db", 5432); got != "429" {
+		t.Fatalf("second open within the second: %s", got)
+	}
+	cid := ts.connectorID(t, "prod")
+	waitFor(t, func() bool {
+		rows, _ := ts.s.st.Load().PrivateConns(t.Context(), cid, 10)
+		results := map[string]int{}
+		for _, r := range rows {
+			results[r.Result]++
+		}
+		return len(rows) == 2 && results["ok"] == 1 && results["rate_limited"] == 1
+	})
+}
+
+func TestPrivateConnSetSweepsIdleLimiters(t *testing.T) {
+	var set privateConnSet
+	held := &privateConn{sandboxID: "busy", close: func() {}}
+	set.add(held)
+	set.allow("busy")
+	set.allow("idle")
+	time.Sleep(50 * time.Millisecond) // both buckets refill
+	set.mu.Lock()
+	set.swept = time.Time{}
+	set.mu.Unlock()
+	set.allow("other")
+	set.mu.Lock()
+	defer set.mu.Unlock()
+	if _, ok := set.limits["idle"]; ok {
+		t.Fatal("an idle, refilled limiter was kept")
+	}
+	if _, ok := set.limits["busy"]; !ok {
+		t.Fatal("a limiter with an open connection was dropped")
+	}
+}

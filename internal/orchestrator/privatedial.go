@@ -10,16 +10,17 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/time/rate"
 
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
-const (
-	maxPrivateConnsPerSandbox = 100
-	privateOpensPerSecond     = 50
-)
+const maxPrivateConnsPerSandbox = 100
+
+// privateOpensPerSecond is a var so tests can lower it.
+var privateOpensPerSecond = 50
 
 // privateConn is one open private connection a sandbox holds through a connector.
 type privateConn struct {
@@ -34,6 +35,7 @@ type privateConnSet struct {
 	conns      map[*privateConn]struct{}
 	perSandbox map[string]int
 	limits     map[string]*rate.Limiter
+	swept      time.Time
 }
 
 // add registers c, or reports false when its sandbox already holds the maximum.
@@ -62,10 +64,6 @@ func (p *privateConnSet) remove(c *privateConn) {
 		return
 	}
 	delete(p.perSandbox, c.sandboxID)
-	// A refilled limiter carries no history, so an idle sandbox costs no memory.
-	if l := p.limits[c.sandboxID]; l != nil && l.Tokens() >= privateOpensPerSecond {
-		delete(p.limits, c.sandboxID)
-	}
 }
 
 // allow takes one of the sandbox's new-connection tokens.
@@ -75,9 +73,19 @@ func (p *privateConnSet) allow(sandboxID string) bool {
 	if p.limits == nil {
 		p.limits = map[string]*rate.Limiter{}
 	}
+	// A refilled limiter with no open connection carries no history, so it is
+	// dropped; sweeping at most once a second keeps allow cheap.
+	if now := time.Now(); now.Sub(p.swept) >= time.Second {
+		p.swept = now
+		for id, l := range p.limits {
+			if p.perSandbox[id] == 0 && l.Tokens() >= float64(l.Burst()) {
+				delete(p.limits, id)
+			}
+		}
+	}
 	l := p.limits[sandboxID]
 	if l == nil {
-		l = rate.NewLimiter(privateOpensPerSecond, privateOpensPerSecond)
+		l = rate.NewLimiter(rate.Limit(privateOpensPerSecond), privateOpensPerSecond)
 		p.limits[sandboxID] = l
 	}
 	return l.Allow()

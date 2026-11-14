@@ -150,3 +150,23 @@ func TestCheckpointRestoreRepushesPrivate(t *testing.T) {
 		t.Fatalf("after checkpoint restore: %+v", got)
 	}
 }
+
+// A move that lands a granted sandbox on a node without private access must
+// not undo itself with Destroy: the id is the original's, still running on the
+// source, and Destroy would delete its row and backups.
+func TestMovedInCreateKeepsTheRowWhenPrivateCannotApply(t *testing.T) {
+	d, _, st := newPrivateDaemon(t, false)
+	const id = "sb-1790000000000-0123abcd"
+	if err := st.SaveSandbox(t.Context(), store.SandboxRecord{ID: id, OrgID: "o", Template: "base", State: "running", CreatedAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSandboxPrivate(t.Context(), id, `[{"name":"db","port":5432}]`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Create(t.Context(), CreateSpec{Template: "base", OrgID: "o", ID: id}); err != nil {
+		t.Fatalf("moved-in create: %v", err)
+	}
+	if !strings.Contains(storedPrivate(t, st, id), `"db"`) {
+		t.Fatal("the moved sandbox's stored targets were lost")
+	}
+}
