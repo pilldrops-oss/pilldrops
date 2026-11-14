@@ -50,6 +50,8 @@ func (s *Server) registerConnectorRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/connectors/session", s.handleConnectorSession)
 	mux.HandleFunc("GET /v1/connectors/{id}/tunnel", s.handleConnectorControl)
 	mux.HandleFunc("GET /v1/connector-conns/{conn}", s.handleConnectorConn)
+	// Authenticated by node key inside the handler.
+	mux.HandleFunc("GET /internal/private/dial", s.handlePrivateDial)
 }
 
 // privateAdmin is the one gate for changing connectors and grants.

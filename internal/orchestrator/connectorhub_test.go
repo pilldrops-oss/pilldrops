@@ -39,7 +39,10 @@ func dialInstance(t *testing.T, ts *connectorTestServer, name, instance string, 
 			if m["type"] != "open" {
 				continue
 			}
-			f.opens <- m
+			select {
+			case f.opens <- m:
+			default: // nobody reads past the buffer; never stall the instance
+			}
 			id := m["id"].(string)
 			if !echo {
 				_ = ctrl.WriteJSON(map[string]any{"type": "fail", "id": id, "reason": "dial"})

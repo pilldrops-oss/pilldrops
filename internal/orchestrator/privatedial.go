@@ -1,6 +1,25 @@
 package orchestrator
 
-import "sync"
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"io"
+	"net"
+	"net/http"
+	"strconv"
+	"sync"
+	"sync/atomic"
+
+	"golang.org/x/time/rate"
+
+	"github.com/pilldrops-oss/pilldrops/internal/store"
+)
+
+const (
+	maxPrivateConnsPerSandbox = 100
+	privateOpensPerSecond     = 50
+)
 
 // privateConn is one open private connection a sandbox holds through a connector.
 type privateConn struct {
@@ -8,26 +27,60 @@ type privateConn struct {
 	close             func()
 }
 
-// privateConnSet tracks open private connections so a revoked grant or a
-// destroyed sandbox can cut them at once.
+// privateConnSet tracks open private connections so a revoke or destroy can cut
+// them at once, and holds each sandbox's connection limits.
 type privateConnSet struct {
-	mu    sync.Mutex
-	conns map[*privateConn]struct{}
+	mu         sync.Mutex
+	conns      map[*privateConn]struct{}
+	perSandbox map[string]int
+	limits     map[string]*rate.Limiter
 }
 
-func (p *privateConnSet) add(c *privateConn) {
+// add registers c, or reports false when its sandbox already holds the maximum.
+func (p *privateConnSet) add(c *privateConn) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.conns == nil {
-		p.conns = map[*privateConn]struct{}{}
+		p.conns, p.perSandbox = map[*privateConn]struct{}{}, map[string]int{}
+	}
+	if p.perSandbox[c.sandboxID] >= maxPrivateConnsPerSandbox {
+		return false
 	}
 	p.conns[c] = struct{}{}
+	p.perSandbox[c.sandboxID]++
+	return true
 }
 
 func (p *privateConnSet) remove(c *privateConn) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if _, ok := p.conns[c]; !ok {
+		return
+	}
 	delete(p.conns, c)
+	if p.perSandbox[c.sandboxID]--; p.perSandbox[c.sandboxID] > 0 {
+		return
+	}
+	delete(p.perSandbox, c.sandboxID)
+	// A refilled limiter carries no history, so an idle sandbox costs no memory.
+	if l := p.limits[c.sandboxID]; l != nil && l.Tokens() >= privateOpensPerSecond {
+		delete(p.limits, c.sandboxID)
+	}
+}
+
+// allow takes one of the sandbox's new-connection tokens.
+func (p *privateConnSet) allow(sandboxID string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.limits == nil {
+		p.limits = map[string]*rate.Limiter{}
+	}
+	l := p.limits[sandboxID]
+	if l == nil {
+		l = rate.NewLimiter(privateOpensPerSecond, privateOpensPerSecond)
+		p.limits[sandboxID] = l
+	}
+	return l.Allow()
 }
 
 // closeFor closes the sandbox's connections to target; an empty target means all of them.
@@ -43,4 +96,176 @@ func (p *privateConnSet) closeFor(sandboxID, target string) {
 	for _, c := range hit {
 		c.close()
 	}
+}
+
+// privateSlot is a sandbox's place in privateConnSet, taken before the upstream
+// exists so a full sandbox gets 429 rather than a dial. A cut before the
+// upstream arrives closes it as soon as it does.
+type privateSlot struct {
+	mu  sync.Mutex
+	up  net.Conn
+	cut bool
+}
+
+func (s *privateSlot) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cut = true
+	if s.up != nil {
+		_ = s.up.Close()
+	}
+}
+
+// set hands the slot its upstream, and reports false when it was cut first.
+func (s *privateSlot) set(up net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.up = up
+	return !s.cut
+}
+
+type byteCounter struct {
+	net.Conn
+	read, written *atomic.Int64
+}
+
+func (b byteCounter) Read(p []byte) (int, error) {
+	n, err := b.Conn.Read(p)
+	b.read.Add(int64(n))
+	return n, err
+}
+
+func (b byteCounter) Write(p []byte) (int, error) {
+	n, err := b.Conn.Write(p)
+	b.written.Add(int64(n))
+	return n, err
+}
+
+func newPrivateConnID() string {
+	b := make([]byte, 12)
+	_, _ = rand.Read(b)
+	return "pc_" + hex.EncodeToString(b)
+}
+
+// handlePrivateDial carries one sandbox connection to a granted target. The
+// node has already routed it by name; this re-checks everything, because a
+// node key is not proof the sandbox may reach the target.
+func (s *Server) handlePrivateDial(w http.ResponseWriter, r *http.Request) {
+	if !privateIngressEnabled() {
+		writeErr(w, http.StatusServiceUnavailable, "this replica does not run the connector hub")
+		return
+	}
+	nodeID, ok := s.authNode(r)
+	if !ok && nodeID != "" {
+		writeErr(w, http.StatusForbidden, "node removed: this id was revoked by an operator")
+		return
+	}
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "node key required")
+		return
+	}
+	if nodeID == "" {
+		writeErr(w, http.StatusForbidden, "only a node may open private connections")
+		return
+	}
+	st := s.st.Load()
+	if st == nil {
+		writeErr(w, http.StatusServiceUnavailable, "store unavailable")
+		return
+	}
+	q := r.URL.Query()
+	sbID, target := q.Get("sandbox"), q.Get("target")
+	port, _ := strconv.Atoi(q.Get("port"))
+	rec, found, err := st.SandboxByID(r.Context(), sbID)
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	if !found || rec.NodeID != nodeID {
+		writeErr(w, http.StatusForbidden, "this node does not run that sandbox")
+		return
+	}
+	row := store.PrivateConn{ID: newPrivateConnID(), OrgID: rec.OrgID, SandboxID: sbID, Target: target, NodeID: nodeID, StartedAt: s.now().Unix()}
+	logRow := func(result string) {
+		row.Result, row.EndedAt = result, s.now().Unix()
+		if err := st.InsertPrivateConn(context.WithoutCancel(r.Context()), row); err != nil {
+			s.log().Warn("private connection not logged", "component", "private", "sandbox", sbID, "err", err)
+		}
+	}
+	g, granted, err := st.PrivateGrantFor(r.Context(), sbID, target)
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	if !granted {
+		logRow("denied")
+		writeErr(w, http.StatusForbidden, "not granted")
+		return
+	}
+	row.ConnectorID = g.ConnectorID
+	c, found, err := st.ConnectorByID(r.Context(), "", g.ConnectorID)
+	if err != nil {
+		logRow("offline")
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	portOK := false
+	if found && c.RevokedAt == 0 {
+		for _, t := range s.connectors.union(c.ID, c.Targets) {
+			portOK = portOK || (t.Name == target && t.Port == port)
+		}
+	}
+	if !portOK {
+		logRow("denied")
+		writeErr(w, http.StatusForbidden, "not granted")
+		return
+	}
+	if !s.privateConns.allow(sbID) {
+		logRow("rate_limited")
+		writeErr(w, http.StatusTooManyRequests, "too many new private connections from this sandbox")
+		return
+	}
+	slot := &privateSlot{}
+	pc := &privateConn{sandboxID: sbID, target: target, close: slot.close}
+	if !s.privateConns.add(pc) {
+		logRow("rate_limited")
+		writeErr(w, http.StatusTooManyRequests, "this sandbox has too many open private connections")
+		return
+	}
+	defer s.privateConns.remove(pc)
+	up, result, err := s.openPrivate(r.Context(), g.ConnectorID, target, port)
+	if err != nil {
+		logRow(result)
+		writeErr(w, http.StatusBadGateway, "connector "+c.Name+": "+result)
+		return
+	}
+	defer func() { _ = up.Close() }()
+	if !slot.set(up) {
+		logRow("denied")
+		writeErr(w, http.StatusForbidden, "not granted")
+		return
+	}
+	ws, err := shareUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		logRow("offline")
+		return
+	}
+	var in, out atomic.Int64
+	splicePrivate(byteCounter{Conn: &wsConn{ws: ws}, read: &in, written: &out}, up)
+	row.BytesIn, row.BytesOut = in.Load(), out.Load()
+	logRow("ok")
+}
+
+// splicePrivate copies both ways until either side ends, then closes both.
+func splicePrivate(a, b net.Conn) {
+	done := make(chan struct{}, 2)
+	half := func(dst, src net.Conn) {
+		_, _ = io.Copy(dst, src)
+		_ = dst.Close()
+		done <- struct{}{}
+	}
+	go half(a, b)
+	go half(b, a)
+	<-done
+	<-done
 }

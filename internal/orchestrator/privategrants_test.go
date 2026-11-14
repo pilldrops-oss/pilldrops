@@ -43,11 +43,27 @@ func (n *privateFakeNode) wasDeleted(id string) bool {
 	return false
 }
 
-// newFakeNode registers a node, and sandbox sb1 on it when place is true. A node
-// that does not support private access answers PATCH with 409.
+// newFakeNode registers node n1, and sandbox sb1 on it when place is true.
 func (ts *connectorTestServer) newFakeNode(t *testing.T, supports, place bool) *privateFakeNode {
 	t.Helper()
-	n := &privateFakeNode{id: "n1", patches: map[string]string{}}
+	n := ts.fakeNodeNamed(t, "n1", supports)
+	rec := store.SandboxRecord{ID: "sb1", OrgID: "org-a", Template: "base", State: "running", NodeID: n.id}
+	if place {
+		ts.s.reg.Place("sb1", n.id)
+	} else {
+		rec.State, rec.NodeID = "paused", ""
+	}
+	if err := ts.s.st.Load().SaveSandbox(t.Context(), rec); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// fakeNodeNamed registers a node that runs no sandbox. A node that does not
+// support private access answers PATCH with 409.
+func (ts *connectorTestServer) fakeNodeNamed(t *testing.T, id string, supports bool) *privateFakeNode {
+	t.Helper()
+	n := &privateFakeNode{id: id, patches: map[string]string{}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		b, _ := io.ReadAll(r.Body)
@@ -84,16 +100,6 @@ func (ts *connectorTestServer) newFakeNode(t *testing.T, supports, place bool) *
 		t.Fatal(err)
 	}
 	ts.s.reg.SetNodeMeta(n.id, cluster.NodeMeta{Runtime: "docker", PrivateAccess: supports})
-	if place {
-		ts.s.reg.Place("sb1", n.id)
-	}
-	rec := store.SandboxRecord{ID: "sb1", OrgID: "org-a", Template: "base", State: "running"}
-	if !place {
-		rec.State = "paused"
-	}
-	if err := ts.s.st.Load().SaveSandbox(t.Context(), rec); err != nil {
-		t.Fatal(err)
-	}
 	return n
 }
 
