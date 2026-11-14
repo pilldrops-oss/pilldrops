@@ -245,3 +245,27 @@ func TestAnotherOrgCannotSpendAHooksTestBudget(t *testing.T) {
 		}
 	}
 }
+
+func TestAProbeRefusalNamesTheRealRefillTime(t *testing.T) {
+	srv, key, _, _, _ := newCronSandboxWithAPI(t)
+	code, out := do(t, "POST", srv+"/v1/webhooks", key, `{"url":"`+testWebhookURL+`","events":["sandbox.ended"]}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create hook = %d %v", code, out)
+	}
+	hookID := out["webhook"].(map[string]any)["id"].(string)
+	for webhookTestLimiter.allow("whtest:" + hookID) {
+	}
+	req, _ := http.NewRequest("POST", srv+"/v1/webhooks/"+hookID+"/test", nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("probe over the budget = %d, want 429", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Retry-After"); got != "12" {
+		t.Errorf("Retry-After = %q, want 12: one send comes back every 12 s", got)
+	}
+}
