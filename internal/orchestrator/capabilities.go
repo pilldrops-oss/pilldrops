@@ -69,6 +69,9 @@ type fleetCapabilities struct {
 	// domain is set and a replica is declared as its ingress. A deployment
 	// setting like CustomDomains, so it is not in Features.
 	ShareLinks bool `json:"share_links"`
+	// PrivateAccess is true when sandboxes can be granted targets behind a
+	// connector: one replica runs the connector hub and a node can dial it.
+	PrivateAccess bool `json:"private_access"`
 
 	// Features names the optional command groups this deployment serves, beyond
 	// the core sandbox API every server has. Never null: absent means a server
@@ -162,5 +165,6 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	caps := aggregateCapabilities(s.reg.Nodes(), s.now(), cluster.NodeTTL)
 	caps.CustomDomains = strings.TrimSpace(s.sandboxDomain) != ""
 	caps.ShareLinks = shareLinksOn()
+	caps.PrivateAccess = privateAccessOn() && s.reg.AnyWithCapability(cluster.CapPrivateAccess, s.now(), cluster.NodeTTL)
 	writeJSON(w, 200, caps)
 }

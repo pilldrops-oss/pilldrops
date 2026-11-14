@@ -88,6 +88,8 @@ type Server struct {
 
 	// shares holds this replica's share tunnels. Zero value ready; see shareingress.go.
 	shares shareHub
+	// connectors holds this replica's connector instances. Zero value ready; see connectorhub.go.
+	connectors connectorHub
 
 	// logger is the structured logger. Use the ...Context variants so
 	// request_id and trace_id are stamped from the context.
@@ -419,6 +421,7 @@ func (s *Server) Routes() http.Handler {
 	s.registerOrgEgressRoutes(mux)
 	s.registerForwardRoutes(mux)
 	s.registerShareRoutes(mux)
+	s.registerConnectorRoutes(mux)
 	s.registerPublicTemplateRoutes(mux)
 	s.registerLaunchStatsRoutes(mux)
 	// Artifact publish lives here because a node's database role has only SELECT on template_builds and artifacts.
