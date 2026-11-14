@@ -32,6 +32,9 @@ type heartbeatBody struct {
 	// network tags. Older nodes omit it, which reads as false: a create naming
 	// tags is not placed there.
 	TagNetworks bool `json:"tag_networks"`
+	// PrivateAccess means the node can carry private connections. Older nodes
+	// omit it, which reads as false: a sandbox granted one is not placed there.
+	PrivateAccess bool `json:"private_access"`
 	// EgressDomains means the node runs the name layer that makes a domain
 	// egress rule enforceable. Older nodes omit it, which reads as false: a
 	// create whose rules name a domain is not placed there.
@@ -155,7 +158,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	s.reg.SetNodeMeta(b.ID, cluster.NodeMeta{
 		Runtime: b.Runtime, Isolation: b.Isolation, Templates: b.Templates,
-		CanFetch: b.CanFetch, AutoPause: b.AutoPause, TagNetworks: b.TagNetworks,
+		CanFetch: b.CanFetch, AutoPause: b.AutoPause, TagNetworks: b.TagNetworks, PrivateAccess: b.PrivateAccess,
 		EgressDomains: b.EgressDomains, Volumes: b.Volumes,
 		Checkpoint: b.Checkpoint, NamedSnapshot: b.NamedSnapshot, Standby: b.Standby,
 		MultiPort: b.MultiPort, L4Forward: b.L4Forward, NestedDocker: b.NestedDocker,

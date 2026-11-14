@@ -148,6 +148,10 @@ type Caps struct {
 	// the host's netns table. False is the shipped default everywhere and means
 	// a create naming tags is refused, never accepted and ignored.
 	TagNetworks bool
+	// PrivateAccess is true when this runtime can carry private connections from
+	// a sandbox to a connector. Like TagNetworks it needs per-sandbox namespaces
+	// on firecracker.
+	PrivateAccess bool
 	// Volumes is true when a boot can attach standalone volumes (Volumer).
 	// False refuses a create naming one rather than booting without it.
 	Volumes bool

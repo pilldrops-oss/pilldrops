@@ -136,6 +136,7 @@ func (r *fcRuntime) Capabilities() rt.Caps {
 	// Same condition: the partition is a rule in the host's netns table, and
 	// the shared bridge has no slot addresses to pair.
 	caps.TagNetworks = r.netns
+	caps.PrivateAccess = r.netns
 	caps.Volumes = true
 	// Stamping a new machine out of a capture reuses the baked tap name and
 	// guest address, which only a private namespace has room for: on the shared
