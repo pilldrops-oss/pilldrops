@@ -18,9 +18,11 @@ import (
 
 // Org-level webhooks report sandbox lifecycle events for every sandbox in the org.
 
-// webhookTestLimiter allows 5 test sends per minute per hook, since each one
-// makes the server call a third party.
-var webhookTestLimiter = newRateLimiter(5.0/60.0, 5)
+// webhookTestRefill is how often a hook earns back one test send, after a burst
+// of 5 (5 a minute); a test send makes the server call a third party.
+const webhookTestRefill = 12 * time.Second
+
+var webhookTestLimiter = newRateLimiter(1/webhookTestRefill.Seconds(), 5)
 
 // maxOrgWebhooks bounds how many requests one lifecycle event can fan out to.
 const maxOrgWebhooks = 20
@@ -177,7 +179,7 @@ func (s *Server) handleWebhookTest(w http.ResponseWriter, r *http.Request) {
 	}
 	// Charged only once the hook is the caller's, so another org cannot spend it.
 	if !webhookTestLimiter.allow("whtest:" + hookID) {
-		w.Header().Set("Retry-After", "60")
+		w.Header().Set("Retry-After", strconv.Itoa(int(webhookTestRefill/time.Second)))
 		writeErr(w, http.StatusTooManyRequests,
 			"test sends are limited; this endpoint makes the server call your endpoint on demand")
 		return
