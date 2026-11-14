@@ -183,6 +183,19 @@ func (h *connectorHub) takePending(id string) chan net.Conn {
 	return ch
 }
 
+// abandonPending gives up on a pending open. If the data socket was already
+// taken, it is on its way down ch and must be closed, not leaked.
+func (h *connectorHub) abandonPending(id string, ch chan net.Conn) {
+	if h.takePending(id) != nil {
+		return
+	}
+	go func() {
+		if c := <-ch; c != nil {
+			_ = c.Close()
+		}
+	}()
+}
+
 func (h *connectorHub) counter(connectorID string) *atomic.Int64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -214,7 +227,7 @@ func (s *Server) openPrivate(ctx context.Context, connectorID, target string, po
 		ch := make(chan net.Conn, 1)
 		id := s.connectors.addPending(ch)
 		if err := in.send(map[string]any{"type": "open", "id": id, "proto": "tcp", "target": target, "port": port}); err != nil {
-			s.connectors.takePending(id)
+			s.connectors.abandonPending(id, ch)
 			continue
 		}
 		select {
@@ -226,13 +239,13 @@ func (s *Server) openPrivate(ctx context.Context, connectorID, target string, po
 			in.conns.Store(c, struct{}{})
 			return &connectorConn{Conn: c, onClose: func() { active.Add(-1); in.conns.Delete(c) }}, "", nil
 		case <-time.After(connectorOpenWait):
-			s.connectors.takePending(id)
+			s.connectors.abandonPending(id, ch)
 		case <-ctx.Done():
-			s.connectors.takePending(id)
+			s.connectors.abandonPending(id, ch)
 			active.Add(-1)
 			return nil, "offline", ctx.Err()
 		case <-in.done:
-			s.connectors.takePending(id)
+			s.connectors.abandonPending(id, ch)
 		}
 	}
 	active.Add(-1)
@@ -285,7 +298,7 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 		} `json:"capabilities"`
 	}
 	in := &connectorInstance{connectorID: id, ctrl: ctrl, done: make(chan struct{})}
-	if err := ctrl.ReadJSON(&hello); err != nil || hello.Type != "hello" || len(hello.InstanceID) < 8 || len(hello.InstanceID) > 64 {
+	if err := ctrl.ReadJSON(&hello); err != nil || hello.Type != "hello" || len(hello.InstanceID) < 16 || len(hello.InstanceID) > 64 {
 		in.end("expected a hello with an instance_id")
 		return
 	}

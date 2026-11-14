@@ -150,3 +150,17 @@ func (ts *connectorTestServer) session(t *testing.T, name string) (tunnelURL, co
 	}
 	return m["tunnel_url"], m["conn_url"], m["tunnel_token"]
 }
+
+func TestAbandonedPendingClosesALateDataSocket(t *testing.T) {
+	var h connectorHub
+	ch := make(chan net.Conn, 1)
+	id := h.addPending(ch)
+	h.takePending(id) // the data handler got there first
+	h.abandonPending(id, ch)
+	server, client := net.Pipe()
+	ch <- server
+	_ = client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := client.Read(make([]byte, 1)); err != io.EOF {
+		t.Fatalf("late socket not closed: %v", err)
+	}
+}

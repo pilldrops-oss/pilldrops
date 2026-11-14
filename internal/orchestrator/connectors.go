@@ -84,6 +84,14 @@ func validConnectorHost(host string, platform []string) error {
 			return fmt.Errorf("host %q is under this platform's own domain", host)
 		}
 	}
+	if len(h) > 253 {
+		return fmt.Errorf("host %q is too long", host)
+	}
+	for _, label := range strings.Split(h, ".") {
+		if !sandbox.ValidPrivateName(label) {
+			return fmt.Errorf("host %q is not a valid hostname", host)
+		}
+	}
 	if _, err := publicsuffix.EffectiveTLDPlusOne(h); err != nil {
 		return fmt.Errorf("host %q is a public suffix", host)
 	}
