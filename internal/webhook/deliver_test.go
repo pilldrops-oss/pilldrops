@@ -95,6 +95,9 @@ func TestBlockedTargetsAreRefused(t *testing.T) {
 		"unspecified":        "https://0.0.0.0/hook",
 		"ipv6 loopback":      "https://[::1]/hook",
 		"ipv6 link local":    "https://[fe80::1]/hook",
+		"nat64 private":      "https://[64:ff9b::a00:1]/hook",
+		"nat64 metadata":     "https://[64:ff9b::a9fe:a9fe]/hook",
+		"local-use nat64":    "https://[64:ff9b:1::a00:1]/hook",
 		// The signature proves origin, not confidentiality.
 		"plaintext": "http://example.com/hook",
 		"no host":   "https:///hook",
