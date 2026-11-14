@@ -2,6 +2,8 @@ package vm
 
 import (
 	"fmt"
+	"io"
+	"net"
 	"net/netip"
 	"sort"
 	"strings"
@@ -80,4 +82,27 @@ func privateRouteTo(routes map[string]privateRoute, dst netip.AddrPort) (private
 		return privateRoute{}, false
 	}
 	return r, true
+}
+
+// privSplice copies both ways. A clean EOF half-closes the side that can take
+// it (the sandbox's TCP socket) and leaves the upstream, which has no
+// half-close, open for the reply; the owner closes both once both directions
+// are done. An error on either side closes both.
+// ponytail: a sandbox that half-closes and a connector that never answers
+// hold the upstream until either side closes or the grant is revoked.
+func privSplice(guest, up net.Conn) {
+	done := make(chan struct{}, 2)
+	half := func(dst, src net.Conn) {
+		if _, err := io.Copy(dst, src); err != nil {
+			_ = guest.Close()
+			_ = up.Close()
+		} else if hc, ok := dst.(interface{ CloseWrite() error }); ok {
+			_ = hc.CloseWrite()
+		}
+		done <- struct{}{}
+	}
+	go half(guest, up)
+	go half(up, guest)
+	<-done
+	<-done
 }

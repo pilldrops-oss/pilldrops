@@ -1,10 +1,12 @@
 package vm
 
 import (
+	"io"
 	"net"
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
@@ -73,5 +75,49 @@ func TestPrivateProxyRoute(t *testing.T) {
 		if ok != want || (ok && r.Target.Name != "db") {
 			t.Errorf("%s: route %+v %v, want %v", dst, r, ok, want)
 		}
+	}
+}
+
+// A client that half-closes after its request must still get the reply: the
+// upstream has no half-close, so the guest's FIN must not end it.
+func TestPrivSpliceKeepsReplyAfterGuestHalfClose(t *testing.T) {
+	t.Parallel()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	client, err := net.Dial("tcp", l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	guest, err := l.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, far := net.Pipe()
+	go func() {
+		privSplice(guest, up)
+		_ = guest.Close()
+		_ = up.Close()
+	}()
+	go func() {
+		buf := make([]byte, 4)
+		if _, err := io.ReadFull(far, buf); err != nil || string(buf) != "ping" {
+			t.Errorf("upstream read %q %v", buf, err)
+		}
+		time.Sleep(50 * time.Millisecond) // let the guest's FIN reach the splice first
+		if _, err := far.Write([]byte("pong")); err != nil {
+			t.Errorf("upstream closed before the reply: %v", err)
+		}
+		_ = far.Close()
+	}()
+	_, _ = client.Write([]byte("ping"))
+	_ = client.(*net.TCPConn).CloseWrite()
+	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	got, err := io.ReadAll(client)
+	if err != nil || string(got) != "pong" {
+		t.Fatalf("client got %q %v", got, err)
 	}
 }

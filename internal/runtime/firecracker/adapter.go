@@ -44,8 +44,9 @@ type vmBackend interface {
 	// SetNetworks replaces a sandbox's tag-network membership and returns the
 	// address peers reach it on.
 	SetNetworks(id string, n rt.Networks) (string, error)
-	// SetPrivate replaces the private targets a sandbox may reach.
-	SetPrivate(id string, ts []sandbox.PrivateTarget) error
+	// SetPrivate replaces the private targets a sandbox may reach. sandboxID
+	// is the daemon's id, which the control plane checks grants against.
+	SetPrivate(id, sandboxID string, ts []sandbox.PrivateTarget) error
 	// VolumePath, CreateVolume and DeleteVolume manage standalone volume images.
 	VolumePath(id string) (string, error)
 	CreateVolume(id string, sizeMB int) error
@@ -89,6 +90,9 @@ type fcRuntime struct {
 	// netns mirrors vm.Config.NetNS; the isolation preflight differs per mode
 	// and probing the wrong one would fail a healthy node.
 	netns bool
+	// privateDial is whether vm.Config.PrivateDial is set: without it the node
+	// has no way to reach a connector, so it must not be offered private sandboxes.
+	privateDial bool
 	// warmRestoreStorageMB is the one writable-disk size golden restore serves
 	// on this node, 0 when snapshots are off.
 	warmRestoreStorageMB int
@@ -139,7 +143,7 @@ func (r *fcRuntime) Capabilities() rt.Caps {
 	// Same condition: the partition is a rule in the host's netns table, and
 	// the shared bridge has no slot addresses to pair.
 	caps.TagNetworks = r.netns
-	caps.PrivateAccess = r.netns
+	caps.PrivateAccess = r.netns && r.privateDial
 	caps.Volumes = true
 	// Stamping a new machine out of a capture reuses the baked tap name and
 	// guest address, which only a private namespace has room for: on the shared
@@ -475,7 +479,7 @@ func (i *fcInstance) SetNetworks(_ context.Context, n rt.Networks) (string, erro
 
 // SetPrivate implements rt.PrivateRouter, on the instance for the same reason.
 func (i *fcInstance) SetPrivate(_ context.Context, ts []sandbox.PrivateTarget) error {
-	return i.be.SetPrivate(i.vmID, ts)
+	return i.be.SetPrivate(i.vmID, i.sandboxID, ts)
 }
 
 // Freeze implements rt.Freezer: stop the vCPUs, keep the RAM. Unlike Snapshot

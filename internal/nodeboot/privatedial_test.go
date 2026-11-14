@@ -41,3 +41,22 @@ func TestPrivateDialerSendsNodeKeyAndSplices(t *testing.T) {
 		t.Fatal("refused dial returned a conn")
 	}
 }
+
+func TestPrivateDialBase(t *testing.T) {
+	for in, want := range map[string]string{
+		"http://orch:8080/":         "ws://orch:8080",
+		"https://api.example.com":   "wss://api.example.com",
+		"https://example.com/base/": "wss://example.com/base",
+		"orch:8080":                 "",
+		"ftp://orch":                "",
+		"":                          "",
+	} {
+		got, err := privateDialBase(in)
+		if got != want || (want == "") != (err != nil) {
+			t.Errorf("%q: %q %v, want %q", in, got, err, want)
+		}
+	}
+	if _, err := NewPrivateDialer("orch:8080", "k")(context.Background(), "sb", "db", 1); err == nil {
+		t.Error("a dialer built from a schemeless URL dialled")
+	}
+}

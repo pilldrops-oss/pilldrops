@@ -5,7 +5,6 @@ package vm
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 
@@ -19,10 +18,30 @@ import (
 // liveProxy is one sandbox's private proxy: the listener on its tap gateway,
 // the routes it may open, and the sandbox-side connections it holds open.
 type liveProxy struct {
-	ns     string
-	l      net.Listener
-	routes map[string]privateRoute            // by IP
-	conns  map[net.Conn]sandbox.PrivateTarget // open sandbox side -> its target
+	ns string
+	// sandboxID is the daemon's id, the one the control plane checks grants
+	// against; the map key and teardown use the vm-layer id.
+	sandboxID string
+	l         net.Listener
+	routes    map[string]privateRoute // by IP
+	conns     map[net.Conn]*privConn  // by sandbox side
+}
+
+// privConn is one proxied connection: its target, and its upstream once dialled.
+type privConn struct {
+	target sandbox.PrivateTarget
+	up     net.Conn
+}
+
+// closeLocked ends both sides at once: a sandbox side that already
+// half-closed would otherwise leave the upstream waiting on the connector.
+// Called with privMu held.
+func (p *liveProxy) closeLocked(c net.Conn) {
+	_ = c.Close()
+	if pc := p.conns[c]; pc != nil && pc.up != nil {
+		_ = pc.up.Close()
+	}
+	delete(p.conns, c)
 }
 
 // privLive is keyed by the vm-layer sandbox id. Package-level for the same
@@ -54,8 +73,9 @@ func privateLookup(id string) map[string]string {
 }
 
 // SetPrivate replaces the targets a sandbox may reach and applies them to the
-// running sandbox. An empty list closes the proxy and every connection it holds.
-func (m *Manager) SetPrivate(id string, ts []sandbox.PrivateTarget) error {
+// running sandbox. An empty list closes the proxy and every connection it
+// holds. id is the vm-layer id; sandboxID is the daemon's, which dials carry.
+func (m *Manager) SetPrivate(id, sandboxID string, ts []sandbox.PrivateTarget) error {
 	if err := sandbox.ValidPrivateTargets(ts); err != nil {
 		return err
 	}
@@ -87,7 +107,7 @@ func (m *Manager) SetPrivate(id string, ts []sandbox.PrivateTarget) error {
 			privMu.Unlock()
 			return fmt.Errorf("netns %s: private proxy: %w", sb.NetNS, err)
 		}
-		p = &liveProxy{ns: sb.NetNS, l: l, conns: map[net.Conn]sandbox.PrivateTarget{}}
+		p = &liveProxy{ns: sb.NetNS, sandboxID: sandboxID, l: l, conns: map[net.Conn]*privConn{}}
 		privLive[id] = p
 		go m.servePrivate(id, p)
 	}
@@ -97,9 +117,9 @@ func (m *Manager) SetPrivate(id string, ts []sandbox.PrivateTarget) error {
 		for _, r := range routes {
 			granted[r.Target] = true
 		}
-		for c, t := range p.conns {
-			if !granted[t] {
-				_ = c.Close()
+		for c, pc := range p.conns {
+			if !granted[pc.target] {
+				p.closeLocked(c)
 			}
 		}
 	} else if p != nil {
@@ -138,7 +158,7 @@ func (m *Manager) proxyPrivate(id string, p *liveProxy, c net.Conn) {
 	r, ok := privateRouteTo(p.routes, dst)
 	ok = ok && privLive[id] == p
 	if ok {
-		p.conns[c] = r.Target
+		p.conns[c] = &privConn{target: r.Target}
 	}
 	privMu.Unlock()
 	if !ok {
@@ -149,33 +169,22 @@ func (m *Manager) proxyPrivate(id string, p *liveProxy, c net.Conn) {
 		delete(p.conns, c)
 		privMu.Unlock()
 	}()
-	up, err := m.config.PrivateDial(context.Background(), id, r.Target.Name, r.Target.Port)
+	up, err := m.config.PrivateDial(context.Background(), p.sandboxID, r.Target.Name, r.Target.Port)
 	if err != nil {
-		m.log.Debug("private dial failed", zap.String("sandbox", id), zap.String("target", r.Target.Name), zap.Error(err))
+		m.log.Warn("private dial failed", zap.String("sandbox", p.sandboxID), zap.String("target", r.Target.Name), zap.Error(err))
 		return
 	}
 	defer func() { _ = up.Close() }()
-	privSplice(c, up)
-}
-
-// privSplice copies both ways. The upstream carries no half-close, so the
-// sandbox finishing its side ends the upstream; the upstream finishing only
-// half-closes the sandbox side, so a reply already sent still arrives.
-func privSplice(guest, up net.Conn) {
-	done := make(chan struct{}, 2)
-	half := func(dst, src net.Conn) {
-		_, _ = io.Copy(dst, src)
-		if t, ok := dst.(*net.TCPConn); ok {
-			_ = t.CloseWrite()
-		} else {
-			_ = dst.Close()
-		}
-		done <- struct{}{}
+	privMu.Lock()
+	pc := p.conns[c]
+	if pc != nil {
+		pc.up = up
 	}
-	go half(guest, up)
-	go half(up, guest)
-	<-done
-	<-done
+	privMu.Unlock()
+	if pc == nil {
+		return // revoked while dialling
+	}
+	privSplice(c, up)
 }
 
 // closeProxyLocked closes a proxy's listener and every connection it holds.
@@ -183,7 +192,7 @@ func privSplice(guest, up net.Conn) {
 func closeProxyLocked(id string, p *liveProxy) {
 	_ = p.l.Close()
 	for c := range p.conns {
-		_ = c.Close()
+		p.closeLocked(c)
 	}
 	delete(privLive, id)
 }

@@ -22,7 +22,10 @@ func TestPrivateProxyLive(t *testing.T) {
 	cfg.Templates = []string{tmpl}
 	dials := make(chan string, 8)
 	upClosed := make(chan struct{}, 8)
-	cfg.PrivateDial = func(_ context.Context, _, target string, _ int) (net.Conn, error) {
+	cfg.PrivateDial = func(_ context.Context, sandboxID, target string, _ int) (net.Conn, error) {
+		if sandboxID != "sb-platform" {
+			t.Errorf("dialled as %q, want the platform id", sandboxID)
+		}
 		dials <- target
 		a, b := net.Pipe()
 		go func() {
@@ -58,7 +61,7 @@ func TestPrivateProxyLive(t *testing.T) {
 		}
 	}
 
-	if err := m.SetPrivate(id, []sandbox.PrivateTarget{{Name: "db", Port: 5432}}); err != nil {
+	if err := m.SetPrivate(id, "sb-platform", []sandbox.PrivateTarget{{Name: "db", Port: 5432}}); err != nil {
 		t.Fatal(err)
 	}
 	if out := run(`getent hosts db.private; echo hi | nc -w 2 db.private 5432`); !strings.Contains(out, "192.168.31.2") || !strings.Contains(out, "hi") {
@@ -92,7 +95,7 @@ func TestPrivateProxyLive(t *testing.T) {
 	// A connection held open across the revoke must be closed by it.
 	go func() { _, _ = m.Exec(ctx, id, `sleep 20 | nc db.private 5432`, "", 30*time.Second) }()
 	nextDial()
-	if err := m.SetPrivate(id, nil); err != nil {
+	if err := m.SetPrivate(id, "sb-platform", nil); err != nil {
 		t.Fatal(err)
 	}
 	select {

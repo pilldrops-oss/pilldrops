@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,8 +19,14 @@ import (
 
 // NewPrivateDialer opens a sandbox's connection to a granted target through
 // the control plane's connector hub, authenticated as this node.
+// An unusable URL yields a dialer that always fails, logged once here, so a
+// misconfigured node refuses private connections instead of failing to boot.
 func NewPrivateDialer(orchURL, nodeKey string) func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error) {
-	base := "ws" + strings.TrimPrefix(strings.TrimRight(orchURL, "/"), "http")
+	base, err := privateDialBase(orchURL)
+	if err != nil {
+		slog.Error("private access disabled", "component", "node", "err", err)
+		return func(context.Context, string, string, int) (net.Conn, error) { return nil, err }
+	}
 	return func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error) {
 		q := url.Values{"sandbox": {sandboxID}, "target": {target}, "port": {strconv.Itoa(port)}}
 		d := websocket.Dialer{HandshakeTimeout: 15 * time.Second}
@@ -35,6 +42,26 @@ func NewPrivateDialer(orchURL, nodeKey string) func(ctx context.Context, sandbox
 		}
 		return &wsStream{ws: ws}, nil
 	}
+}
+
+// privateDialBase is ORCHESTRATOR_URL with its scheme moved to WebSocket.
+func privateDialBase(orchURL string) (string, error) {
+	u, err := url.Parse(strings.TrimRight(orchURL, "/"))
+	if err != nil {
+		return "", fmt.Errorf("ORCHESTRATOR_URL: %w", err)
+	}
+	switch u.Scheme {
+	case "http":
+		u.Scheme = "ws"
+	case "https":
+		u.Scheme = "wss"
+	default:
+		return "", fmt.Errorf("ORCHESTRATOR_URL %q: want an http or https URL", orchURL)
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("ORCHESTRATOR_URL %q has no host", orchURL)
+	}
+	return u.String(), nil
 }
 
 // wsStream is a net.Conn over binary WebSocket frames, behaving as the

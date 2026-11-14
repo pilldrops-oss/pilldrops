@@ -108,6 +108,11 @@ func privateDialer() func(ctx context.Context, sandboxID, target string, port in
 	if orchURL == "" || key == "" {
 		return nil
 	}
+	// Nil, not a failing dialer, so the node does not advertise private access.
+	if _, err := privateDialBase(orchURL); err != nil {
+		slog.Error("private access disabled", "component", "node", "err", err)
+		return nil
+	}
 	return NewPrivateDialer(orchURL, key)
 }
 

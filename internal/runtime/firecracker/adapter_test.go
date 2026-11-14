@@ -35,12 +35,16 @@ func (f *fakeBackend) SetNetworks(id string, n rt.Networks) (string, error) {
 	return "10.128.0.2", nil
 }
 
-func (f *fakeBackend) SetPrivate(string, []sandbox.PrivateTarget) error { return nil }
+func (f *fakeBackend) SetPrivate(id, sandboxID string, _ []sandbox.PrivateTarget) error {
+	f.privateIDs = []string{id, sandboxID}
+	return nil
+}
 
 type fakeBackend struct {
 	bootedFrom    string
 	bootedEgress  *egress.Rules
 	networks      map[string][]string
+	privateIDs    []string
 	execs         []string
 	detachedExecs []string
 	execOut       map[string]string
@@ -590,5 +594,33 @@ func TestEgressPolicyCapabilityFollowsNetNSMode(t *testing.T) {
 	if !r.Capabilities().EgressPolicy {
 		t.Error("a netns node denies it enforces egress policy, so every policy-carrying create is " +
 			"refused on the one runtime that can actually apply the rules")
+	}
+}
+
+func TestPrivateAccessNeedsNetNSAndDialer(t *testing.T) {
+	r := newWithBackend(newFake())
+	for _, tc := range []struct{ netns, dial, want bool }{
+		{false, false, false}, {true, false, false}, {false, true, false}, {true, true, true},
+	} {
+		r.netns, r.privateDial = tc.netns, tc.dial
+		if got := r.Capabilities().PrivateAccess; got != tc.want {
+			t.Errorf("netns=%v dialer=%v: PrivateAccess %v, want %v", tc.netns, tc.dial, got, tc.want)
+		}
+	}
+}
+
+// The control plane checks grants against the daemon's id, so the proxy must
+// dial with it, not with the vm layer's.
+func TestSetPrivateCarriesDaemonSandboxID(t *testing.T) {
+	be := newFake()
+	inst, err := newWithBackend(be).Boot(context.Background(), rt.BootSpec{SandboxID: "sb1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inst.(rt.PrivateRouter).SetPrivate(context.Background(), []sandbox.PrivateTarget{{Name: "db", Port: 5432}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(be.privateIDs) != 2 || be.privateIDs[0] != "vm_123" || be.privateIDs[1] != "sb1" {
+		t.Fatalf("backend got ids %v, want [vm_123 sb1]", be.privateIDs)
 	}
 }

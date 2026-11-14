@@ -157,7 +157,7 @@ func (m *Manager) SetNetworks(string, runtime.Networks) (string, error) {
 }
 
 // SetPrivate mirrors the linux signature; this build proxies nothing.
-func (m *Manager) SetPrivate(string, []sandbox.PrivateTarget) error { return ErrUnsupported }
+func (m *Manager) SetPrivate(string, string, []sandbox.PrivateTarget) error { return ErrUnsupported }
 
 // TagPeers mirrors the linux helper; no sandbox here has peers.
 func TagPeers(string) map[string]string { return nil }

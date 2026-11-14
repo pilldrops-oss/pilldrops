@@ -66,6 +66,7 @@ func New(ctx context.Context, cfg Config) (rt.Runtime, error) {
 	vm.RunMonitors(ctx, mgr, logger)
 	r := newWithBackend(mgr)
 	r.netns = cfg.NetNS
+	r.privateDial = cfg.PrivateDial != nil
 	// Golden restore serves exactly one storage size, and only when snapshots are on.
 	if cfg.EnableSnapshots {
 		r.warmRestoreStorageMB = vm.DefaultOverlayMB
