@@ -426,6 +426,39 @@ open connections within 5 seconds.
 One replica carries all share traffic, and bandwidth is not capped per link. Each
 link's byte totals are in the `shares` table.
 
+## Private access
+
+Private access lets a sandbox reach a service on a customer's own network
+(a database, an internal API) without that network opening an inbound port. A
+connector program runs on that network and dials out to the control plane. An
+admin grants a sandbox a target the connector announced, and the sandbox reaches
+it as `<target>.private`, or by its real hostname when the connector gave one.
+
+1. On exactly one orchestrator replica set `PRIVATE_INGRESS=1`. It holds the
+   connectors' tunnels. On every other replica set `PRIVATE_INGRESS=remote`: they
+   answer the API but run no hub. With neither set, the routes answer 501
+   `no_private_ingress` and `private_access` in `GET /v1/capabilities` is false.
+2. The load balancer must send these paths, WebSocket upgrades included, to the
+   replica with `PRIVATE_INGRESS=1`:
+   - `GET /v1/connectors/{id}/tunnel` and `GET /v1/connector-conns/{conn}`, which
+     the connector CLI opens;
+   - `GET /internal/private/dial`, which nodes open with their node key.
+
+   Any proxy in front of the orchestrator must pass WebSocket upgrades on them.
+3. Nodes need `ORCHESTRATOR_URL` (`http` or `https`) and `ORCHESTRATOR_API_KEY`,
+   which a clustered node already has, to reach that dial route. Only nodes with
+   per-sandbox network namespaces advertise private access; a grant on a sandbox
+   placed elsewhere is refused with 409 `private_access_unsupported`.
+4. Connectors are outbound-only: the customer's network opens no port. A connector
+   authenticates with a `pd_conn_` key created through
+   `POST /v1/connectors/{id}/keys`.
+
+Every connection is logged per connector (`GET /v1/connectors/{id}/connections`)
+and kept for 365 days. A connector may not announce a hostname under this
+platform's own domains or `localhost`; such a hello is refused. Limits: 10
+connectors per org, 50 targets and 5 instances per connector, 100 concurrent
+connections per sandbox, 1,000 per connector.
+
 ## Environment
 
 ### Control plane (`cmd/orchestrator`)
