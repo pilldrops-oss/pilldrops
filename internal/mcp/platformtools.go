@@ -472,7 +472,7 @@ func platformTools() []tool {
 		{
 			name: "list_connectors",
 			desc: "The org's private-network connectors: name, whether an instance is online, and the targets it " +
-				"announces (name and port; hosts given as IP addresses are never sent). A sandbox can be granted " +
+				"announces (name and port, and a hostname when it has one). A sandbox can be granted " +
 				"a target with grant_private_target.",
 			schema: obj(map[string]any{}),
 			run: func(a map[string]any, be Backend) map[string]any {

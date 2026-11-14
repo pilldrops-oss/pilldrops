@@ -1595,7 +1595,7 @@
     "/v1/connectors": {
       "post": {
         "summary": "Create a connector",
-        "description": "A connector is a small program on your own network that dials out to this control plane and announces the targets (name, port, optional hostname) a sandbox may be granted. It opens no inbound port. Needs an owner or admin: a sandbox key gets 403, and in a team org so does an API key. The name is a lowercase DNS label, unique in the org. Needs a private ingress replica, else 501.",
+        "description": "A connector is a small program on your own network that dials out to this control plane and announces the targets (name, port, optional hostname) a sandbox may be granted. It opens no inbound port. A sandbox's own key gets 403. The name is a lowercase DNS label, unique in the org. Needs a private ingress replica, else 501.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1666,7 +1666,7 @@
       },
       "get": {
         "summary": "List connectors",
-        "description": "The org's connectors with whether an instance is online and the targets announced so far. Host names given as IP addresses are never returned as hostnames.",
+        "description": "The org's connectors with whether an instance is online and the targets announced so far. The connector program does not announce IP addresses as hostnames.",
         "responses": {
           "200": {
             "description": "OK.",
@@ -1695,7 +1695,7 @@
     "/v1/connectors/{id}": {
       "delete": {
         "summary": "Remove a connector",
-        "description": "Needs an owner or admin: a sandbox key gets 403, and in a team org so does an API key. Its keys stop working, its instances are disconnected, and every sandbox granted one of its targets loses access.",
+        "description": "A sandbox's own key gets 403. Its keys stop working, its instances are disconnected, and every sandbox granted one of its targets loses access.",
         "parameters": [
           {
             "name": "id",
@@ -1766,7 +1766,7 @@
     "/v1/connectors/{id}/keys": {
       "post": {
         "summary": "Create a connector key",
-        "description": "Needs an owner or admin: a sandbox key gets 403, and in a team org so does an API key. The `pd_conn_` key is in the reply once and cannot be read again. A connector's key can only open that connector's tunnel.",
+        "description": "A sandbox's own key gets 403. The `pd_conn_` key is in the reply once and cannot be read again. A connector's key can only open that connector's tunnel.",
         "parameters": [
           {
             "name": "id",
@@ -1817,7 +1817,7 @@
       },
       "get": {
         "summary": "List a connector's keys",
-        "description": "Needs an owner or admin: a sandbox key gets 403, and in a team org so does an API key. Key secrets are never returned.",
+        "description": "A sandbox's own key gets 403. Key secrets are never returned.",
         "parameters": [
           {
             "name": "id",
@@ -1860,7 +1860,7 @@
     "/v1/connectors/{id}/keys/{key}": {
       "delete": {
         "summary": "Revoke a connector key",
-        "description": "Needs an owner or admin: a sandbox key gets 403, and in a team org so does an API key.",
+        "description": "A sandbox's own key gets 403.",
         "parameters": [
           {
             "name": "id",
@@ -1951,6 +1951,16 @@
           "403": {
             "$ref": "#/components/responses/Error"
           },
+          "409": {
+            "description": "With an API key, the connector could not be created because the name is already taken.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "429": {
             "description": "The org is at its limit of 10 connectors.",
             "content": {
@@ -1977,7 +1987,7 @@
     "/v1/sandboxes/{id}/private": {
       "post": {
         "summary": "Let a sandbox reach a private target",
-        "description": "Needs an owner or admin: a sandbox key gets 403, and in a team org so does an API key. Inside the sandbox the target answers at `<target>.private` on its own port, and at its real hostname when the connector announced one. A sandbox keeps one target per name: a second grant with the same target name is 409 `private_name_taken`. A paused sandbox keeps the grant and applies it on resume. 409 `private_access_unsupported` when this sandbox's node has no per-sandbox network namespaces.",
+        "description": "A sandbox's own key gets 403. Inside the sandbox the target answers at `<target>.private` on its own port, and at its real hostname when the connector announced one. A sandbox keeps one target per name: a second grant with the same target name is 409 `private_name_taken`. A paused sandbox keeps the grant and applies it on resume. 409 `private_access_unsupported` when this sandbox's node has no per-sandbox network namespaces.",
         "parameters": [
           {
             "name": "id",
@@ -2072,6 +2082,16 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "The sandbox's node did not take the grant (code `private_push_failed`); the grant is rolled back.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       },
@@ -2123,7 +2143,7 @@
     "/v1/sandboxes/{id}/private/{connector}/{target}": {
       "delete": {
         "summary": "Take a private target away from a sandbox",
-        "description": "Needs an owner or admin: a sandbox key gets 403, and in a team org so does an API key. Open connections to the target close.",
+        "description": "A sandbox's own key gets 403. Open connections to the target close.",
         "parameters": [
           {
             "name": "id",
