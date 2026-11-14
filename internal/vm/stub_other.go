@@ -7,6 +7,7 @@ package vm
 import (
 	"context"
 	"errors"
+	"net"
 	"time"
 
 	"go.uber.org/zap"
@@ -14,6 +15,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/egress"
 	"github.com/pilldrops-oss/pilldrops/internal/envd"
 	"github.com/pilldrops-oss/pilldrops/internal/runtime"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
 // ErrUnsupported is returned by every stub operation.
@@ -36,6 +38,7 @@ type Config struct {
 	EnvdAuth        bool
 	NonRootVMM      bool
 	NetNS           bool
+	PrivateDial     func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error)
 }
 
 // CreateRequest mirrors the Linux type.
@@ -152,6 +155,9 @@ func (m *Manager) DiscardSnapshot(string) error { return ErrUnsupported }
 func (m *Manager) SetNetworks(string, runtime.Networks) (string, error) {
 	return "", ErrUnsupported
 }
+
+// SetPrivate mirrors the linux signature; this build proxies nothing.
+func (m *Manager) SetPrivate(string, []sandbox.PrivateTarget) error { return ErrUnsupported }
 
 // TagPeers mirrors the linux helper; no sandbox here has peers.
 func TagPeers(string) map[string]string { return nil }

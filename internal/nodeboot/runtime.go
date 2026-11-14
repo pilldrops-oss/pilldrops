@@ -3,6 +3,7 @@ package nodeboot
 import (
 	"context"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,10 +72,11 @@ func SelectRuntime(ctx context.Context, dataDir string, logger *zap.Logger) (rt.
 			EnableSnapshots: EnvBool("FC_SNAPSHOTS", true),
 			// ENVD_AUTH=0 is a dev escape hatch, not a working "disable auth":
 			// envd still refuses every method until a credential is pushed.
-			EnvdAuth:   envdAuth,
-			NonRootVMM: NonRootVMMRequested(),
-			NetNS:      NetNSRequested(),
-			Logger:     logger,
+			EnvdAuth:    envdAuth,
+			NonRootVMM:  NonRootVMMRequested(),
+			NetNS:       NetNSRequested(),
+			PrivateDial: privateDialer(),
+			Logger:      logger,
 		})
 		if ferr == nil {
 			slog.Info("/dev/kvm, the firecracker binary and a kernel are all present; "+
@@ -97,6 +99,16 @@ func SelectRuntime(ctx context.Context, dataDir string, logger *zap.Logger) (rt.
 		return dr, true
 	}
 	return unisolated(dataDir, "auto-probe found neither Firecracker nor Docker")
+}
+
+// privateDialer reaches the control plane's connector hub with the key this
+// node registers with; nil on a standalone node, which then refuses grants.
+func privateDialer() func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error) {
+	orchURL, key := Env("ORCHESTRATOR_URL", ""), Env("ORCHESTRATOR_API_KEY", "")
+	if orchURL == "" || key == "" {
+		return nil
+	}
+	return NewPrivateDialer(orchURL, key)
 }
 
 // unisolated returns the process runtime in a dev build and nil in a release

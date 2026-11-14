@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/egress"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
 // Ports the platform owns inside every sandbox, declared once so runtimes cannot drift.
@@ -521,6 +522,14 @@ type Networks struct {
 // predecessor's peers.
 type Networker interface {
 	SetNetworks(ctx context.Context, n Networks) (privateIP string, err error)
+}
+
+// PrivateRouter is an optional Instance capability: the sandbox can reach
+// granted private targets by name. SetPrivate replaces the list, takes effect
+// on the running sandbox, and closes open connections to targets it drops; an
+// empty list removes access entirely.
+type PrivateRouter interface {
+	SetPrivate(ctx context.Context, ts []sandbox.PrivateTarget) error
 }
 
 // Forker is a Runtime that can copy a sandbox, memory, disk and running

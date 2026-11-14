@@ -2,6 +2,7 @@ package firecracker
 
 import (
 	"context"
+	"net"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 	"github.com/pilldrops-oss/pilldrops/internal/vm"
@@ -25,8 +26,10 @@ type Config struct {
 	EnvdAuth        bool
 	NonRootVMM      bool
 	// NetNS boots every sandbox in its own network namespace (FC_NETNS).
-	NetNS  bool
-	Logger *zap.Logger
+	NetNS bool
+	// PrivateDial reaches granted private targets through the control plane.
+	PrivateDial func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error)
+	Logger      *zap.Logger
 }
 
 // New builds the Firecracker runtime. ctx is the node's lifetime: the manager's
@@ -52,6 +55,7 @@ func New(ctx context.Context, cfg Config) (rt.Runtime, error) {
 		EnvdAuth:        cfg.EnvdAuth,
 		NonRootVMM:      cfg.NonRootVMM,
 		NetNS:           cfg.NetNS,
+		PrivateDial:     cfg.PrivateDial,
 	}, logger)
 	if err != nil {
 		return nil, err

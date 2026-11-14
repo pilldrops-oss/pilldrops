@@ -2,6 +2,7 @@ package vm
 
 import (
 	"net"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -55,5 +56,22 @@ func TestRulesetPrivateRedirectBeforeDivert(t *testing.T) {
 	off := buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), "", "", false, false)
 	if strings.Contains(off, "192.168.31") || strings.Contains(off, ":53") {
 		t.Errorf("private off still renders private rules:\n%s", off)
+	}
+}
+
+func TestPrivateProxyRoute(t *testing.T) {
+	t.Parallel()
+	routes := routesByIP(assignPrivate([]sandbox.PrivateTarget{{Name: "db", Port: 5432}}))
+	for dst, want := range map[string]bool{
+		"192.168.31.2:5432":  true,
+		"192.168.31.2:5433":  false, // not the granted port
+		"192.168.31.3:5432":  false, // nothing assigned there
+		"192.168.30.1:18445": false, // the proxy itself, dialled directly
+		"10.0.0.5:5432":      false,
+	} {
+		r, ok := privateRouteTo(routes, netip.MustParseAddrPort(dst))
+		if ok != want || (ok && r.Target.Name != "db") {
+			t.Errorf("%s: route %+v %v, want %v", dst, r, ok, want)
+		}
 	}
 }

@@ -419,6 +419,7 @@ func teardownNetNS(name string) {
 	// membership here is what makes a reclaimed slot unreachable by its
 	// predecessor's peers. A caller that forgot to clear it cannot leave one.
 	forgetTagMemberByNS(name)
+	stopPrivateByNS(name)
 	// Same argument: the name layer's listener lives in this namespace, and a
 	// listener outliving it would hold a socket in a namespace nothing can
 	// reach and a policy for a sandbox that no longer exists.

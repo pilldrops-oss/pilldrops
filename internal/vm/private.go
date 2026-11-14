@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"net/netip"
 	"sort"
 	"strings"
 
@@ -55,4 +56,28 @@ func privateEgressDrop(on bool) string {
 		return ""
 	}
 	return "\t\tip daddr " + privateSubnet + " drop\n"
+}
+
+var privatePrefix = netip.MustParsePrefix(privateSubnet)
+
+func routesByIP(routes []privateRoute) map[string]privateRoute {
+	m := make(map[string]privateRoute, len(routes))
+	for _, r := range routes {
+		m[r.IP] = r
+	}
+	return m
+}
+
+// privateRouteTo is what a connection the guest made to dst may reach. The
+// guest can dial the proxy's own address directly, so the original
+// destination must be a granted address and port, never anything else.
+func privateRouteTo(routes map[string]privateRoute, dst netip.AddrPort) (privateRoute, bool) {
+	if !privatePrefix.Contains(dst.Addr().Unmap()) {
+		return privateRoute{}, false
+	}
+	r, ok := routes[dst.Addr().Unmap().String()]
+	if !ok || int(dst.Port()) != r.Target.Port {
+		return privateRoute{}, false
+	}
+	return r, true
 }

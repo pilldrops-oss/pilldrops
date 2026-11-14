@@ -14,6 +14,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/egress"
 	"github.com/pilldrops-oss/pilldrops/internal/envd"
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/vm"
 )
 
@@ -33,6 +34,8 @@ func (f *fakeBackend) SetNetworks(id string, n rt.Networks) (string, error) {
 	f.networks[id] = append([]string(nil), n.Sets...)
 	return "10.128.0.2", nil
 }
+
+func (f *fakeBackend) SetPrivate(string, []sandbox.PrivateTarget) error { return nil }
 
 type fakeBackend struct {
 	bootedFrom    string

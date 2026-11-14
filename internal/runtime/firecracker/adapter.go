@@ -18,6 +18,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/egress"
 	"github.com/pilldrops-oss/pilldrops/internal/envd"
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/vm"
 )
 
@@ -43,6 +44,8 @@ type vmBackend interface {
 	// SetNetworks replaces a sandbox's tag-network membership and returns the
 	// address peers reach it on.
 	SetNetworks(id string, n rt.Networks) (string, error)
+	// SetPrivate replaces the private targets a sandbox may reach.
+	SetPrivate(id string, ts []sandbox.PrivateTarget) error
 	// VolumePath, CreateVolume and DeleteVolume manage standalone volume images.
 	VolumePath(id string) (string, error)
 	CreateVolume(id string, sizeMB int) error
@@ -468,6 +471,11 @@ func (i *fcInstance) BootType() string { return i.bootType }
 // instance knows this sandbox's vm-layer id, which is not the daemon's.
 func (i *fcInstance) SetNetworks(_ context.Context, n rt.Networks) (string, error) {
 	return i.be.SetNetworks(i.vmID, n)
+}
+
+// SetPrivate implements rt.PrivateRouter, on the instance for the same reason.
+func (i *fcInstance) SetPrivate(_ context.Context, ts []sandbox.PrivateTarget) error {
+	return i.be.SetPrivate(i.vmID, ts)
 }
 
 // Freeze implements rt.Freezer: stop the vCPUs, keep the RAM. Unlike Snapshot

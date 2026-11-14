@@ -127,15 +127,8 @@ func (m *Manager) SetNetworks(id string, n rt.Networks) (string, error) {
 	// The resolver and the redirect that points the guest at it move together
 	// with the ruleset.
 	if was != now {
-		if err := m.reapplyNetNSRuleset(sb, slot, now); err != nil {
+		if err := m.syncNamespace(id, sb, slot); err != nil {
 			return "", err
-		}
-		if now {
-			if err := startResolver(id, sb.NetNS); err != nil {
-				return "", err
-			}
-		} else {
-			stopResolver(id)
 		}
 	}
 	if !now {
@@ -144,10 +137,32 @@ func (m *Manager) SetNetworks(id string, n rt.Networks) (string, error) {
 	return ip, nil
 }
 
+// nsSyncMu orders syncNamespace calls: tags and private access are set
+// independently, and each re-render must read the state the other just wrote.
+var nsSyncMu sync.Mutex
+
+// syncNamespace brings a running sandbox's ruleset and resolver in line with
+// its current tag and private state. The resolver runs while either is on.
+func (m *Manager) syncNamespace(id string, sb *Sandbox, slot int) error {
+	nsSyncMu.Lock()
+	defer nsSyncMu.Unlock()
+	tagged, private := isTagged(id), privateOn(id)
+	if err := m.reapplyNetNSRuleset(sb, slot, tagged, private); err != nil {
+		return err
+	}
+	return ensureResolver(id, sb.NetNS, tagged || private)
+}
+
+func isTagged(id string) bool {
+	tagMu.Lock()
+	defer tagMu.Unlock()
+	return len(tagMembers[id].sets) > 0
+}
+
 // reapplyNetNSRuleset re-renders and reloads a running sandbox's in-namespace
-// ruleset with its current tagged state. The egress policy is re-rendered from
-// the same rules the boot used, so a policied sandbox keeps its policy.
-func (m *Manager) reapplyNetNSRuleset(sb *Sandbox, slot int, tagged bool) error {
+// ruleset with its current tagged and private state. The egress policy is
+// re-rendered from the same rules the boot used, so a policied sandbox keeps its policy.
+func (m *Manager) reapplyNetNSRuleset(sb *Sandbox, slot int, tagged, private bool) error {
 	policy, divert, err := renderEgressPolicy(sb.Egress, sb.TapName)
 	if err != nil {
 		return err
@@ -157,7 +172,7 @@ func (m *Manager) reapplyNetNSRuleset(sb *Sandbox, slot int, tagged bool) error 
 	if guestIP == nil {
 		return fmt.Errorf("sandbox %s has no usable VM IP %q", sb.ID, sb.VMIP)
 	}
-	ruleset := buildNetNSRuleset(vethNS(slot), sb.TapName, hostIP, nsIP, guestIP, policy, divert, tagged, false)
+	ruleset := buildNetNSRuleset(vethNS(slot), sb.TapName, hostIP, nsIP, guestIP, policy, divert, tagged, private)
 	return applyRulesetInNS(netnsRunDir+"/"+sb.NetNS, ruleset)
 }
 
@@ -178,6 +193,16 @@ type liveTag struct {
 
 // tagLive is keyed like tagMembers and guarded by the same mutex.
 var tagLive = map[string]*liveTag{}
+
+// ensureResolver starts the namespace's resolver when on, if it is not
+// running, and stops it otherwise.
+func ensureResolver(id, nsName string, on bool) error {
+	if !on {
+		stopResolver(id)
+		return nil
+	}
+	return startResolver(id, nsName)
+}
 
 // startResolver opens this namespace's resolver on the tap gateway and serves
 // it. The socket is created *inside* the namespace — a netns is a property of
@@ -201,7 +226,7 @@ func startResolver(id, nsName string) error {
 	}
 	tagLive[id].dns = pc
 	tagMu.Unlock()
-	go serveDNS(pc, func() map[string]string { return TagPeers(id) }, nil, guestResolvers)
+	go serveDNS(pc, func() map[string]string { return TagPeers(id) }, func() map[string]string { return privateLookup(id) }, guestResolvers)
 	return nil
 }
 
