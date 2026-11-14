@@ -11,13 +11,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// originalDst returns the destination the guest actually dialled, before the
+// OriginalDst returns the destination the guest actually dialled, before the
 // namespace's `redirect` rewrote it. Conntrack holds it, and SO_ORIGINAL_DST
 // is how a redirected socket asks — which is the whole reason the divert is a
 // `redirect` in the namespace's own prerouting chain and not a DNAT to a
 // node-wide listener: a socket on the far side of a different namespace's NAT
 // has no conntrack entry to ask, and the destination is simply gone.
-func originalDst(c net.Conn) (netip.AddrPort, error) {
+func OriginalDst(c net.Conn) (netip.AddrPort, error) {
 	tc, ok := c.(*net.TCPConn)
 	if !ok {
 		return netip.AddrPort{}, errors.New("not a TCP connection")
