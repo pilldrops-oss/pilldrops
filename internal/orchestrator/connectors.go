@@ -248,11 +248,21 @@ func (s *Server) handleConnectorRevoke(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	granted, err := st.SandboxesGrantedConnector(r.Context(), c.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if _, err := st.RevokeConnector(r.Context(), org, c.ID, s.now().Unix()); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.connectors.closeConnector(c.ID, "revoked")
+	for _, sandboxID := range granted {
+		if _, err := s.pushPrivate(r.Context(), st, sandboxID, org); err != nil {
+			s.log().Warn("revoked connector not pushed", "component", "private", "sandbox", sandboxID, "err", err)
+		}
+	}
 	s.auditPrivate(r, st, "connector.revoke", c.ID, c.Name)
 	w.WriteHeader(http.StatusNoContent)
 }

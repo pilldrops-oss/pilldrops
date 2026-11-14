@@ -140,6 +140,22 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer releaseSlot()
+	var privPeek struct {
+		Private []privateGrantRequest `json:"private"`
+	}
+	_ = json.Unmarshal(body, &privPeek) //nolint:errcheck // best-effort peek, as for networks
+	if len(privPeek.Private) > 0 {
+		if privateOff(w) {
+			return
+		}
+		if _, ok := s.privateAdmin(w, r); !ok {
+			return
+		}
+		if !s.reg.AnyWithCapability(cluster.CapPrivateAccess, s.now(), cluster.NodeTTL) {
+			writeJSONErr(w, http.StatusConflict, "private_access_unsupported", "no online node can carry private connections")
+			return
+		}
+	}
 	// Peek at the requested size to schedule; the node does the real sizing.
 	var req sandbox.Spec
 	_ = json.Unmarshal(body, &req) //nolint:errcheck // best-effort peek only; a malformed body fails for real when the node parses it below
@@ -216,6 +232,14 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// Unconditional, unlike the bits above: the refusal higher up already
 	// established that some node advertises it, so this can only narrow.
 	place.EgressDomains = wantsDomains
+	var grants []privateGrantRequest
+	if len(privPeek.Private) > 0 {
+		place.PrivateAccess = true
+		if body, ok = stripPrivate(w, body); !ok {
+			return
+		}
+		grants = privPeek.Private
+	}
 	// A volume's image is on one node, so a create attaching one runs there or nowhere.
 	var volPeek struct {
 		Volumes []struct {
@@ -371,6 +395,10 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(rb, &created) == nil && created.ID != "" {
 			s.reg.Place(created.ID, node.ID)
 			s.recordPlaced(r.Context(), rb, fastOrg(r), node.ID, req.VCPU, req.MemoryMB)
+			if status, code, err := s.grantAtCreate(r.Context(), node, created.ID, fastOrg(r), grants); err != nil {
+				writeGrantErr(w, status, code, err)
+				return
+			}
 			if st := s.st.Load(); st != nil {
 				_ = st.SetSandboxAttribution(r.Context(), created.ID, store.ClassifySource(req.Client), req.Client) //nolint:errcheck // best-effort: a failure here just means attribution shows up later, not never
 			}
@@ -596,6 +624,7 @@ func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 					writeErr(w, http.StatusServiceUnavailable, "could not forget the lost sandbox: "+err.Error())
 					return
 				}
+				s.dropPrivate(r.Context(), id)
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"id": id, "state": "destroyed", "was": store.StateLost})
 			return
@@ -613,6 +642,7 @@ func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 	// unplacing on that would let an id guess strip a running sandbox's route.
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		s.reg.Unplace(id)
+		s.dropPrivate(r.Context(), id)
 	}
 	relay(w, resp)
 }
