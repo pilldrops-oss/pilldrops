@@ -157,7 +157,7 @@ func (m *Manager) reapplyNetNSRuleset(sb *Sandbox, slot int, tagged bool) error 
 	if guestIP == nil {
 		return fmt.Errorf("sandbox %s has no usable VM IP %q", sb.ID, sb.VMIP)
 	}
-	ruleset := buildNetNSRuleset(vethNS(slot), sb.TapName, hostIP, nsIP, guestIP, policy, divert, tagged)
+	ruleset := buildNetNSRuleset(vethNS(slot), sb.TapName, hostIP, nsIP, guestIP, policy, divert, tagged, false)
 	return applyRulesetInNS(netnsRunDir+"/"+sb.NetNS, ruleset)
 }
 
@@ -201,7 +201,7 @@ func startResolver(id, nsName string) error {
 	}
 	tagLive[id].dns = pc
 	tagMu.Unlock()
-	go serveDNS(pc, func() map[string]string { return TagPeers(id) }, guestResolvers)
+	go serveDNS(pc, func() map[string]string { return TagPeers(id) }, nil, guestResolvers)
 	return nil
 }
 

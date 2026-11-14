@@ -204,7 +204,7 @@ func setupNetNS(sandboxID string, uid int, tapName string, guestIP net.IP, rules
 	// Not optional: host chains only see the post-SNAT source, so every egress
 	// control must live in here. A new namespace is always untagged: membership
 	// is pushed after the boot, by SetNetworks, which re-renders this.
-	ruleset := buildNetNSRuleset(vn, tapName, hostIP, nsIP, guestIP, policy, divert, false)
+	ruleset := buildNetNSRuleset(vn, tapName, hostIP, nsIP, guestIP, policy, divert, false, false)
 	if err := applyRulesetInNS("/var/run/netns/"+name, ruleset); err != nil {
 		return nil, err
 	}
