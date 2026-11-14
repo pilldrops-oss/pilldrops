@@ -78,6 +78,9 @@ func validConnectorHost(host string, platform []string) error {
 	if h == "localhost" || strings.HasSuffix(h, ".localhost") || !strings.Contains(h, ".") {
 		return fmt.Errorf("host %q is not allowed", host)
 	}
+	if strings.HasSuffix(h, ".pd") || strings.HasSuffix(h, ".private") {
+		return fmt.Errorf("host %q is under a sandbox-internal zone", host)
+	}
 	for _, p := range platform {
 		p = strings.ToLower(p)
 		if p != "" && (h == p || strings.HasSuffix(h, "."+p)) {

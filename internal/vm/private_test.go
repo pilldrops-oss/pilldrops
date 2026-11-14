@@ -24,9 +24,18 @@ func TestPrivateDNSNames(t *testing.T) {
 	}
 }
 
+func TestPrivateDNSSkipsInternalZoneHosts(t *testing.T) {
+	t.Parallel()
+	m := privateDNS(assignPrivate([]sandbox.PrivateTarget{{Name: "a", Host: "bravo.pd"}, {Name: "b", Host: "DB.Private."}}))
+	if len(m) != 2 || m["a.private."] == "" || m["b.private."] == "" {
+		t.Fatalf("%v", m)
+	}
+}
+
 func TestRulesetPrivateRedirectBeforeDivert(t *testing.T) {
 	t.Setenv("PILLDROPS_LOCAL_API_PORT", "")
-	rs := buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), "", "", false, true)
+	const divert = "\t\tiifname \"tap0\" tcp dport 443 redirect to :18443\n"
+	rs := buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), "", divert, false, true)
 	for _, want := range []string{
 		`iifname "tap0" ip daddr 192.168.31.0/24 meta l4proto tcp redirect to :18445`,
 		`iifname "tap0" udp dport 53 redirect to :53`,
@@ -39,6 +48,9 @@ func TestRulesetPrivateRedirectBeforeDivert(t *testing.T) {
 	}
 	if strings.Index(rs, "192.168.31.0/24 drop") > strings.Index(rs, "dport { 53, 80, 443 }") {
 		t.Error("UDP to private addresses must drop before the default accepts")
+	}
+	if strings.Index(rs, "redirect to :18445") > strings.Index(rs, "redirect to :18443") {
+		t.Error("private redirect must come before the divert")
 	}
 	off := buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), "", "", false, false)
 	if strings.Contains(off, "192.168.31") || strings.Contains(off, ":53") {

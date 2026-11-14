@@ -34,8 +34,10 @@ func privateDNS(routes []privateRoute) map[string]string {
 	m := make(map[string]string, 2*len(routes))
 	for _, r := range routes {
 		m[r.Target.Name+".private."] = r.IP
-		if r.Target.Host != "" {
-			m[strings.ToLower(strings.TrimSuffix(r.Target.Host, "."))+"."] = r.IP
+		host := strings.ToLower(strings.TrimSuffix(r.Target.Host, "."))
+		// The orchestrator refuses these too; a host here must never shadow a peer or target name.
+		if host != "" && !strings.HasSuffix(host, ".pd") && !strings.HasSuffix(host, ".private") {
+			m[host+"."] = r.IP
 		}
 	}
 	return m

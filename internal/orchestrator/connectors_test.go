@@ -22,7 +22,7 @@ func TestValidConnectorHost(t *testing.T) {
 			t.Errorf("%q: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"localhost", "LOCALHOST", "db", "com", "co.uk", "pilldrops.com", "api.pilldrops.com", "x.pilldrops.app", "evil.localhost", "a.com\n10.0.0.1 api.pilldrops.com", "evil.com:22", "x y.com", "-a.com", "a..com"} {
+	for _, bad := range []string{"localhost", "LOCALHOST", "db", "com", "co.uk", "pilldrops.com", "api.pilldrops.com", "x.pilldrops.app", "evil.localhost", "pd", "private", "bravo.pd", "db.private", "X.Private.", "a.com\n10.0.0.1 api.pilldrops.com", "evil.com:22", "x y.com", "-a.com", "a..com"} {
 		if validConnectorHost(bad, platform) == nil {
 			t.Errorf("%q accepted", bad)
 		}
