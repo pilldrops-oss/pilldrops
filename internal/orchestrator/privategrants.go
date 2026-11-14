@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
@@ -14,9 +15,9 @@ import (
 )
 
 func (s *Server) registerPrivateGrantRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/sandboxes/{id}/private", s.auth(s.handlePrivateGrant))
-	mux.HandleFunc("GET /v1/sandboxes/{id}/private", s.auth(s.handlePrivateGrantList))
-	mux.HandleFunc("DELETE /v1/sandboxes/{id}/private/{connector}/{target}", s.auth(s.handlePrivateRevoke))
+	mux.HandleFunc("POST /v1/sandboxes/{id}/private", s.auth(s.bySlug(s.handlePrivateGrant)))
+	mux.HandleFunc("GET /v1/sandboxes/{id}/private", s.auth(s.bySlug(s.handlePrivateGrantList)))
+	mux.HandleFunc("DELETE /v1/sandboxes/{id}/private/{connector}/{target}", s.auth(s.bySlug(s.handlePrivateRevoke)))
 }
 
 // ownSandbox loads the caller's sandbox; another org's id reads as not found.
@@ -83,7 +84,8 @@ func (s *Server) pushPrivate(ctx context.Context, st *store.Store, sandboxID, or
 		if bytes.Contains(b, []byte("private_access_unsupported")) {
 			return http.StatusConflict, errors.New("private access is not available on this sandbox's node")
 		}
-		return resp.StatusCode, errors.New("node refused the change: " + string(b))
+		s.log().Warn("node refused a private targets change", "component", "private", "sandbox", sandboxID, "status", resp.StatusCode, "body", string(b))
+		return resp.StatusCode, errors.New("the sandbox's node refused the change")
 	}
 	return resp.StatusCode, nil
 }
@@ -115,8 +117,12 @@ func (s *Server) grantPrivate(ctx context.Context, st *store.Store, org, sandbox
 	if err == nil {
 		return c, 0, "", nil
 	}
-	_, _ = st.RemovePrivateGrant(ctx, sandboxID, c.ID, target)
-	_, _ = s.pushPrivate(ctx, st, sandboxID, org)
+	if _, rmErr := st.RemovePrivateGrant(ctx, sandboxID, c.ID, target); rmErr != nil {
+		s.log().Warn("could not roll back a private grant", "component", "private", "sandbox", sandboxID, "target", target, "err", rmErr)
+	}
+	if _, pushErr := s.pushPrivate(ctx, st, sandboxID, org); pushErr != nil {
+		s.log().Warn("could not re-push private targets after a rollback", "component", "private", "sandbox", sandboxID, "err", pushErr)
+	}
 	code = "private_push_failed"
 	if status == http.StatusConflict {
 		code = "private_access_unsupported"
@@ -272,13 +278,21 @@ func (s *Server) grantAtCreate(ctx context.Context, node *cluster.Node, sandboxI
 	return 0, "", nil
 }
 
+// destroyNew removes a sandbox whose grants failed. The node's answer is only
+// logged: local cleanup runs either way so no grant or route outlives it.
 func (s *Server) destroyNew(ctx context.Context, node *cluster.Node, sandboxID, org string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
 	resp, err := s.forward(ctx, node, "DELETE", "/v1/sandboxes/"+sandboxID, nil, "", org)
-	if err != nil {
+	switch {
+	case err != nil:
 		s.log().Warn("could not destroy a sandbox whose grants failed", "component", "private", "sandbox", sandboxID, "err", err)
-		return
+	case resp.StatusCode >= 300:
+		s.log().Warn("node refused to destroy a sandbox whose grants failed", "component", "private", "sandbox", sandboxID, "status", resp.StatusCode)
 	}
-	_ = resp.Body.Close()
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 	if st := s.st.Load(); st != nil {
 		_ = st.ForgetSandbox(ctx, sandboxID) //nolint:errcheck // best-effort: the node removes its own row too
 	}

@@ -13,10 +13,12 @@ import (
 )
 
 type privateFakeNode struct {
-	id, key string
-	mu      sync.Mutex
-	patches map[string]string
-	deleted []string
+	id, key    string
+	mu         sync.Mutex
+	patches    map[string]string
+	deleted    []string
+	failDelete bool
+	creates    []string
 }
 
 func (n *privateFakeNode) lastPatch(t *testing.T, id string) string {
@@ -58,12 +60,17 @@ func (ts *connectorTestServer) newFakeNode(t *testing.T, supports, place bool) *
 			n.patches[strings.TrimPrefix(r.URL.Path, "/v1/sandboxes/")] = string(b)
 			n.mu.Unlock()
 			_, _ = w.Write([]byte(`{}`))
+		case r.Method == "DELETE" && n.failDelete:
+			w.WriteHeader(http.StatusInternalServerError)
 		case r.Method == "DELETE":
 			n.mu.Lock()
 			n.deleted = append(n.deleted, strings.TrimPrefix(r.URL.Path, "/v1/sandboxes/"))
 			n.mu.Unlock()
 			_, _ = w.Write([]byte(`{"status":"destroyed"}`))
 		case r.Method == "POST":
+			n.mu.Lock()
+			n.creates = append(n.creates, string(b))
+			n.mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":"sbnew","template":"base","status":"running"}`))
 		default:
@@ -218,5 +225,93 @@ func TestCreateWithFailingGrantDestroysTheSandbox(t *testing.T) {
 	}
 	if _, ok := ts.s.reg.NodeFor("sbnew"); ok {
 		t.Fatal("destroyed sandbox still placed")
+	}
+}
+
+func TestCreateForwardsBodyWithoutPrivate(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.fakeNode(t, true)
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"prod"}`)
+	ts.announce(t, "prod", `[{"name":"db","port":5432}]`)
+	ts.body(ts.do(t, "POST", "/v1/sandboxes", ts.key, `{"template":"base","private":[{"connector":"prod","target":"db"}]}`))
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if len(node.creates) != 1 || strings.Contains(node.creates[0], "private") || !strings.Contains(node.creates[0], `"template"`) {
+		t.Fatalf("node create bodies: %v", node.creates)
+	}
+}
+
+func TestCreateCleanupSurvivesNodeDeleteFailure(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.fakeNode(t, true)
+	node.failDelete = true
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"prod"}`)
+	ts.announce(t, "prod", `[{"name":"db","port":5432}]`)
+	resp := ts.do(t, "POST", "/v1/sandboxes", ts.key, `{"template":"base","private":[{"connector":"prod","target":"db"},{"connector":"prod","target":"nope"}]}`)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("create: %d %s", resp.StatusCode, ts.body(resp))
+	}
+	if gs, _ := ts.s.st.Load().PrivateGrants(t.Context(), "sbnew"); len(gs) != 0 {
+		t.Fatalf("grants left after cleanup: %v", gs)
+	}
+	if _, ok := ts.s.reg.NodeFor("sbnew"); ok {
+		t.Fatal("sandbox still placed")
+	}
+}
+
+func TestGrantBySlug(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	ts.fakeNode(t, true)
+	if err := ts.s.st.Load().SaveSandbox(t.Context(), store.SandboxRecord{ID: "sb1", OrgID: "org-a", Name: "my-box", Slug: "my-box", Template: "base", State: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"prod"}`)
+	ts.announce(t, "prod", `[{"name":"db","port":5432}]`)
+	if resp := ts.do(t, "POST", "/v1/sandboxes/my-box/private", ts.key, `{"connector":"prod","target":"db"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("grant by slug: %d %s", resp.StatusCode, ts.body(resp))
+	}
+}
+
+func TestGrantListAndRevokeRefusals(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.fakeNode(t, true)
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"prod"}`)
+	ts.announce(t, "prod", `[{"name":"db","port":5432},{"name":"api","port":443}]`)
+	for _, target := range []string{"db", "api"} {
+		ts.body(ts.do(t, "POST", "/v1/sandboxes/sb1/private", ts.key, `{"connector":"prod","target":"`+target+`"}`))
+	}
+	for _, c := range []struct {
+		method, path, key string
+		want              int
+	}{
+		{"GET", "/v1/sandboxes/sb1/private", ts.sandboxToken, http.StatusForbidden},
+		{"GET", "/v1/sandboxes/sb1/private", ts.otherOrgKey, http.StatusNotFound},
+		{"DELETE", "/v1/sandboxes/sb1/private/prod/db", ts.sandboxToken, http.StatusForbidden},
+		{"DELETE", "/v1/sandboxes/sb1/private/prod/db", ts.otherOrgKey, http.StatusNotFound},
+	} {
+		if resp := ts.do(t, c.method, c.path, c.key, ""); resp.StatusCode != c.want {
+			t.Errorf("%s %s: %d, want %d", c.method, c.path, resp.StatusCode, c.want)
+		}
+	}
+	if resp := ts.do(t, "DELETE", "/v1/sandboxes/sb1/private/prod/db", ts.key, ""); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke: %d", resp.StatusCode)
+	}
+	got := node.lastPatch(t, "sb1")
+	if !strings.Contains(got, `"api"`) || strings.Contains(got, `"db"`) {
+		t.Fatalf("node not re-pushed with the shorter list: %s", got)
+	}
+}
+
+func TestDestroyDropsGrants(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	ts.fakeNode(t, true)
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"prod"}`)
+	ts.announce(t, "prod", `[{"name":"db","port":5432}]`)
+	ts.body(ts.do(t, "POST", "/v1/sandboxes/sb1/private", ts.key, `{"connector":"prod","target":"db"}`))
+	if resp := ts.do(t, "DELETE", "/v1/sandboxes/sb1", ts.key, ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("destroy: %d %s", resp.StatusCode, ts.body(resp))
+	}
+	if gs, _ := ts.s.st.Load().PrivateGrants(t.Context(), "sb1"); len(gs) != 0 {
+		t.Fatalf("grants left: %v", gs)
 	}
 }
