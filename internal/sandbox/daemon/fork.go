@@ -124,6 +124,7 @@ func (d *Daemon) Fork(ctx context.Context, parentID string, spec ForkSpec) (res 
 	if ttl > 0 {
 		expiresAt = now.Add(ttl)
 	}
+	// Private targets are not copied: grants are per sandbox, and a fork asks for its own.
 	sb := &Sandbox{
 		ID: id, Template: template, Name: spec.Name, OrgID: orgID, State: StateRunning,
 		CreatedAt: now, ExpiresAt: expiresAt, LastActiveAt: now,

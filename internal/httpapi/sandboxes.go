@@ -70,6 +70,9 @@ const codeSlugTaken = "slug_taken"
 // the alternative is a sandbox whose row claims a network it is not on.
 const codeTagNetworksUnsupported = "tag_networks_unsupported"
 
+// codePrivateAccessUnsupported: this sandbox's node cannot route private targets.
+const codePrivateAccessUnsupported = "private_access_unsupported"
+
 // tenantMayBoot reports whether a tenant may create from tmpl and snapshot: a
 // catalogue template, or its own org's named snapshot. Another org's snapshot,
 // a rehome capture and a move capture (a reserved snapshot name) are not.
@@ -1077,21 +1080,22 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name             *string   `json:"name"`
-		Slug             *string   `json:"slug"`
-		Port             *int      `json:"port"`
-		IdleTimeout      *int      `json:"idle_timeout"`
-		HibernateTimeout *int      `json:"hibernate_timeout"`
-		Networks         *[]string `json:"networks"`
+		Name             *string                  `json:"name"`
+		Slug             *string                  `json:"slug"`
+		Port             *int                     `json:"port"`
+		IdleTimeout      *int                     `json:"idle_timeout"`
+		HibernateTimeout *int                     `json:"hibernate_timeout"`
+		Networks         *[]string                `json:"networks"`
+		Private          *[]sandbox.PrivateTarget `json:"private"`
 	}
 	if !decodeBody(r, &body) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if body.Name == nil && body.Slug == nil && body.Port == nil &&
-		body.IdleTimeout == nil && body.HibernateTimeout == nil && body.Networks == nil {
+		body.IdleTimeout == nil && body.HibernateTimeout == nil && body.Networks == nil && body.Private == nil {
 		writeErr(w, http.StatusBadRequest,
-			"body must set at least one of name, slug, port, idle_timeout, hibernate_timeout, networks")
+			"body must set at least one of name, slug, port, idle_timeout, hibernate_timeout, networks, private")
 		return
 	}
 	audit := map[string]any{}
@@ -1108,6 +1112,12 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Networks != nil {
 		if err := sandbox.ValidNetworks(*body.Networks); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if body.Private != nil {
+		if err := sandbox.ValidPrivateTargets(*body.Private); err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -1165,6 +1175,17 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		audit["networks"] = *body.Networks
+	}
+	if body.Private != nil {
+		if err := s.d.SetPrivate(r.Context(), id, *body.Private); err != nil {
+			if errors.Is(err, daemon.ErrPrivateUnsupported) {
+				writeErrCode(w, http.StatusConflict, codePrivateAccessUnsupported, err.Error())
+				return
+			}
+			writeErr(w, statusForErr(err), err.Error())
+			return
+		}
+		audit["private"] = len(*body.Private)
 	}
 	if body.IdleTimeout != nil {
 		idle := sandbox.IdleTimeout(*body.IdleTimeout)

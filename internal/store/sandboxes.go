@@ -97,6 +97,8 @@ func (s *Store) SaveSandbox(ctx context.Context, r SandboxRecord) error {
 	r.Env = env
 	// An empty incoming node_id leaves the stored owner alone, so a call site
 	// that forgets to carry the id cannot un-own a live sandbox.
+	// private_targets is written on insert only: SetSandboxPrivate owns it after
+	// that, since the control plane changes it while the node holds a stale record.
 	_, err = s.exec(ctx,
 		`INSERT INTO sandboxes (id, template, name, slug, org_id, node_id, state, snapshot, start_cmd, public_port, vcpu, mem_mib, storage_mb, idle_timeout, hibernate_timeout, backup_retention, env, identity_hash, networks, created_by, visibility, created_at, expires_at, updated_at, pause_archive, image, ports, private_targets)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -111,7 +113,7 @@ func (s *Store) SaveSandbox(ctx context.Context, r SandboxRecord) error {
 		   created_by=CASE WHEN excluded.created_by = '' THEN sandboxes.created_by ELSE excluded.created_by END,
 		   visibility=CASE WHEN excluded.visibility = '' THEN sandboxes.visibility ELSE excluded.visibility END,
 		   expires_at=excluded.expires_at, updated_at=excluded.updated_at, pause_archive=excluded.pause_archive,
-		   image=excluded.image, ports=excluded.ports, private_targets=excluded.private_targets`,
+		   image=excluded.image, ports=excluded.ports`,
 		r.ID, r.Template, r.Name, r.Slug, r.OrgID, r.NodeID, r.State, r.Snapshot, r.StartCmd, r.PublicPort, r.VCPU, r.MemMiB, r.StorageMB, r.IdleTimeoutSecs, r.HibernateTimeoutSecs, r.BackupRetentionSecs, r.Env, r.IdentityHash, r.Networks, r.CreatedBy, r.Visibility, r.CreatedAt, r.ExpiresAt, r.UpdatedAt, r.PauseArchive, r.Image, r.Ports, r.Private,
 	)
 	if slugConflict(err) {

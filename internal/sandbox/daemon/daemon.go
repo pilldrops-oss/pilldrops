@@ -458,6 +458,11 @@ func (d *Daemon) finishCreate(ctx context.Context, sb *Sandbox, spec CreateSpec)
 			return SandboxInfo{}, fmt.Errorf("join networks: %w", err)
 		}
 	}
+	// A moved-in sandbox brings its stored grants.
+	if err := d.pushPrivate(ctx, id); err != nil {
+		_ = d.Destroy(context.WithoutCancel(ctx), id)
+		return SandboxInfo{}, fmt.Errorf("private targets: %w", err)
+	}
 	d.mu.Lock()
 	info = sb.info()
 	rec := d.recordOf(sb)

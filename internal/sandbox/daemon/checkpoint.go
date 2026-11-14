@@ -427,6 +427,9 @@ func (d *Daemon) RestoreCheckpoint(ctx context.Context, id, name string) (took t
 	rec := d.recordOf(sb)
 	d.mu.Unlock()
 
+	if err := d.pushPrivate(ctx, id); err != nil {
+		d.log().Warn("restore checkpoint: could not restore private targets", "sandbox_id", id, "error", err)
+	}
 	// A memory checkpoint brought the app back with the rest of the guest.
 	if meta.Kind != "memory" && startCmd != "" {
 		if err := newInst.StartServer(ctx, startCmd, startEnv); err != nil {

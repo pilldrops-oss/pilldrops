@@ -283,6 +283,9 @@ func (d *Daemon) adoptRunning(ctx context.Context, r PersistedSandbox, inst rt.I
 			d.log().Warn("adopt: could not restore network membership", "sandbox_id", r.ID, "error", err)
 		}
 	}
+	if err := d.pushPrivate(ctx, r.ID); err != nil {
+		d.log().Warn("adopt: could not restore private targets", "sandbox_id", r.ID, "error", err)
+	}
 	d.persistRec(ctx, rec)
 	d.log().Info("sandbox restored as running (adopted live instance)", "sandbox_id", r.ID)
 	return true
