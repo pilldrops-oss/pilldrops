@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../../src/api'
@@ -83,5 +83,73 @@ describe('Connectors', () => {
     vi.mocked(api.listConnectors).mockRejectedValue(new Error('boom'))
     renderPage()
     expect(await screen.findByText(/boom/)).toBeInTheDocument()
+  })
+
+  it('does not leak a new key into another connector', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([conn(), conn({ id: 'cn_2', name: 'stage' })])
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Keys for prod' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Create key' }))
+    const key = `pd_conn_${'a'.repeat(48)}`
+    expect(await screen.findByText(key)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Keys for stage' }))
+    expect(screen.queryByText(key)).not.toBeInTheDocument()
+  })
+
+  it('Done hides the key and closes the panel', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([conn()])
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Keys for prod' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Create key' }))
+    await screen.findByText(/shown once/)
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(screen.queryByText(/shown once/)).not.toBeInTheDocument()
+  })
+
+  it('asks before removing a connector', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([conn()])
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove prod' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(api.revokeConnector).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Remove prod' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Confirm' }))
+    await waitFor(() => expect(api.revokeConnector).toHaveBeenCalledWith('cn_1'))
+  })
+
+  it('asks before revoking a key', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([conn()])
+    vi.mocked(api.listConnectorKeys).mockResolvedValue([{ id: 'ck_9', created_at: 1, last_used_at: 0 }])
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Keys for prod' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Revoke' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(api.revokeConnectorKey).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Confirm' }))
+    await waitFor(() => expect(api.revokeConnectorKey).toHaveBeenCalledWith('cn_1', 'ck_9'))
+  })
+
+  it('hides Keys from a member', async () => {
+    vi.mocked(useOrgRole).mockReturnValue('member')
+    vi.mocked(api.listConnectors).mockResolvedValue([conn()])
+    renderPage()
+    await screen.findByText('prod')
+    expect(screen.queryByRole('button', { name: 'Keys for prod' })).not.toBeInTheDocument()
+  })
+
+  it('shows the connection log and its empty state', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([conn()])
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Log for prod' }))
+    expect(await screen.findByText('No connections yet.')).toBeInTheDocument()
+    vi.mocked(api.listConnectorConnections).mockResolvedValue([
+      { id: 'c1', sandbox_id: 'sb9', target: 'db', started_at: 10, ended_at: 15, bytes_in: 3, bytes_out: 4, result: 'dial_failed' },
+    ])
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Log for prod' }))
+    expect(await screen.findByText('sb9')).toBeInTheDocument()
+    expect(screen.getByText('dial failed')).toBeInTheDocument()
+    expect(screen.getByText('5s')).toBeInTheDocument()
   })
 })

@@ -111,4 +111,34 @@ describe('sandbox detail private access', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add' }))
     expect(await screen.findByText(/already granted from another connector/)).toBeInTheDocument()
   })
+
+  it('hides itself when the server has no private ingress', async () => {
+    vi.mocked(api.listPrivateGrants).mockRejectedValue(
+      new ApiError({ status: 501, code: 'no_private_ingress', method: 'GET', path: '/v1/sandboxes/sb1/private', message: 'off' }),
+    )
+    renderPage()
+    await waitFor(() => expect(api.listPrivateGrants).toHaveBeenCalled())
+    await screen.findByText('my-app')
+    expect(screen.queryByText('Private access')).not.toBeInTheDocument()
+  })
+
+  it('points to Connectors when there are none', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([])
+    renderPage()
+    expect(await screen.findByText(/No connectors yet/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Create one' })).toHaveAttribute('href', '/connectors')
+  })
+
+  it('toasts a failed connector fetch', async () => {
+    vi.mocked(api.listConnectors).mockRejectedValue(new Error('connectors down'))
+    renderPage()
+    expect(await screen.findByText(/connectors down/)).toBeInTheDocument()
+  })
+
+  it('keeps the grant when removal is cancelled', async () => {
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove db' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(api.revokePrivate).not.toHaveBeenCalled()
+  })
 })

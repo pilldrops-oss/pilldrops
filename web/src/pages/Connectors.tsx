@@ -44,7 +44,7 @@ export default function Connectors() {
 
   const remove = async (c: Connector) => {
     if (!await confirm({ title: `Remove ${c.name}?`, body: 'Its instances disconnect, open connections close, and every grant and key for it is removed.', danger: true })) return
-    try { await revokeConnector(c.id); toast.success(`${c.name} removed`); await refresh() } catch (err) { toast.error(errText(err)) }
+    try { await revokeConnector(c.id); setOpen(o => (o?.id === c.id ? null : o)); toast.success(`${c.name} removed`); await refresh() } catch (err) { toast.error(errText(err)) }
   }
 
   if (on === false) {
@@ -86,13 +86,13 @@ export default function Connectors() {
           </tbody>
         </table>
       )}
-      {open?.tab === 'keys' && <KeysPanel id={open.id} />}
-      {open?.tab === 'log' && <LogPanel id={open.id} />}
+      {open?.tab === 'keys' && <KeysPanel key={open.id} id={open.id} onDone={() => setOpen(null)} />}
+      {open?.tab === 'log' && <LogPanel key={open.id} id={open.id} onDone={() => setOpen(null)} />}
     </div>
   )
 }
 
-function KeysPanel({ id }: { id: string }) {
+function KeysPanel({ id, onDone }: { id: string; onDone: () => void }) {
   const toast = useToast()
   const toastRef = useRef(toast)
   toastRef.current = toast
@@ -104,6 +104,7 @@ function KeysPanel({ id }: { id: string }) {
   return (
     <div className="panel">
       <h2>Keys</h2>
+      <button className="btn ghost" onClick={onDone}>Done</button>
       <p className="muted">A key lets a server run this connector without your login: <code>PILLDROPS_CONNECTOR_KEY=… pilldrops connector run …</code></p>
       <button className="btn" onClick={async () => { try { const k = await createConnectorKey(id); setFresh(k.key); load() } catch (e) { toast.error(errText(e)) } }}>Create key</button>
       {fresh && <><pre className="code">{fresh}</pre><p className="muted">This key is shown once. Store it now.</p></>}
@@ -119,7 +120,7 @@ function KeysPanel({ id }: { id: string }) {
   )
 }
 
-function LogPanel({ id }: { id: string }) {
+function LogPanel({ id, onDone }: { id: string; onDone: () => void }) {
   const toast = useToast()
   const toastRef = useRef(toast)
   toastRef.current = toast
@@ -129,6 +130,7 @@ function LogPanel({ id }: { id: string }) {
   return (
     <div className="panel">
       <h2>Connections</h2>
+      <button className="btn ghost" onClick={onDone}>Done</button>
       {rows.length === 0 ? <p className="vault-empty">No connections yet.</p> : (
         <table className="tbl"><thead><tr><th>Sandbox</th><th>Target</th><th>Started</th><th>Duration</th><th>Bytes</th><th>Result</th></tr></thead>
           <tbody>{rows.map(r => (

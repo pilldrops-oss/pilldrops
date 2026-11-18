@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listPrivateGrants, grantPrivate, revokePrivate, listConnectors } from '../api'
 import type { Connector, PrivateGrant } from '../types'
@@ -17,6 +18,7 @@ export default function PrivateAccessPanel({ sandboxId }: { sandboxId: string })
   const [supported, setSupported] = useState(true)
   const [hidden, setHidden] = useState(false)
   const [connectors, setConnectors] = useState<Connector[]>([])
+  const [adding, setAdding] = useState(false)
   const [pick, setPick] = useState({ connector: '', target: '' })
 
   const load = useCallback(async () => {
@@ -24,7 +26,7 @@ export default function PrivateAccessPanel({ sandboxId }: { sandboxId: string })
     catch (e) { if ((e as { status?: number }).status === 501) setHidden(true); else toastRef.current.error(errText(e)) }
   }, [sandboxId])
   useEffect(() => { void load() }, [load])
-  useEffect(() => { if (canChange) listConnectors().then(setConnectors).catch(() => setConnectors([])) }, [canChange])
+  useEffect(() => { if (canChange) listConnectors().then(setConnectors).catch(e => toastRef.current.error(errText(e))) }, [canChange])
 
   if (hidden || grants === null) return null
   const targets = connectors.find(c => c.name === pick.connector)?.targets ?? []
@@ -44,11 +46,13 @@ export default function PrivateAccessPanel({ sandboxId }: { sandboxId: string })
             }}>Remove</button></td>}
           </tr>))}</tbody></table>
       )}
-      {canChange && (
+      {canChange && connectors.length === 0 && <p className="vault-empty">No connectors yet. <Link to="/connectors">Create one</Link>.</p>}
+      {canChange && connectors.length > 0 && (
         <form className="vault-add" onSubmit={async e => {
           e.preventDefault()
+          setAdding(true)
           try { await grantPrivate(sandboxId, pick.connector, pick.target); setPick({ connector: '', target: '' }); await load() }
-          catch (err) { toast.error(errText(err)) }
+          catch (err) { toast.error(errText(err)) } finally { setAdding(false) }
         }}>
           <select className="sel" aria-label="Connector" value={pick.connector} disabled={!supported} onChange={e => setPick({ connector: e.target.value, target: '' })}>
             <option value="">Connector…</option>
@@ -58,7 +62,7 @@ export default function PrivateAccessPanel({ sandboxId }: { sandboxId: string })
             <option value="">Target…</option>
             {targets.map(t => <option key={t.name} value={t.name}>{t.name}:{t.port}</option>)}
           </select>
-          <button className="btn" type="submit" disabled={!supported || !pick.target}>Add</button>
+          <button className="btn" type="submit" disabled={!supported || !pick.target || adding}>Add</button>
         </form>
       )}
     </section>
