@@ -141,6 +141,14 @@ function UserNav() {
             Domains
           </NavLink>
         )}
+        {!IS_LOCAL_RUNTIME && (
+          <NavLink to="/connectors" className={({ isActive }) => isActive ? 'on' : ''}>
+            <svg viewBox="0 0 24 24">
+              <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v4" />
+            </svg>
+            Connectors
+          </NavLink>
+        )}
         <NavLink to="/webhooks" className={({ isActive }) => isActive ? 'on' : ''}>
           <svg viewBox="0 0 24 24">
             <circle cx="6" cy="17" r="2.5" />

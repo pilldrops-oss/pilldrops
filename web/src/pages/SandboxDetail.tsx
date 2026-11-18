@@ -8,6 +8,7 @@ import { useToast } from '../components/Toast'
 import { errText } from '../lib/errText'
 import { cpuReading, memReading, diskReading } from '../lib/liveMetrics'
 import FileBrowser from '../components/FileBrowser'
+import PrivateAccessPanel from '../components/PrivateAccessPanel'
 import type { SandboxDetail as SandboxDetailType, Template, SandboxMetrics, PortStatus } from '../types'
 import { statusPill } from './Sandboxes'
 import { usePreviewLink, forgetPreviewTokens } from '../lib/previewToken'
@@ -1161,6 +1162,8 @@ export default function SandboxDetail() {
           </>
         )}
       </MetricsStrip>
+
+      <PrivateAccessPanel sandboxId={id} />
 
       <div className="tab-bar" role="tablist">
         {tabs.map(t => (
