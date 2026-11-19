@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
@@ -58,10 +59,52 @@ func (s *Server) privateTargetsFor(ctx context.Context, st *store.Store, sandbox
 	return out, nil
 }
 
+// sandboxLocks serializes work on one sandbox. An entry lives only while
+// someone holds or waits for it, so the map stays as small as the work in flight.
+// ponytail: per replica; two API replicas can still interleave one sandbox's pushes.
+type sandboxLocks struct {
+	mu sync.Mutex
+	m  map[string]*sandboxLock
+}
+
+type sandboxLock struct {
+	sync.Mutex
+	refs int
+}
+
+func (l *sandboxLocks) lock(id string) (unlock func()) {
+	l.mu.Lock()
+	if l.m == nil {
+		l.m = map[string]*sandboxLock{}
+	}
+	e := l.m[id]
+	if e == nil {
+		e = &sandboxLock{}
+		l.m[id] = e
+	}
+	e.refs++
+	l.mu.Unlock()
+	e.Lock()
+	return func() {
+		e.Unlock()
+		l.mu.Lock()
+		if e.refs--; e.refs == 0 {
+			delete(l.m, id)
+		}
+		l.mu.Unlock()
+	}
+}
+
 // pushPrivate stores the sandbox's routed targets and sends them to its node.
 // status is the node's reply, 0 when the sandbox has no node right now; the
-// stored list is applied when it next resumes.
+// stored list is applied when it next resumes. Pushes to one sandbox run one at
+// a time and each reads the grants afresh, so the last one sent is current.
 func (s *Server) pushPrivate(ctx context.Context, st *store.Store, sandboxID, org string) (int, error) {
+	defer s.privatePushes.lock(sandboxID)()
+	return s.pushPrivateLocked(ctx, st, sandboxID, org)
+}
+
+func (s *Server) pushPrivateLocked(ctx context.Context, st *store.Store, sandboxID, org string) (int, error) {
 	ts, err := s.privateTargetsFor(ctx, st, sandboxID)
 	if err != nil {
 		return 0, err
@@ -101,12 +144,28 @@ func (s *Server) grantPrivate(ctx context.Context, st *store.Store, org, sandbox
 	if !found {
 		return c, http.StatusNotFound, "", errors.New("connector not found")
 	}
+	var host string
 	announced := false
 	for _, t := range s.connectors.union(c.ID, c.Targets) {
-		announced = announced || t.Name == target
+		if t.Name == target {
+			announced, host = true, normalHost(t.Host)
+		}
 	}
 	if !announced {
 		return c, http.StatusNotFound, "", errors.New("connector " + c.Name + " has not announced target " + target)
+	}
+	defer s.privatePushes.lock(sandboxID)()
+	if host != "" {
+		granted, err := s.privateTargetsFor(ctx, st, sandboxID)
+		if err != nil {
+			return c, http.StatusInternalServerError, "", err
+		}
+		for _, t := range granted {
+			// Both would resolve to one address in the sandbox, silently reaching only one of them.
+			if t.Name != target && normalHost(t.Host) == host {
+				return c, http.StatusConflict, "private_name_taken", errors.New("this sandbox already reaches " + host + " through target " + t.Name + "; remove that grant first")
+			}
+		}
 	}
 	g := store.PrivateGrant{SandboxID: sandboxID, ConnectorID: c.ID, Target: target, CreatedAt: s.now().Unix()}
 	if err := st.AddPrivateGrant(ctx, g); errors.Is(err, store.ErrPrivateNameTaken) {
@@ -114,14 +173,14 @@ func (s *Server) grantPrivate(ctx context.Context, st *store.Store, org, sandbox
 	} else if err != nil {
 		return c, http.StatusInternalServerError, "", err
 	}
-	status, err = s.pushPrivate(ctx, st, sandboxID, org)
+	status, err = s.pushPrivateLocked(ctx, st, sandboxID, org)
 	if err == nil {
 		return c, 0, "", nil
 	}
 	if _, rmErr := st.RemovePrivateGrant(ctx, sandboxID, c.ID, target); rmErr != nil {
 		s.log().Warn("could not roll back a private grant", "component", "private", "sandbox", sandboxID, "target", target, "err", rmErr)
 	}
-	if _, pushErr := s.pushPrivate(ctx, st, sandboxID, org); pushErr != nil {
+	if _, pushErr := s.pushPrivateLocked(ctx, st, sandboxID, org); pushErr != nil {
 		s.log().Warn("could not re-push private targets after a rollback", "component", "private", "sandbox", sandboxID, "err", pushErr)
 	}
 	code = "private_push_failed"
@@ -133,6 +192,8 @@ func (s *Server) grantPrivate(ctx context.Context, st *store.Store, org, sandbox
 	}
 	return c, status, code, err
 }
+
+func normalHost(h string) string { return strings.ToLower(strings.TrimSuffix(h, ".")) }
 
 func writeGrantErr(w http.ResponseWriter, status int, code string, err error) {
 	if code == "" {
