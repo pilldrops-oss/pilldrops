@@ -437,8 +437,9 @@ it as `<target>.private`, or by its real hostname when the connector gave one.
 1. On exactly one orchestrator replica set `PRIVATE_INGRESS=1`. It holds the
    connectors' tunnels. On every other replica set `PRIVATE_INGRESS=remote`: they
    answer the API but run no hub. With neither set, creating a connector or a
-   session, granting a sandbox a target, and listing its grants answer 501 `no_private_ingress`, and
-   `private_access` in `GET /v1/capabilities` is false.
+   session, granting a sandbox a target, listing its grants, and creating a
+   sandbox with `private` answer 501 `no_private_ingress`, and `private_access`
+   in `GET /v1/capabilities` is false.
 2. The portal forwards the connector API to its `PORTAL_ORCHESTRATOR_URL`, including
    the two sockets the connector CLI opens, `GET /v1/connectors/{id}/tunnel` and
    `GET /v1/connector-conns/{conn}`, with their WebSocket upgrades. That URL must

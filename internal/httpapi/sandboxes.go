@@ -1095,7 +1095,7 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 	if body.Name == nil && body.Slug == nil && body.Port == nil &&
 		body.IdleTimeout == nil && body.HibernateTimeout == nil && body.Networks == nil && body.Private == nil {
 		writeErr(w, http.StatusBadRequest,
-			"body must set at least one of name, slug, port, idle_timeout, hibernate_timeout, networks, private")
+			"body must set at least one of name, slug, port, idle_timeout, hibernate_timeout, networks")
 		return
 	}
 	audit := map[string]any{}
