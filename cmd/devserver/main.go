@@ -193,12 +193,12 @@ func newPortalStreamClient() *http.Client {
 // authenticated customer; it is a parameter rather than read from the inbound
 // headers because this hop carries the orchestrator's master key, so a
 // forwarded X-Org-Override would be honoured.
-func proxyToOrchestrator(r *http.Request, base, key, owner string) (body []byte, status int, ctype string) {
+func proxyToOrchestrator(r *http.Request, base, key, owner string) (body []byte, status int, header http.Header) {
 	var rdr io.Reader
 	if r.Body != nil {
 		b, err := io.ReadAll(r.Body)
 		if err != nil {
-			return nil, 0, ""
+			return nil, 0, nil
 		}
 		rdr = bytes.NewReader(b)
 	}
@@ -208,7 +208,7 @@ func proxyToOrchestrator(r *http.Request, base, key, owner string) (body []byte,
 	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, rdr)
 	if err != nil {
-		return nil, 0, ""
+		return nil, 0, nil
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
 	// Set with "" would send a present-but-blank header, which downstream
@@ -230,14 +230,26 @@ func proxyToOrchestrator(r *http.Request, base, key, owner string) (body []byte,
 	}
 	resp, err := portalBufferedClient.Do(req)
 	if err != nil {
-		return nil, 0, ""
+		return nil, 0, nil
 	}
 	defer closeQuietly(resp.Body, "proxyToOrchestrator")
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, 0, ""
+		return nil, 0, nil
 	}
-	return b, resp.StatusCode, resp.Header.Get("Content-Type")
+	return b, resp.StatusCode, resp.Header
+}
+
+// relayedResponseHeaders are the control plane's response headers a buffered
+// reply carries back to the client; Retry-After is how a 429 or 503 says when.
+var relayedResponseHeaders = []string{"Content-Type", "Retry-After"}
+
+func relayResponseHeaders(w http.ResponseWriter, h http.Header) {
+	for _, k := range relayedResponseHeaders {
+		if v := h.Get(k); v != "" {
+			w.Header().Set(k, v)
+		}
+	}
 }
 
 // streamToOrchestrator forwards a request to the orchestrator and relays the
@@ -2532,7 +2544,7 @@ func main() {
 					r.Body = io.NopCloser(bytes.NewReader(resolved))
 				}
 			}
-			body, status, ctype := proxyToOrchestrator(r, orchURL, orchKey, ownerID(r))
+			body, status, header := proxyToOrchestrator(r, orchURL, orchKey, ownerID(r))
 			if status == 0 {
 				http.Error(w, `{"error":"orchestrator unreachable"}`, http.StatusBadGateway)
 				return
@@ -2555,9 +2567,7 @@ func main() {
 					}
 				}
 			}
-			if ctype != "" {
-				w.Header().Set("Content-Type", ctype)
-			}
+			relayResponseHeaders(w, header)
 			w.WriteHeader(status)
 			writeBytes(w, body)
 		})
@@ -2998,14 +3008,12 @@ func main() {
 				fallback(w)
 				return
 			}
-			body, status, ctype := proxyToOrchestrator(r, orchURL, orchKey, ownerID(r))
+			body, status, header := proxyToOrchestrator(r, orchURL, orchKey, ownerID(r))
 			if status == 0 {
 				http.Error(w, `{"error":"orchestrator unreachable"}`, http.StatusBadGateway)
 				return
 			}
-			if ctype != "" {
-				w.Header().Set("Content-Type", ctype)
-			}
+			relayResponseHeaders(w, header)
 			w.WriteHeader(status)
 			writeBytes(w, body)
 		}
