@@ -205,7 +205,10 @@ func run() error {
 	d.Start()
 	defer d.Stop()
 
-	nodeboot.BootstrapKey(bootCtx, st, dataDir)
+	// A clustered node shares the fleet's database, where a per-node operator key is never used.
+	if orchURL == "" {
+		nodeboot.BootstrapKey(bootCtx, st, dataDir)
+	}
 
 	sandboxDomain := nodeboot.Env("SANDBOXD_SANDBOX_DOMAIN", "")
 

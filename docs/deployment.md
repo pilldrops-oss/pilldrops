@@ -1213,7 +1213,7 @@ without rotating it for every SDK caller.
 `ORCHESTRATOR_API_KEY` still authenticates `/v1` — SDKs and `curl` are
 unchanged. It just no longer opens the console.
 
-The API key a node writes to `bootstrap.key` is for SDKs, the CLI and `curl`;
+The API key a standalone server writes to `bootstrap.key` (a fleet node writes none) is for SDKs, the CLI and `curl`;
 it does not open the dashboard. `make dev` has no sign-in at all: it is
 anonymous and bound to localhost.
 
