@@ -112,7 +112,7 @@ function KeysPanel({ id, onDone }: { id: string; onDone: () => void }) {
         <table className="tbl"><tbody>{keys.map(k => (
           <tr key={k.id}><td>{k.id}</td><td>{k.last_used_at ? `used ${new Date(k.last_used_at * 1000).toLocaleString()}` : 'never used'}</td>
             <td><button className="btn ghost" onClick={async () => {
-              if (!await confirm({ title: `Revoke ${k.id}?`, body: 'Instances using it cannot reconnect.', danger: true })) return
+              if (!await confirm({ title: `Revoke ${k.id}?`, body: 'Instances using it are disconnected and cannot reconnect.', danger: true })) return
               try { await revokeConnectorKey(id, k.id); load() } catch (e) { toast.error(errText(e)) }
             }}>Revoke</button></td></tr>))}</tbody></table>
       )}

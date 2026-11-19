@@ -26,6 +26,7 @@ const (
 
 type connectorInstance struct {
 	connectorID, instanceID string
+	keyID                   string // the connector key its session came from; empty for an API key
 	targets                 []store.ConnectorTarget
 	ctrl                    *websocket.Conn
 	writeMu                 sync.Mutex
@@ -164,6 +165,21 @@ func (h *connectorHub) closeConnector(connectorID, reason string) {
 	}
 }
 
+// closeKey ends the instances whose session came from one connector key.
+func (h *connectorHub) closeKey(connectorID, keyID, reason string) {
+	h.mu.Lock()
+	var ins []*connectorInstance
+	for _, in := range h.instances[connectorID] {
+		if in.keyID == keyID {
+			ins = append(ins, in)
+		}
+	}
+	h.mu.Unlock()
+	for _, in := range ins {
+		in.end(reason)
+	}
+}
+
 func (h *connectorHub) addPending(ch chan net.Conn) string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
@@ -266,7 +282,8 @@ func (c *connectorConn) Close() error {
 func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	// 403 not 401: this route is self-authenticated, and an unauthenticated probe must not look like a key-guarded route.
-	if !s.validConnectorToken(bearer(r), id) {
+	keyID, valid := s.validConnectorToken(bearer(r), id)
+	if !valid {
 		writeErr(w, http.StatusForbidden, "missing or invalid tunnel token")
 		return
 	}
@@ -284,6 +301,12 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusGone, "connector revoked")
 		return
 	}
+	if keyID != "" {
+		if live, err := st.ConnectorKeyLive(r.Context(), id, keyID); err != nil || !live {
+			writeErr(w, http.StatusGone, "connector key revoked")
+			return
+		}
+	}
 	ctrl, err := shareUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -297,7 +320,7 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 			Targets []store.ConnectorTarget `json:"targets"`
 		} `json:"capabilities"`
 	}
-	in := &connectorInstance{connectorID: id, ctrl: ctrl, done: make(chan struct{})}
+	in := &connectorInstance{connectorID: id, keyID: keyID, ctrl: ctrl, done: make(chan struct{})}
 	if err := ctrl.ReadJSON(&hello); err != nil || hello.Type != "hello" || len(hello.InstanceID) < 16 || len(hello.InstanceID) > 64 {
 		in.end("expected a hello with an instance_id")
 		return
@@ -353,7 +376,7 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 }
 
 // superviseConnector pings, refreshes last_seen, and ends the instance when the
-// connector is revoked on another replica.
+// connector, or the key its session came from, is revoked on another replica.
 func (s *Server) superviseConnector(st *store.Store, in *connectorInstance) {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
@@ -373,6 +396,12 @@ func (s *Server) superviseConnector(st *store.Store, in *connectorInstance) {
 			if err == nil && (!ok || c.RevokedAt != 0) {
 				in.end("revoked")
 				return
+			}
+			if in.keyID != "" {
+				if live, err := st.ConnectorKeyLive(context.Background(), in.connectorID, in.keyID); err == nil && !live {
+					in.end("key revoked")
+					return
+				}
 			}
 			_ = st.TouchConnector(context.Background(), in.connectorID, s.now().Unix())
 		}

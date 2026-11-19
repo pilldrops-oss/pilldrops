@@ -72,10 +72,14 @@ func TestConnectorLifecycle(t *testing.T) {
 		if err != nil || !strings.HasPrefix(plain, "pd_conn_") || len(plain) != len("pd_conn_")+48 {
 			t.Fatalf("key: %q %v", plain, err)
 		}
-		if got, ok, _ := st.ConnectorForKey(ctx, plain, 31); !ok || got.ID != c.ID {
+		got, keyID, ok, _ := st.ConnectorForKey(ctx, plain, 31)
+		if !ok || got.ID != c.ID || keyID == "" {
 			t.Fatal("key does not resolve")
 		}
-		if _, ok, _ := st.ConnectorForKey(ctx, plain+"0", 31); ok {
+		if live, err := st.ConnectorKeyLive(ctx, c.ID, keyID); !live || err != nil {
+			t.Fatalf("key not live: %v %v", live, err)
+		}
+		if _, _, ok, _ := st.ConnectorForKey(ctx, plain+"0", 31); ok {
 			t.Fatal("wrong key resolved")
 		}
 		if err := st.AddPrivateGrant(ctx, PrivateGrant{SandboxID: "sb1" + sfx, ConnectorID: c.ID, Target: "db", CreatedAt: 40}); err != nil {
@@ -84,7 +88,7 @@ func TestConnectorLifecycle(t *testing.T) {
 		if ok, err := st.RevokeConnector(ctx, org, c.ID, 50); !ok || err != nil {
 			t.Fatalf("revoke: %v %v", ok, err)
 		}
-		if _, ok, _ := st.ConnectorForKey(ctx, plain, 51); ok {
+		if _, _, ok, _ := st.ConnectorForKey(ctx, plain, 51); ok {
 			t.Fatal("key survives connector revoke")
 		}
 		if gs, _ := st.PrivateGrants(ctx, "sb1"+sfx); len(gs) != 0 {

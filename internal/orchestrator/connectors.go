@@ -128,15 +128,27 @@ func newConnectorID() (string, error) {
 
 func (s *Server) connectorTokenKey() []byte { return previewtoken.BrowserKey("connector:" + s.apiKey) }
 
-func (s *Server) mintConnectorToken(id string) string {
-	return previewtoken.BrowserAt(s.connectorTokenKey(), id, 1, "tunnel", s.now().Add(shareTokenTTL))
+// mintConnectorToken signs a tunnel session for connector id. A session opened
+// with a connector key carries that key's id, signed with the connector's, so
+// revoking the key can end the session.
+func (s *Server) mintConnectorToken(id, keyID string) string {
+	if keyID == "" {
+		return previewtoken.BrowserAt(s.connectorTokenKey(), id, 1, "tunnel", s.now().Add(shareTokenTTL))
+	}
+	return keyID + "." + previewtoken.BrowserAt(s.connectorTokenKey(), id+"/"+keyID, 1, "tunnel", s.now().Add(shareTokenTTL))
 }
 
-func (s *Server) validConnectorToken(tok, id string) bool {
+// validConnectorToken checks a tunnel token for connector id and returns the
+// key id it was minted for, empty for a session opened with an API key.
+func (s *Server) validConnectorToken(tok, id string) (keyID string, ok bool) {
 	if s.apiKey == "" && !devInsecure() {
-		return false
+		return "", false
 	}
-	return previewtoken.BrowserValidAt(s.connectorTokenKey(), tok, id, 1, "tunnel", s.now())
+	subject := id
+	if k, rest, found := strings.Cut(tok, "."); found && strings.Contains(rest, ".") {
+		keyID, tok, subject = k, rest, id+"/"+k
+	}
+	return keyID, previewtoken.BrowserValidAt(s.connectorTokenKey(), tok, subject, 1, "tunnel", s.now())
 }
 
 func connectorJSON(c store.Connector, online int) map[string]any {
@@ -367,6 +379,7 @@ func (s *Server) handleConnectorKeyRevoke(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusNotFound, "key not found")
 		return
 	}
+	s.connectors.closeKey(c.ID, r.PathValue("key"), "key revoked")
 	s.auditPrivate(r, st, "connector.key.revoke", c.ID, r.PathValue("key"))
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -392,7 +405,7 @@ func (s *Server) handleConnectorSession(w http.ResponseWriter, r *http.Request) 
 			writeErr(w, http.StatusServiceUnavailable, "store unavailable")
 			return
 		}
-		c, ok, err := st.ConnectorForKey(r.Context(), tok, s.now().Unix())
+		c, keyID, ok, err := st.ConnectorForKey(r.Context(), tok, s.now().Unix())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -405,7 +418,7 @@ func (s *Server) handleConnectorSession(w http.ResponseWriter, r *http.Request) 
 			writeErr(w, http.StatusForbidden, "this key belongs to connector "+c.Name)
 			return
 		}
-		writeJSON(w, http.StatusOK, s.sessionJSON(r, c))
+		writeJSON(w, http.StatusOK, s.sessionJSON(r, c, keyID))
 		return
 	}
 	r.Body = io.NopCloser(strings.NewReader(string(raw)))
@@ -430,16 +443,16 @@ func (s *Server) handleConnectorSession(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		}
-		writeJSON(w, http.StatusOK, s.sessionJSON(r, c))
+		writeJSON(w, http.StatusOK, s.sessionJSON(r, c, ""))
 	})(w, r)
 }
 
-func (s *Server) sessionJSON(r *http.Request, c store.Connector) map[string]any {
+func (s *Server) sessionJSON(r *http.Request, c store.Connector, keyID string) map[string]any {
 	scheme := "wss"
 	if r.TLS == nil && !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "ws"
 	}
 	base := scheme + "://" + r.Host + "/v1/connectors/"
 	return map[string]any{"id": c.ID, "name": c.Name, "tunnel_url": base + c.ID + "/tunnel",
-		"conn_url": scheme + "://" + r.Host + "/v1/connector-conns/", "tunnel_token": s.mintConnectorToken(c.ID)}
+		"conn_url": scheme + "://" + r.Host + "/v1/connector-conns/", "tunnel_token": s.mintConnectorToken(c.ID, keyID)}
 }

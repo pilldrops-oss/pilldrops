@@ -152,24 +152,32 @@ func (s *Store) CreateConnectorKey(ctx context.Context, connectorID string, now 
 	return k, plain, nil
 }
 
-func (s *Store) ConnectorForKey(ctx context.Context, plaintext string, now int64) (Connector, bool, error) {
+// ConnectorForKey resolves a live connector key to its connector and the key's id.
+func (s *Store) ConnectorForKey(ctx context.Context, plaintext string, now int64) (Connector, string, bool, error) {
 	if !strings.HasPrefix(plaintext, "pd_conn_") {
-		return Connector{}, false, nil
+		return Connector{}, "", false, nil
 	}
 	var keyID, connID string
 	err := s.queryRow(ctx, `SELECT id, connector_id FROM connector_keys WHERE key_hash = ? AND revoked_at = 0`, hashKey(plaintext)).Scan(&keyID, &connID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Connector{}, false, nil
+		return Connector{}, "", false, nil
 	}
 	if err != nil {
-		return Connector{}, false, err
+		return Connector{}, "", false, err
 	}
 	c, ok, err := s.ConnectorByID(ctx, "", connID)
 	if err != nil || !ok || c.RevokedAt != 0 {
-		return Connector{}, false, err
+		return Connector{}, "", false, err
 	}
 	_, _ = s.exec(ctx, `UPDATE connector_keys SET last_used_at = ? WHERE id = ?`, now, keyID) //nolint:errcheck // best-effort timestamp
-	return c, true, nil
+	return c, keyID, true, nil
+}
+
+// ConnectorKeyLive reports whether a connector's key exists and is not revoked.
+func (s *Store) ConnectorKeyLive(ctx context.Context, connectorID, keyID string) (bool, error) {
+	var n int
+	err := s.queryRow(ctx, `SELECT COUNT(*) FROM connector_keys WHERE id = ? AND connector_id = ? AND revoked_at = 0`, keyID, connectorID).Scan(&n)
+	return n > 0, err
 }
 
 func (s *Store) ListConnectorKeys(ctx context.Context, connectorID string) ([]ConnectorKey, error) {

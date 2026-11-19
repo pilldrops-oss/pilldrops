@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -147,8 +148,13 @@ func TestHubInstanceDropEndsConn(t *testing.T) {
 
 func (ts *connectorTestServer) session(t *testing.T, name string) (tunnelURL, connURL, token string) {
 	t.Helper()
+	return ts.sessionAs(t, ts.key, name)
+}
+
+func (ts *connectorTestServer) sessionAs(t *testing.T, key, name string) (tunnelURL, connURL, token string) {
+	t.Helper()
 	var m map[string]string
-	if err := json.Unmarshal([]byte(ts.body(ts.do(t, "POST", "/v1/connectors/session", ts.key, `{"name":"`+name+`"}`))), &m); err != nil {
+	if err := json.Unmarshal([]byte(ts.body(ts.do(t, "POST", "/v1/connectors/session", key, `{"name":"`+name+`"}`))), &m); err != nil {
 		t.Fatal(err)
 	}
 	return m["tunnel_url"], m["conn_url"], m["tunnel_token"]
@@ -165,5 +171,57 @@ func TestAbandonedPendingClosesALateDataSocket(t *testing.T) {
 	_ = client.SetReadDeadline(time.Now().Add(3 * time.Second))
 	if _, err := client.Read(make([]byte, 1)); err != io.EOF {
 		t.Fatalf("late socket not closed: %v", err)
+	}
+}
+
+// keyInstance connects an instance through a session opened with a connector key.
+func keyInstance(t *testing.T, ts *connectorTestServer, key, instance string) (ctrl *websocket.Conn, tunnel, token string) {
+	t.Helper()
+	tunnel, _, token = ts.sessionAs(t, key, "prod")
+	ctrl, _, err := websocket.DefaultDialer.Dial(tunnel, map[string][]string{"Authorization": {"Bearer " + token}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ctrl.Close() })
+	if err := ctrl.WriteMessage(websocket.TextMessage, []byte(`{"type":"hello","instance_id":"`+instance+`","capabilities":{"targets":[]}}`)); err != nil {
+		t.Fatal(err)
+	}
+	return ctrl, tunnel, token
+}
+
+func TestKeyRevokeEndsItsInstances(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"prod"}`)
+	id := ts.connectorID(t, "prod")
+	newKey := func() (keyID, plain string) {
+		var k struct{ ID, Key string }
+		if err := json.Unmarshal([]byte(ts.body(ts.do(t, "POST", "/v1/connectors/"+id+"/keys", ts.key, ""))), &k); err != nil {
+			t.Fatal(err)
+		}
+		return k.ID, k.Key
+	}
+	revokedID, revoked := newKey()
+	_, kept := newKey()
+	gone, tunnel, token := keyInstance(t, ts, revoked, "inst-revoked-aaaa")
+	keyInstance(t, ts, kept, "inst-kept-aaaaaaa")
+	dialInstance(t, ts, "prod", "inst-apikey-aaaaa", `[]`, true)
+	waitFor(t, func() bool { return ts.s.connectors.count(id) == 3 })
+
+	if resp := ts.do(t, "DELETE", "/v1/connectors/"+id+"/keys/"+revokedID, ts.key, ""); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke key: %d", resp.StatusCode)
+	}
+	_ = gone.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var m map[string]any
+	if err := gone.ReadJSON(&m); err != nil || m["type"] != "closed" || m["reason"] != "key revoked" {
+		t.Fatalf("revoked key's instance got %v %v", m, err)
+	}
+	waitFor(t, func() bool { return ts.s.connectors.count(id) == 2 })
+
+	_, resp, err := websocket.DefaultDialer.Dial(tunnel, map[string][]string{"Authorization": {"Bearer " + token}})
+	if err == nil || resp == nil || resp.StatusCode != http.StatusGone {
+		t.Fatalf("token for a revoked key: %v %v", resp, err)
+	}
+	if _, ok := ts.s.validConnectorToken(token[strings.IndexByte(token, '.')+1:], id); ok {
+		t.Fatal("a key session's token without its key id passed as an API-key session")
 	}
 }
