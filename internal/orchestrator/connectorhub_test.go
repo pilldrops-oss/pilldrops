@@ -3,9 +3,11 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -281,5 +283,53 @@ func TestHubPingsAConnectedInstance(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatalf("no %s reached the connected instance", name)
 		}
+	}
+}
+
+// A stalled instance must not hold up ending the others: each end can wait
+// out a 10 s send deadline.
+func TestCloseConnectorEndsInstancesAtOnce(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := shareUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	var h connectorHub
+	var ins []*connectorInstance
+	for i := range maxConnectorInstances {
+		ctrl, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = ctrl.Close() })
+		in := &connectorInstance{connectorID: "cn", instanceID: fmt.Sprint("inst-", i), ctrl: ctrl, done: make(chan struct{})}
+		if _, ok := h.add(in); !ok {
+			t.Fatal("add")
+		}
+		in.writeMu.Lock() // a send stuck on a stalled socket
+		ins = append(ins, in)
+	}
+	closed := make(chan struct{})
+	go func() { h.closeConnector("cn", "revoked"); close(closed) }()
+	// Freed in reverse: one at a time, only ending them concurrently lets each finish in turn.
+	for i := len(ins) - 1; i >= 0; i-- {
+		ins[i].writeMu.Unlock()
+		select {
+		case <-ins[i].done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("instance %d waited on the others", i)
+		}
+	}
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("closeConnector did not return")
 	}
 }

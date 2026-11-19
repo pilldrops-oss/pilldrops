@@ -163,9 +163,17 @@ func (h *connectorHub) closeConnector(connectorID, reason string) {
 		ins = append(ins, in)
 	}
 	h.mu.Unlock()
+	endAll(ins, reason)
+}
+
+// endAll ends instances at once and waits for all: each end may wait out a
+// send deadline on a stalled socket.
+func endAll(ins []*connectorInstance, reason string) {
+	var wg sync.WaitGroup
 	for _, in := range ins {
-		in.end(reason)
+		wg.Go(func() { in.end(reason) })
 	}
+	wg.Wait()
 }
 
 // closeKey ends the instances whose session came from one connector key.
@@ -178,9 +186,7 @@ func (h *connectorHub) closeKey(connectorID, keyID, reason string) {
 		}
 	}
 	h.mu.Unlock()
-	for _, in := range ins {
-		in.end(reason)
-	}
+	endAll(ins, reason)
 }
 
 func (h *connectorHub) addPending(ch chan net.Conn) string {
