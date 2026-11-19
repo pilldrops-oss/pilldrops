@@ -10,9 +10,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/pilldrops-oss/pilldrops/internal/config"
 	"github.com/pilldrops-oss/pilldrops/internal/hoststats"
 	"github.com/pilldrops-oss/pilldrops/internal/httpapi"
 	"github.com/pilldrops-oss/pilldrops/internal/nodetls"
@@ -94,6 +96,25 @@ func parseLabels(s string) map[string]string {
 	return out
 }
 
+// capacityLimit reads an operator's cap on the capacity this node reports; 0 is no cap.
+func capacityLimit(key string) int {
+	n := EnvInt(key, 0)
+	if n < 0 || slices.ContainsFunc(config.Invalid(), func(e config.Entry) bool { return e.Key == key }) {
+		slog.Warn("ignoring an invalid capacity cap: reporting the whole host",
+			"component", "node", "key", key, "value", os.Getenv(key))
+		return 0
+	}
+	return n
+}
+
+// capped is host, or limit when one is set and smaller.
+func capped(host, limit int) int {
+	if limit > 0 {
+		return min(host, limit)
+	}
+	return host
+}
+
 // heartbeatFailure logs a failing heartbeat when the reason changes, not on every
 // beat. An empty reason means the beat succeeded.
 type heartbeatFailure struct{ last string }
@@ -141,6 +162,9 @@ func StartHeartbeat(ctx context.Context, d *daemon.Daemon, dataDir, selfURL, run
 		zone = "default"
 	}
 	labels := parseLabels(os.Getenv("NODE_LABELS"))
+	// Nodes sharing one host each report only their share, or the scheduler overbooks the host.
+	capCores := capacityLimit("SANDBOXD_CAPACITY_CPU_CORES")
+	capMemMB := capacityLimit("SANDBOXD_CAPACITY_MEM_MB")
 
 	client := &http.Client{Timeout: 8 * time.Second}
 	// The replay guard wants every beat newer than the last one accepted, so
@@ -190,8 +214,8 @@ func StartHeartbeat(ctx context.Context, d *daemon.Daemon, dataDir, selfURL, run
 			"multiport": caps.MultiPort, "l4_forward": caps.L4Forward,
 			"nested_docker": caps.NestedDocker,
 			"capacity": map[string]any{
-				"cpu_cores": st.Cores, "cpu_percent": st.CPUPercent, "load1": st.LoadAvg[0],
-				"mem_total_mb": st.MemTotalMB, "mem_available_mb": st.MemAvailMB,
+				"cpu_cores": capped(st.Cores, capCores), "cpu_percent": st.CPUPercent, "load1": st.LoadAvg[0],
+				"mem_total_mb": capped(st.MemTotalMB, capMemMB), "mem_available_mb": capped(st.MemAvailMB, capMemMB),
 				"mem_committed_mb": memMB, "disk_free_gb": st.DiskFreeGB,
 				"sandboxes_active": len(boxes), "vcpu_committed": vcpu,
 			},

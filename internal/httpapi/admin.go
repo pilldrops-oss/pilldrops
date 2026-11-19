@@ -50,7 +50,7 @@ func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	// Org-scoped so one tenant cannot revoke another's key. Another org's key
 	// reads as 404, not 403, so the id's existence is not leaked.
-	if err := s.st.RevokeKey(r.Context(), id, orgID(r), operatorPrincipal(r)); err != nil {
+	if err := s.st.RevokeKey(r.Context(), id, orgID(r), operatorCaller(r)); err != nil {
 		if errors.Is(err, store.ErrKeyNotFound) {
 			writeErr(w, http.StatusNotFound, "key not found")
 			return

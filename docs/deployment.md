@@ -486,6 +486,7 @@ link's byte totals are in the `shares` table.
 | `SNAPSHOT_ARCHIVE_DIR` | no | the older alternative: pause snapshots copied to a directory, expected to be a network volume. Restorable only by a node with the same id |
 | `SANDBOXD_LAZY_MEMORY` | no | default on (`0` off). A sandbox restored from its archive on another node boots **before its memory is downloaded**: pages are fetched from the bucket as the guest touches them and the rest prefetched. Needs Firecracker `v1.17` or later on a 6.x+ host kernel (see the pin table). *When a node dies* describes the one window it adds |
 | `SANDBOXD_DOCKERD_PIDFILE` | Docker nodes with a non-default dockerd | default `/var/run/docker.pid`. dockerd's start time, read from its pidfile, is how a sandbox container stopped by a dockerd restart is told from one that crashed. Set it for a rootless (`$XDG_RUNTIME_DIR/docker.pid`), snap or custom-`--pidfile` dockerd. Setting it always wins. Unset, a docker endpoint that is not a local socket (a remote `DOCKER_HOST` or docker context) is never read locally. With no readable pidfile, or a remote endpoint, the node warns at startup and starts every stopped sandbox container again; a crash is still destroyed when its container will not stay up |
+| `SANDBOXD_CAPACITY_CPU_CORES` · `SANDBOXD_CAPACITY_MEM_MB` | when nodes share a host | caps the cores and memory (MB) this node reports in its heartbeat: it sends the smaller of the host value and the cap for `cpu_cores`, and for `mem_total_mb` and `mem_available_mb`. Without them every node on a host reports the whole host and the scheduler overbooks it. Give each node its share. Unset or `0` reports the whole host; an invalid value is ignored with a warning |
 
 > **Nothing configures the node's TLS certificate.** It is generated on first
 > boot into `SANDBOXD_DATA` as `node-tls.crt` / `node-tls.key` and advertised in
@@ -1213,7 +1214,7 @@ without rotating it for every SDK caller.
 `ORCHESTRATOR_API_KEY` still authenticates `/v1` — SDKs and `curl` are
 unchanged. It just no longer opens the console.
 
-The API key a node writes to `bootstrap.key` is for SDKs, the CLI and `curl`;
+The API key a standalone server writes to `bootstrap.key` (a fleet node writes none) is for SDKs, the CLI and `curl`;
 it does not open the dashboard. `make dev` has no sign-in at all: it is
 anonymous and bound to localhost.
 

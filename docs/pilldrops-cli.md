@@ -6,7 +6,7 @@ Single-binary customer CLI, from the
 
 ## Sign in
 
-There is one credential: the API key. On a fresh node it is written to
+There is one credential: the API key. On a fresh standalone server it is written to
 `$SANDBOXD_DATA/bootstrap.key` on first start (see the README's self-hosting
 section); after that you mint more from the dashboard.
 

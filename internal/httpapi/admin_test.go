@@ -361,3 +361,39 @@ func TestRelayedOperatorSeesOperatorKeys(t *testing.T) {
 		t.Error("a member relayed by the control plane sees the node key")
 	}
 }
+
+// The operator acting as itself through the control plane revokes an operator
+// key like it lists one; a member relayed the same way still cannot.
+func TestRelayedOperatorRevokesOperatorKeys(t *testing.T) {
+	srv, st, _ := newTestServerWithStore(t)
+	nodeKey, _, err := st.CreateKeyWithRole(t.Context(), "node", "default", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, orchKey, err := st.CreateKeyWithRole(t.Context(), "orch", "default", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revoke := func(principal ...string) int {
+		path := "/v1/keys/" + nodeKey.ID
+		req, _ := http.NewRequest("DELETE", srv.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+orchKey)
+		req.Header.Set("X-Org-Override", orgassert.Sign([]byte(testOrgOverrideSecret), "default", testNodeID, "DELETE", path, time.Now(), principal...))
+		if len(principal) == 2 {
+			req.Header.Set("X-Key-Id", principal[0])
+			req.Header.Set("X-Key-Role", principal[1])
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := revoke("k-member", "user"); code != http.StatusNotFound {
+		t.Fatalf("a member relayed by the control plane revoking an operator key = %d, want 404", code)
+	}
+	if code := revoke(); code != http.StatusOK {
+		t.Fatalf("the operator acting as itself through the control plane revoking an operator key = %d, want 200", code)
+	}
+}
