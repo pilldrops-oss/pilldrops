@@ -38,15 +38,23 @@ type privConn struct {
 	up     net.Conn
 }
 
-// closeLocked ends both sides at once: a sandbox side that already
-// half-closed would otherwise leave the upstream waiting on the connector.
-// Called with privMu held.
-func (p *liveProxy) closeLocked(c net.Conn) {
-	_ = c.Close()
+// dropLocked forgets a connection and returns both its sides, to close at
+// once after privMu is released: a sandbox side that already half-closed would
+// otherwise leave the upstream waiting on the connector, and closing an
+// upstream can block on the network. Called with privMu held.
+func (p *liveProxy) dropLocked(c net.Conn) []net.Conn {
+	out := []net.Conn{c}
 	if pc := p.conns[c]; pc != nil && pc.up != nil {
-		_ = pc.up.Close()
+		out = append(out, pc.up)
 	}
 	delete(p.conns, c)
+	return out
+}
+
+func closeConns(cs []net.Conn) {
+	for _, c := range cs {
+		_ = c.Close()
+	}
 }
 
 // privLive is keyed by the vm-layer sandbox id. Package-level for the same
@@ -102,6 +110,7 @@ func (m *Manager) SetPrivate(id, sandboxID string, ts []sandbox.PrivateTarget) e
 	}
 	routes := assignPrivate(ts)
 
+	var dropped []net.Conn
 	privMu.Lock()
 	p := privLive[id]
 	was, now := p != nil, len(routes) > 0
@@ -124,13 +133,14 @@ func (m *Manager) SetPrivate(id, sandboxID string, ts []sandbox.PrivateTarget) e
 		}
 		for c, pc := range p.conns {
 			if !granted[pc.target] {
-				p.closeLocked(c)
+				dropped = append(dropped, p.dropLocked(c)...)
 			}
 		}
 	} else if p != nil {
-		closeProxyLocked(id, p)
+		dropped = closeProxyLocked(id, p)
 	}
 	privMu.Unlock()
+	closeConns(dropped)
 
 	if was != now {
 		if err := m.syncNamespace(id, sb, slot); err != nil {
@@ -193,33 +203,39 @@ func (m *Manager) proxyPrivate(id string, p *liveProxy, c net.Conn) {
 	privSplice(c, up)
 }
 
-// closeProxyLocked closes a proxy's listener and every connection it holds.
-// Called with privMu held.
-func closeProxyLocked(id string, p *liveProxy) {
+// closeProxyLocked closes a proxy's listener and returns every connection it
+// held, for the caller to close after releasing privMu. Called with privMu held.
+func closeProxyLocked(id string, p *liveProxy) []net.Conn {
 	_ = p.l.Close()
+	var out []net.Conn
 	for c := range p.conns {
-		p.closeLocked(c)
+		out = append(out, p.dropLocked(c)...)
 	}
 	delete(privLive, id)
+	return out
 }
 
 func stopPrivate(id string) {
+	var dropped []net.Conn
 	privMu.Lock()
-	defer privMu.Unlock()
 	if p := privLive[id]; p != nil {
-		closeProxyLocked(id, p)
+		dropped = closeProxyLocked(id, p)
 	}
+	privMu.Unlock()
+	closeConns(dropped)
 }
 
 // stopPrivateByNS closes the proxy living in a namespace that is going away.
 func stopPrivateByNS(nsName string) {
+	var dropped []net.Conn
 	privMu.Lock()
-	defer privMu.Unlock()
 	for id, p := range privLive {
 		if p.ns == nsName {
-			closeProxyLocked(id, p)
+			dropped = append(dropped, closeProxyLocked(id, p)...)
 		}
 	}
+	privMu.Unlock()
+	closeConns(dropped)
 }
 
 // privateLocalRoute makes the namespace own the whole target range, as
