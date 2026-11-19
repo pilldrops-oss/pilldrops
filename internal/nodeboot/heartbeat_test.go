@@ -210,3 +210,26 @@ func TestHeartbeatFailuresAreLoggedOncePerChange(t *testing.T) {
 		t.Errorf("the log does not name the reason:\n%s", logged.String())
 	}
 }
+
+func TestCappedReportsTheSmallerOfHostAndCap(t *testing.T) {
+	for _, c := range []struct{ host, limit, want int }{
+		{16, 0, 16},
+		{16, 8, 8},
+		{4, 8, 4},
+		{0, 8, 0},
+	} {
+		if got := capped(c.host, c.limit); got != c.want {
+			t.Errorf("capped(%d, %d) = %d, want %d", c.host, c.limit, got, c.want)
+		}
+	}
+}
+
+func TestCapacityLimitIgnoresAnInvalidValue(t *testing.T) {
+	const key = "SANDBOXD_CAPACITY_MEM_MB"
+	for raw, want := range map[string]int{"": 0, "0": 0, "8192": 8192, "-1": 0, "8GB": 0} {
+		t.Setenv(key, raw)
+		if got := capacityLimit(key); got != want {
+			t.Errorf("%s=%q: cap = %d, want %d", key, raw, got, want)
+		}
+	}
+}
