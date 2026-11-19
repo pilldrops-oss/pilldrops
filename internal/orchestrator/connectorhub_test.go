@@ -236,3 +236,50 @@ func TestTunnelStoreErrorIsRetryable(t *testing.T) {
 		t.Fatalf("tunnel on a store error: %v %v", resp, err)
 	}
 }
+
+// Both must arrive: the ping keeps the hub's read deadline fresh, and the
+// keepalive is what the connector sees when a proxy in between eats the ping.
+func TestHubPingsAConnectedInstance(t *testing.T) {
+	connectorPingEvery = 50 * time.Millisecond
+	t.Cleanup(func() { connectorPingEvery = 30 * time.Second })
+	ts := newConnectorTestServer(t)
+	tunnel, _, tok := ts.session(t, "prod")
+	ctrl, _, err := websocket.DefaultDialer.Dial(tunnel, map[string][]string{"Authorization": {"Bearer " + tok}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ctrl.Close() }()
+	if err := ctrl.WriteMessage(websocket.TextMessage, []byte(`{"type":"hello","instance_id":"inst-ping-aaaaaaaa","capabilities":{"targets":[]}}`)); err != nil {
+		t.Fatal(err)
+	}
+	pinged := make(chan struct{}, 1)
+	ctrl.SetPingHandler(func(string) error {
+		select {
+		case pinged <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+	kept := make(chan struct{}, 1)
+	go func() {
+		for {
+			var m map[string]any
+			if err := ctrl.ReadJSON(&m); err != nil {
+				return
+			}
+			if m["type"] == "keepalive" {
+				select {
+				case kept <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
+	for name, ch := range map[string]chan struct{}{"ping": pinged, "keepalive": kept} {
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no %s reached the connected instance", name)
+		}
+	}
+}

@@ -141,14 +141,18 @@ func (m *Manager) SetNetworks(id string, n rt.Networks) (string, error) {
 // independently, and each re-render must read the state the other just wrote.
 var nsSyncMu sync.Mutex
 
-// syncNamespace brings a running sandbox's ruleset and resolver in line with
-// its current tag and private state. The resolver runs while either is on.
+// syncNamespace brings a running sandbox's ruleset, resolver and private
+// route in line with its current tag and private state. The resolver runs
+// while either is on.
 func (m *Manager) syncNamespace(id string, sb *Sandbox, slot int) error {
 	nsSyncMu.Lock()
 	defer nsSyncMu.Unlock()
 	tagged, private := isTagged(id), privateOn(id)
 	if err := m.reapplyNetNSRuleset(sb, slot, tagged, private); err != nil {
 		return err
+	}
+	if err := setPrivateLocalRoute(netnsRunDir+"/"+sb.NetNS, private); err != nil {
+		return fmt.Errorf("netns %s: private route: %w", sb.NetNS, err)
 	}
 	return ensureResolver(id, sb.NetNS, tagged || private)
 }

@@ -24,6 +24,9 @@ const (
 	connectorHelloWait   = 10 * time.Second
 )
 
+// connectorPingEvery is how often the hub pings each instance. A var so a test can shorten it.
+var connectorPingEvery = 30 * time.Second
+
 type connectorInstance struct {
 	connectorID, instanceID string
 	keyID                   string // the connector key its session came from; empty for an API key
@@ -393,7 +396,7 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 // superviseConnector pings, refreshes last_seen, and ends the instance when the
 // connector, or the key its session came from, is revoked on another replica.
 func (s *Server) superviseConnector(st *store.Store, in *connectorInstance) {
-	t := time.NewTicker(30 * time.Second)
+	t := time.NewTicker(connectorPingEvery)
 	defer t.Stop()
 	for {
 		select {
@@ -403,6 +406,11 @@ func (s *Server) superviseConnector(st *store.Store, in *connectorInstance) {
 			in.writeMu.Lock()
 			err := in.ctrl.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
 			in.writeMu.Unlock()
+			// A Cloudflare Worker in front answers the ping itself and never
+			// forwards it, so the connector also needs a message it can see.
+			if err == nil {
+				err = in.send(map[string]any{"type": "keepalive"})
+			}
 			if err != nil {
 				in.end("ping failed")
 				return
