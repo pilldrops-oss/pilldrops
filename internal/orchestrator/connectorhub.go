@@ -279,6 +279,11 @@ func (c *connectorConn) Close() error {
 	return c.Conn.Close()
 }
 
+func (s *Server) tunnelStoreError(w http.ResponseWriter, r *http.Request, id string, err error) {
+	s.log().ErrorContext(r.Context(), "connector unreadable", "component", "private", "connector", id, "err", err)
+	writeErr(w, http.StatusServiceUnavailable, "private access is unavailable right now; retry shortly")
+}
+
 func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	// 403 not 401: this route is self-authenticated, and an unauthenticated probe must not look like a key-guarded route.
@@ -296,13 +301,23 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusServiceUnavailable, "store unavailable")
 		return
 	}
+	// A store error is 503, not 410: the connector stops for good on 410.
 	c, ok, err := st.ConnectorByID(r.Context(), "", id)
-	if err != nil || !ok || c.RevokedAt != 0 {
+	if err != nil {
+		s.tunnelStoreError(w, r, id, err)
+		return
+	}
+	if !ok || c.RevokedAt != 0 {
 		writeErr(w, http.StatusGone, "connector revoked")
 		return
 	}
 	if keyID != "" {
-		if live, err := st.ConnectorKeyLive(r.Context(), id, keyID); err != nil || !live {
+		live, err := st.ConnectorKeyLive(r.Context(), id, keyID)
+		if err != nil {
+			s.tunnelStoreError(w, r, id, err)
+			return
+		}
+		if !live {
 			writeErr(w, http.StatusGone, "connector key revoked")
 			return
 		}

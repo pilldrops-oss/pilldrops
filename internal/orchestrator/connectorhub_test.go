@@ -225,3 +225,13 @@ func TestKeyRevokeEndsItsInstances(t *testing.T) {
 		t.Fatal("a key session's token without its key id passed as an API-key session")
 	}
 }
+
+func TestTunnelStoreErrorIsRetryable(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	tunnel, _, token := ts.session(t, "prod")
+	_ = ts.s.st.Load().Close()
+	_, resp, err := websocket.DefaultDialer.Dial(tunnel, map[string][]string{"Authorization": {"Bearer " + token}})
+	if err == nil || resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("tunnel on a store error: %v %v", resp, err)
+	}
+}
