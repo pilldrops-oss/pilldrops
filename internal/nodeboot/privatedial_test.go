@@ -60,3 +60,17 @@ func TestPrivateDialBase(t *testing.T) {
 		t.Error("a dialer built from a schemeless URL dialled")
 	}
 }
+
+// The dial route takes only a node's own key, so the operator key must not switch it on.
+func TestPrivateDialerUsesTheNodeKey(t *testing.T) {
+	t.Setenv("ORCHESTRATOR_URL", "https://orch.example")
+	t.Setenv("ORCHESTRATOR_API_KEY", "operator-key")
+	t.Setenv("NODE_API_KEY", "")
+	if privateDialer() != nil {
+		t.Fatal("dialer built from the operator key")
+	}
+	t.Setenv("NODE_API_KEY", "sf_node_k")
+	if privateDialer() == nil {
+		t.Fatal("no dialer with a node key")
+	}
+}

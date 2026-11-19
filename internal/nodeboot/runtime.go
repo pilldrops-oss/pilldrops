@@ -101,10 +101,10 @@ func SelectRuntime(ctx context.Context, dataDir string, logger *zap.Logger) (rt.
 	return unisolated(dataDir, "auto-probe found neither Firecracker nor Docker")
 }
 
-// privateDialer reaches the control plane's connector hub with the key this
-// node registers with; nil on a standalone node, which then refuses grants.
+// privateDialer reaches the control plane's connector hub with this node's own
+// key, NODE_API_KEY; nil on a standalone node, which then refuses grants.
 func privateDialer() func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error) {
-	orchURL, key := Env("ORCHESTRATOR_URL", ""), Env("ORCHESTRATOR_API_KEY", "")
+	orchURL, key := Env("ORCHESTRATOR_URL", ""), Env("NODE_API_KEY", "")
 	if orchURL == "" || key == "" {
 		return nil
 	}

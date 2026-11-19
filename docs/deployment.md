@@ -446,8 +446,8 @@ it as `<target>.private`, or by its real hostname when the connector gave one.
    - `GET /internal/private/dial`, which nodes open with their node key.
 
    Any proxy in front of the orchestrator must pass WebSocket upgrades on them.
-3. Nodes need `ORCHESTRATOR_URL` (`http` or `https`) and `ORCHESTRATOR_API_KEY`,
-   which a clustered node already has, to reach that dial route. Only nodes with
+3. Nodes need `ORCHESTRATOR_URL` (`http` or `https`) and `NODE_API_KEY`, which
+   a joined node already has, to reach that dial route. Only nodes with
    per-sandbox network namespaces advertise private access; a grant on a sandbox
    placed elsewhere is refused with 409 `private_access_unsupported`.
 4. Connectors are outbound-only: the customer's network opens no port. A connector
