@@ -23,7 +23,8 @@ function formatDate(ts: string): string {
   }
 }
 
-type Tab = 'shell' | 'terminal' | 'files' | 'preview' | 'logs' | 'info'
+type Tab = 'shell' | 'terminal' | 'files' | 'preview' | 'logs' | 'settings'
+type Section = 'overview' | 'access'
 
 function defaultTabFor(outcome?: string): Tab {
   switch (outcome) {
@@ -700,24 +701,11 @@ function MetricValue({ text }: { text: string }) {
 
 const meterWidth = (ratio: number) => `${Math.min(100, Math.max(0, ratio * 100))}%`
 
-export function MetricsStrip({
-  id,
-  status,
-  createdAt,
-  expiresAt,
-  children,
-}: {
-  id: string
-  status: string
-  createdAt?: string
-  expiresAt?: string
-  children?: ReactNode
-}) {
+function useLiveMetrics(id: string, isRunning: boolean) {
   const [sample, setSample] = useState<{ m: SandboxMetrics | null; at: number } | null>(null)
   const [cpuHistory, setCpuHistory] = useState<number[]>([])
   const [memHistory, setMemHistory] = useState<number[]>([])
   const [now, setNow] = useState(() => Date.now())
-  const isRunning = status === 'running'
 
   useEffect(() => {
     if (!isRunning) return
@@ -737,6 +725,57 @@ export function MetricsStrip({
     const tick = setInterval(() => setNow(Date.now()), 1000)
     return () => { alive = false; clearInterval(poll); clearInterval(tick) }
   }, [id, isRunning])
+
+  return { sample, cpuHistory, memHistory, now }
+}
+
+// One line of size and time left for the header; the full readings live on Settings → Overview.
+function SizeAndTime({ id, status, expiresAt, busy, onRenew }: {
+  id: string
+  status: string
+  expiresAt?: string
+  busy: boolean
+  onRenew: () => void
+}) {
+  const isRunning = status === 'running'
+  const { sample, now } = useLiveMetrics(id, isRunning)
+  if (!isRunning) return null
+  const cpu = cpuReading(sample?.m)
+  const mem = memReading(sample?.m)
+  const expires = expiresAt ? Date.parse(expiresAt) : NaN
+  const secondsLeft = Number.isFinite(expires) ? (expires - now) / 1000 : null
+  const parts = [
+    cpu && (cpu.kind === 'utilisation' ? `CPU ${cpu.text}` : cpu.text),
+    mem?.text,
+    secondsLeft != null && secondsLeft > 0 ? `${formatDuration(secondsLeft)} left` : null,
+  ].filter(Boolean)
+  return (
+    <span className="detail-size" title={expiresAt ? `Expires ${formatDate(expiresAt)}` : undefined}>
+      {parts.join(' · ')}
+      {secondsLeft != null && (
+        <button className="detail-renew" disabled={busy} title="Restart the time limit from now" onClick={onRenew}>
+          Renew
+        </button>
+      )}
+    </span>
+  )
+}
+
+export function MetricsStrip({
+  id,
+  status,
+  createdAt,
+  expiresAt,
+  children,
+}: {
+  id: string
+  status: string
+  createdAt?: string
+  expiresAt?: string
+  children?: ReactNode
+}) {
+  const isRunning = status === 'running'
+  const { sample, cpuHistory, memHistory, now } = useLiveMetrics(id, isRunning)
 
   if (!isRunning) return children ? <div className="metrics-strip">{children}</div> : null
 
@@ -830,11 +869,12 @@ export default function SandboxDetail() {
   // Absent when the page is rendered outside the shell; the bar then sits in the page.
   const topSlot = useOutletContext<HTMLElement | null>()
 
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [openMenu, setOpenMenu] = useState<'more' | 'share' | null>(null)
+  const menuOpen = openMenu === 'more'
   useEffect(() => {
-    if (!menuOpen) return
+    if (!openMenu) return
     const close = (e: Event) => {
-      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !(e.target as Element).closest?.('.menu-wrap')) setMenuOpen(false)
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !(e.target as Element).closest?.('.menu-wrap')) setOpenMenu(null)
     }
     document.addEventListener('mousedown', close)
     document.addEventListener('keydown', close)
@@ -842,9 +882,10 @@ export default function SandboxDetail() {
       document.removeEventListener('mousedown', close)
       document.removeEventListener('keydown', close)
     }
-  }, [menuOpen])
+  }, [openMenu])
 
   const [tab, setTabRaw] = useState<Tab>('shell')
+  const [section, setSection] = useState<Section>('overview')
   // Mounted on first visit and then only hidden, so a tab switch keeps the shell and its history.
   const [shellMounted, setShellMounted] = useState(false)
   if (tab === 'shell' && !shellMounted) setShellMounted(true)
@@ -1006,15 +1047,67 @@ export default function SandboxDetail() {
     { id: 'files', label: 'Files' },
     { id: 'preview', label: previewLabel(tplMeta?.outcome) },
     { id: 'logs', label: 'Logs' },
-    { id: 'info', label: 'Info' },
+    { id: 'settings', label: 'Settings' },
   ]
+  const sections: Array<{ id: Section; label: string }> = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'access', label: 'Access' },
+  ]
+  const openSettings = (to: Section) => { setOpenMenu(null); setSection(to); setTab('settings') }
+
+  const accessControls = !IS_LOCAL_RUNTIME && (
+    <div className="access-controls">
+      <div className="access-row">
+        <span className="access-label" id="api-access-label">API access</span>
+        <span className="access-hint">Who can open, exec in and destroy it through the API</span>
+        <div className="seg" role="group" aria-labelledby="api-access-label">
+          {(['org', 'private'] as const).map(v => (
+            <button
+              key={v}
+              type="button"
+              className={`seg-btn${(isPrivate ? 'private' : 'org') === v ? ' on' : ''}`}
+              aria-pressed={(isPrivate ? 'private' : 'org') === v}
+              disabled={busy}
+              onClick={() => { if ((v === 'private') !== isPrivate) void shareToggle() }}
+            >
+              {API_ACCESS_LABEL[v]}
+            </button>
+          ))}
+        </div>
+      </div>
+      {!previewAccessHidden && sb.public_preview !== undefined && (
+        <div className="access-row">
+          <span className="access-label" id="preview-access-label">Preview</span>
+          <span className="access-hint">
+            Whether the app preview opens without a token. Ports {ENVD_TERMINAL_PORT} (terminal)
+            and {ENVD_DESKTOP_PORT} (desktop) always need one.
+          </span>
+          <div className="seg" role="group" aria-labelledby="preview-access-label">
+            {([['public', 'Public'], ['token', 'Token only']] as const).map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                className={`seg-btn${(isPublicPreview ? 'public' : 'token') === v ? ' on' : ''}`}
+                aria-pressed={(isPublicPreview ? 'public' : 'token') === v}
+                disabled={busy}
+                onClick={() => { if ((v === 'public') !== isPublicPreview) void previewAccessToggle(v === 'public') }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 
   const status = statusPill(transition ?? (sb.status || 'running'))
+  const renew = () => doAction(() => refreshSandbox(id), undefined, 'TTL refreshed')
   const lifecycle = (to: 'pausing' | 'resuming', run: () => Promise<unknown>, done: string) => {
     setTransition(to)
     void doAction(run, undefined, done).finally(() => setTransition(null))
   }
-  const menuAction = (run: () => void) => () => { setMenuOpen(false); run() }
+  const menuAction = (run: () => void) => () => { setOpenMenu(null); run() }
 
   const bar = (
     <>
@@ -1028,7 +1121,6 @@ export default function SandboxDetail() {
           <span className="pd" style={{ background: status.fg }} />
           {status.label}
         </span>
-        <span className="chip">{sb.template}</span>
         <span className="detail-id">
           {sb.id}
           <IconCopyButton text={sb.id} label="sandbox ID" />
@@ -1036,6 +1128,30 @@ export default function SandboxDetail() {
       </div>
 
       <div className="tr detail-actions">
+        <SizeAndTime id={id} status={sb.status} expiresAt={sb.expires_at} busy={busy} onRenew={() => void renew()} />
+        {!IS_LOCAL_RUNTIME && (
+          <div className="menu-wrap detail-share-wrap">
+            <button
+              className="btn"
+              aria-haspopup="dialog"
+              aria-expanded={openMenu === 'share'}
+              onClick={() => setOpenMenu(o => (o === 'share' ? null : 'share'))}
+            >
+              Share
+              <span className="detail-share-state">
+                {isPrivate ? 'Only me' : 'Org'}{sb.public_preview ? ' · Public preview' : ''}
+              </span>
+            </button>
+            {openMenu === 'share' && (
+              <div className="menu detail-share" role="dialog" aria-label="Share">
+                {accessControls}
+                <button type="button" className="link-btn" onClick={() => openSettings('access')}>
+                  Private network access…
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         {isRunning && (
           <a href={openUrl} target="_blank" rel="noopener noreferrer" className="btn primary">
             Open preview ↗
@@ -1048,7 +1164,7 @@ export default function SandboxDetail() {
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             disabled={busy}
-            onClick={() => setMenuOpen(o => !o)}
+            onClick={() => setOpenMenu(o => (o === 'more' ? null : 'more'))}
           >
             {busy ? <span className="spinner" aria-hidden="true" /> : '⋯'}
           </button>
@@ -1088,7 +1204,7 @@ export default function SandboxDetail() {
               <button
                 disabled={busy}
                 title="Extend TTL"
-                onClick={menuAction(() => doAction(() => refreshSandbox(id), undefined, 'TTL refreshed'))}
+                onClick={menuAction(() => void renew())}
               >
                 <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5" /></svg>
                 Refresh TTL
@@ -1119,51 +1235,6 @@ export default function SandboxDetail() {
       {topSlot ? createPortal(bar, topSlot) : <div className="detail-header">{bar}</div>}
 
       {error && sandbox && <p className="lm-error" style={{ marginBottom: 14 }}>{error}</p>}
-
-      <MetricsStrip id={id} status={sb.status} createdAt={sb.created_at} expiresAt={sb.expires_at}>
-        {!IS_LOCAL_RUNTIME && (
-          <>
-            <label
-              className="sbmetric"
-              title="Who can open, exec in and destroy this sandbox through the API. It does not change who can open the preview URL."
-            >
-              <span className="sbmetric-label">API access</span>
-              <select
-                className="sel"
-                disabled={busy}
-                value={isPrivate ? 'private' : 'org'}
-                onChange={e => { if ((e.target.value === 'private') !== isPrivate) void shareToggle() }}
-              >
-                <option value="org">{API_ACCESS_LABEL.org}</option>
-                <option value="private">{API_ACCESS_LABEL.private}</option>
-              </select>
-            </label>
-            {!previewAccessHidden && sb.public_preview !== undefined && (
-              <label
-                className="sbmetric"
-                title={`Whether the app preview is reachable without a token. Ports ${ENVD_TERMINAL_PORT} `
-                  + `(terminal) and ${ENVD_DESKTOP_PORT} (desktop) always need one regardless of this setting.`}
-              >
-                <span className="sbmetric-label">Preview</span>
-                <select
-                  className="sel"
-                  disabled={busy}
-                  value={isPublicPreview ? 'public' : 'token'}
-                  onChange={e => {
-                    const next = e.target.value === 'public'
-                    if (next !== isPublicPreview) void previewAccessToggle(next)
-                  }}
-                >
-                  <option value="public">Public</option>
-                  <option value="token">Token only</option>
-                </select>
-              </label>
-            )}
-          </>
-        )}
-      </MetricsStrip>
-
-      <PrivateAccessPanel sandboxId={id} />
 
       <div className="tab-bar" role="tablist">
         {tabs.map(t => (
@@ -1198,7 +1269,44 @@ export default function SandboxDetail() {
           />
         )}
         {tab === 'logs' && <LogsTab id={id} onOpenTerminal={() => setTab('shell')} />}
-        {tab === 'info' && <InfoTab sandbox={sb} previewPort={previewPort} onSlug={slug => setSandbox(prev => (prev ? { ...prev, slug: slug || undefined } : prev))} />}
+        {tab === 'settings' && (
+          <div className="settings-layout">
+            <nav className="settings-nav" aria-label="Settings">
+              <div className="settings-group">
+                {sections.map(it => (
+                  <button
+                    key={it.id}
+                    type="button"
+                    aria-current={section === it.id ? 'page' : undefined}
+                    className={section === it.id ? 'on' : undefined}
+                    onClick={() => setSection(it.id)}
+                  >
+                    {it.label}
+                  </button>
+                ))}
+              </div>
+            </nav>
+            <div className="settings-body">
+              {section === 'overview' && (
+                <>
+                  <MetricsStrip id={id} status={sb.status} createdAt={sb.created_at} expiresAt={sb.expires_at} />
+                  <InfoTab sandbox={sb} previewPort={previewPort} onSlug={slug => setSandbox(prev => (prev ? { ...prev, slug: slug || undefined } : prev))} />
+                </>
+              )}
+              {section === 'access' && (
+                <>
+                  {accessControls && (
+                    <section className="panel" aria-label="Sharing">
+                      <div className="ph"><h2>Sharing</h2></div>
+                      <div className="panel-pad">{accessControls}</div>
+                    </section>
+                  )}
+                  <PrivateAccessPanel sandboxId={id} />
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
