@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   listConnectors, createConnector, revokeConnector, listConnectorKeys, createConnectorKey,
-  revokeConnectorKey, listConnectorConnections, getCapabilities,
+  revokeConnectorKey, listConnectorConnections,
 } from '../api'
 import type { Connector, ConnectorKey, PrivateConnection } from '../types'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmModal'
 import { errText } from '../lib/errText'
 import { useOrgRole } from '../hooks/useOrgRole'
+import { usePrivateAccess } from '../hooks/usePrivateAccess'
 
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 
@@ -22,18 +23,21 @@ export default function Connectors() {
   const [rows, setRows] = useState<Connector[]>([])
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
-  const [on, setOn] = useState<boolean | null>(null)
+  const on = usePrivateAccess()
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [created, setCreated] = useState('')
   const [open, setOpen] = useState<{ id: string; tab: 'keys' | 'log' } | null>(null)
 
-  useEffect(() => { getCapabilities().then(c => setOn(!!c.private_access)).catch(() => setOn(true)) }, [])
-
   const refresh = useCallback(async () => {
     try { setRows(await listConnectors()); setLoadErr('') } catch (e) { setLoadErr(errText(e)) } finally { setLoading(false) }
   }, [])
-  useEffect(() => { void refresh(); const t = setInterval(refresh, 15000); return () => clearInterval(t) }, [refresh])
+  useEffect(() => {
+    if (!on) return
+    void refresh()
+    const t = setInterval(refresh, 15000)
+    return () => clearInterval(t)
+  }, [refresh, on])
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault()

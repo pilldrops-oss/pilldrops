@@ -73,10 +73,12 @@ describe('Connectors', () => {
     expect(screen.queryByRole('button', { name: 'Remove prod' })).not.toBeInTheDocument()
   })
 
-  it('says when the server has no private access', async () => {
+  it('says when the server has no private access, and does not poll', async () => {
     vi.mocked(api.getCapabilities).mockResolvedValue({ private_access: false } as never)
+    vi.mocked(api.listConnectors).mockClear()
     renderPage()
     expect(await screen.findByText(/This server does not offer private access/)).toBeInTheDocument()
+    expect(api.listConnectors).not.toHaveBeenCalled()
   })
 
   it('shows a load error', async () => {
