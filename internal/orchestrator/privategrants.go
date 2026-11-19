@@ -185,7 +185,7 @@ func privateNames(ts []store.ConnectorTarget, target string) []string {
 
 func (s *Server) handlePrivateGrantList(w http.ResponseWriter, r *http.Request) {
 	st := s.projectStore(w)
-	if st == nil {
+	if st == nil || privateOff(w) {
 		return
 	}
 	if _, role := callerKey(r.Context()); role == principalSandboxRole {

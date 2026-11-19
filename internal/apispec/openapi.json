@@ -2136,6 +2136,16 @@
           },
           "404": {
             "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "description": "This deployment has no private ingress (code `no_private_ingress`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }

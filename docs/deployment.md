@@ -437,7 +437,7 @@ it as `<target>.private`, or by its real hostname when the connector gave one.
 1. On exactly one orchestrator replica set `PRIVATE_INGRESS=1`. It holds the
    connectors' tunnels. On every other replica set `PRIVATE_INGRESS=remote`: they
    answer the API but run no hub. With neither set, creating a connector or a
-   session, and granting a sandbox a target, answer 501 `no_private_ingress`, and
+   session, granting a sandbox a target, and listing its grants answer 501 `no_private_ingress`, and
    `private_access` in `GET /v1/capabilities` is false.
 2. The load balancer must send these paths, WebSocket upgrades included, to the
    replica with `PRIVATE_INGRESS=1`:

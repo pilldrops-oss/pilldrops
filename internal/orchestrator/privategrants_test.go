@@ -308,6 +308,16 @@ func TestGrantListAndRevokeRefusals(t *testing.T) {
 	}
 }
 
+func TestGrantListOffAnswers501(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	ts.fakeNode(t, true)
+	t.Setenv("PRIVATE_INGRESS", "")
+	resp := ts.do(t, "GET", "/v1/sandboxes/sb1/private", ts.key, "")
+	if b := ts.body(resp); resp.StatusCode != http.StatusNotImplemented || !strings.Contains(b, "no_private_ingress") {
+		t.Fatalf("%d %s", resp.StatusCode, b)
+	}
+}
+
 func TestDestroyDropsGrants(t *testing.T) {
 	ts := newConnectorTestServer(t)
 	ts.fakeNode(t, true)
