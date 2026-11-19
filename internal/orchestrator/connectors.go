@@ -448,11 +448,28 @@ func (s *Server) handleConnectorSession(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) sessionJSON(r *http.Request, c store.Connector, keyID string) map[string]any {
+	base := s.connectorOrigin(r)
+	return map[string]any{"id": c.ID, "name": c.Name, "tunnel_url": base + "/v1/connectors/" + c.ID + "/tunnel",
+		"conn_url": base + "/v1/connector-conns/", "tunnel_token": s.mintConnectorToken(c.ID, keyID)}
+}
+
+// connectorOrigin is the ws or wss origin a connector reaches this API on: the
+// portal's when one fronts it (PORTAL_ORIGIN), else the host a proxy forwarded,
+// else the host the request came in on.
+func (s *Server) connectorOrigin(r *http.Request) string {
+	if u, err := url.Parse(strings.TrimSpace(s.portalOrigin)); err == nil && u.Host != "" {
+		if u.Scheme == "http" {
+			return "ws://" + u.Host
+		}
+		return "wss://" + u.Host
+	}
 	scheme := "wss"
 	if r.TLS == nil && !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "ws"
 	}
-	base := scheme + "://" + r.Host + "/v1/connectors/"
-	return map[string]any{"id": c.ID, "name": c.Name, "tunnel_url": base + c.ID + "/tunnel",
-		"conn_url": scheme + "://" + r.Host + "/v1/connector-conns/", "tunnel_token": s.mintConnectorToken(c.ID, keyID)}
+	host := r.Host
+	if fh, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Host"), ","); strings.TrimSpace(fh) != "" {
+		host = strings.TrimSpace(fh)
+	}
+	return scheme + "://" + host
 }

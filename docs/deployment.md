@@ -439,13 +439,15 @@ it as `<target>.private`, or by its real hostname when the connector gave one.
    answer the API but run no hub. With neither set, creating a connector or a
    session, granting a sandbox a target, and listing its grants answer 501 `no_private_ingress`, and
    `private_access` in `GET /v1/capabilities` is false.
-2. The load balancer must send these paths, WebSocket upgrades included, to the
-   replica with `PRIVATE_INGRESS=1`:
-   - `GET /v1/connectors/{id}/tunnel` and `GET /v1/connector-conns/{conn}`, which
-     the connector CLI opens;
-   - `GET /internal/private/dial`, which nodes open with their node key.
-
-   Any proxy in front of the orchestrator must pass WebSocket upgrades on them.
+2. The portal forwards the connector API to its `PORTAL_ORCHESTRATOR_URL`, including
+   the two sockets the connector CLI opens, `GET /v1/connectors/{id}/tunnel` and
+   `GET /v1/connector-conns/{conn}`, with their WebSocket upgrades. That URL must
+   reach the replica with `PRIVATE_INGRESS=1`. Nodes open
+   `GET /internal/private/dial` with their node key straight to that replica, not
+   through the portal. Any other proxy or load balancer on these paths must send
+   them to that replica and pass WebSocket upgrades. A session's tunnel URLs use
+   `PORTAL_ORIGIN` when it is set, else the forwarded or direct host, so set
+   `PORTAL_ORIGIN` on the orchestrator when a portal fronts it.
 3. Nodes need `ORCHESTRATOR_URL` (`http` or `https`) and `NODE_API_KEY`, which
    a joined node already has, to reach that dial route. Only nodes with
    per-sandbox network namespaces advertise private access; a grant on a sandbox

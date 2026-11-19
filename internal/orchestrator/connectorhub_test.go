@@ -116,6 +116,7 @@ func TestHubOfflineAndUnknownTarget(t *testing.T) {
 func TestHubRefusesPlatformHostname(t *testing.T) {
 	t.Setenv("PORTAL_ORIGIN", "https://pilldrops.com")
 	ts := newConnectorTestServer(t)
+	ts.s.portalOrigin = "" // the session URLs must stay on the test server
 	tunnel, _, tok := ts.session(t, "prod")
 	ctrl, _, err := websocket.DefaultDialer.Dial(tunnel, map[string][]string{"Authorization": {"Bearer " + tok}})
 	if err != nil {

@@ -200,3 +200,36 @@ func TestConnectorCapabilityNeedsACapableNode(t *testing.T) {
 		t.Fatal("private_access with PRIVATE_INGRESS unset")
 	}
 }
+
+func TestSessionURLsUseThePublicOrigin(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"prod"}`)
+	id := ts.connectorID(t, "prod")
+	session := func(hdr map[string]string) (tunnel, conn string) {
+		req, _ := http.NewRequest("POST", ts.srv.URL+"/v1/connectors/session", strings.NewReader(`{"name":"prod"}`))
+		req.Header.Set("Authorization", "Bearer "+ts.key)
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		resp, err := ts.srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]string
+		if err := json.Unmarshal([]byte(ts.body(resp)), &m); err != nil {
+			t.Fatal(err)
+		}
+		return m["tunnel_url"], m["conn_url"]
+	}
+	direct := "ws://" + strings.TrimPrefix(ts.srv.URL, "http://")
+	if tun, conn := session(nil); tun != direct+"/v1/connectors/"+id+"/tunnel" || conn != direct+"/v1/connector-conns/" {
+		t.Errorf("direct: %s %s", tun, conn)
+	}
+	if tun, conn := session(map[string]string{"X-Forwarded-Host": "portal.example", "X-Forwarded-Proto": "https"}); tun != "wss://portal.example/v1/connectors/"+id+"/tunnel" || conn != "wss://portal.example/v1/connector-conns/" {
+		t.Errorf("behind a proxy: %s %s", tun, conn)
+	}
+	ts.s.portalOrigin = "https://app.example.com"
+	if tun, _ := session(map[string]string{"X-Forwarded-Host": "orch.internal"}); tun != "wss://app.example.com/v1/connectors/"+id+"/tunnel" {
+		t.Errorf("behind the portal: %s", tun)
+	}
+}
