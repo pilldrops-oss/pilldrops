@@ -10,6 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netns"
+	"golang.org/x/sys/unix"
+
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
@@ -61,8 +65,34 @@ func TestPrivateProxyLive(t *testing.T) {
 		}
 	}
 
+	m.mu.RLock()
+	nsPath := netnsRunDir + "/" + m.active[id].NetNS
+	m.mu.RUnlock()
+	hasLocalRoute := func() bool {
+		t.Helper()
+		ns, err := netns.GetFromPath(nsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = ns.Close() }()
+		h, err := netlink.NewHandleAt(ns)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer h.Close()
+		filter := &netlink.Route{Table: unix.RT_TABLE_LOCAL, Dst: privateLocalRoute(0).Dst}
+		rs, err := h.RouteListFiltered(netlink.FAMILY_V4, filter, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_DST)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(rs) == 1 && rs[0].Type == unix.RTN_LOCAL
+	}
+
 	if err := m.SetPrivate(id, "sb-platform", []sandbox.PrivateTarget{{Name: "db", Port: 5432}}); err != nil {
 		t.Fatal(err)
+	}
+	if !hasLocalRoute() {
+		t.Fatal("granting left the namespace without the local route for the target range")
 	}
 	if out := run(`getent hosts db.private; echo hi | nc -w 2 db.private 5432`); !strings.Contains(out, "192.168.31.2") || !strings.Contains(out, "hi") {
 		t.Fatalf("guest output:\n%s", out)
@@ -105,5 +135,8 @@ func TestPrivateProxyLive(t *testing.T) {
 	}
 	if out := run(`getent hosts db.private; echo rc=$?`); !strings.Contains(out, "rc=2") {
 		t.Fatalf("revoked name still resolves:\n%s", out)
+	}
+	if hasLocalRoute() {
+		t.Fatal("revoking left the local route for the target range")
 	}
 }
