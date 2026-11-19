@@ -102,6 +102,7 @@ func registerFleetPassthrough(r chi.Router, passthrough http.HandlerFunc) {
 		// The tunnel, data socket and session routes are in registerConnectorRoutes.
 		"/v1/connectors", "/v1/connectors/{id}", "/v1/connectors/{id}/connections",
 		"/v1/connectors/{id}/keys", "/v1/connectors/{id}/keys/{key}",
+		"/v1/sandboxes/{id}/private", "/v1/sandboxes/{id}/private/{connector}/{target}",
 		"/v1/capabilities",
 		"/v1/limits",
 		"/v1/launch-stats",
