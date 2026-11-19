@@ -30,10 +30,10 @@ import (
 var (
 	shareDialTimeout  = 10 * time.Second
 	shareRefreshEvery = 5 * time.Second
+	sharePingEvery    = 30 * time.Second
 )
 
 const (
-	sharePingEvery  = 30 * time.Second
 	shareTouchEvery = 30 * time.Second
 	shareReadWait   = 75 * time.Second
 	shareHelloWait  = 10 * time.Second
@@ -380,7 +380,16 @@ func (s *Server) superviseShare(st *store.Store, t *shareTunnel, refreshEvery ti
 		case <-t.done:
 			return
 		case <-ping.C:
-			_ = t.ctrl.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+			err := t.ctrl.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+			// A Cloudflare Worker in front answers the ping itself and never
+			// forwards it, so the CLI also needs a message it can see.
+			if err == nil {
+				err = t.send(map[string]any{"type": "keepalive"})
+			}
+			if err != nil {
+				t.end("ping failed")
+				return
+			}
 		case <-touch.C:
 			s.touchShare(st, t.share.ID)
 		case <-refresh.C:

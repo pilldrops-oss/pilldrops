@@ -361,3 +361,29 @@ func TestALiveTunnelEndsAtExpiry(t *testing.T) {
 		t.Fatalf("link after expiry = %d", r.StatusCode)
 	}
 }
+
+func TestTunnelGetsAKeepaliveMessage(t *testing.T) {
+	old := sharePingEvery
+	sharePingEvery = 20 * time.Millisecond
+	defer func() { sharePingEvery = old }()
+	l := startShare(t, http.NotFoundHandler())
+	h := http.Header{"Authorization": {"Bearer " + l.s.mintShareToken(l.id)}}
+	ctrl, resp, err := dialShareWS(t, l.base, "/tunnel?share="+l.id, h)
+	if err != nil {
+		t.Fatalf("control dial: %v (%v)", err, resp)
+	}
+	defer func() { _ = ctrl.Close() }()
+	if err := ctrl.WriteJSON(map[string]any{"type": "hello", "port": 1}); err != nil {
+		t.Fatalf("hello: %v", err)
+	}
+	_ = ctrl.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		var msg struct{ Type string }
+		if err := ctrl.ReadJSON(&msg); err != nil {
+			t.Fatalf("no keepalive arrived: %v", err)
+		}
+		if msg.Type == "keepalive" {
+			return
+		}
+	}
+}
