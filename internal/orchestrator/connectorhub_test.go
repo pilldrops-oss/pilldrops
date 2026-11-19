@@ -333,3 +333,105 @@ func TestCloseConnectorEndsInstancesAtOnce(t *testing.T) {
 		t.Fatal("closeConnector did not return")
 	}
 }
+
+// A key revoked on another replica never reaches this one's hub: the periodic
+// re-check is what ends its instance.
+func TestHubRecheckEndsAnInstanceWhoseKeyWasRevoked(t *testing.T) {
+	connectorPingEvery = 50 * time.Millisecond
+	t.Cleanup(func() { connectorPingEvery = 30 * time.Second })
+	ts := newConnectorTestServer(t)
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"prod"}`)
+	id := ts.connectorID(t, "prod")
+	var k struct{ ID, Key string }
+	if err := json.Unmarshal([]byte(ts.body(ts.do(t, "POST", "/v1/connectors/"+id+"/keys", ts.key, ""))), &k); err != nil {
+		t.Fatal(err)
+	}
+	ctrl, _, _ := keyInstance(t, ts, k.Key, "inst-recheck-aaaa")
+	waitFor(t, func() bool { return ts.s.connectors.count(id) == 1 })
+	if ok, err := ts.s.st.Load().RevokeConnectorKey(t.Context(), id, k.ID, ts.s.now().Unix()); err != nil || !ok {
+		t.Fatalf("revoke in store: %v %v", ok, err)
+	}
+	_ = ctrl.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		var m map[string]any
+		if err := ctrl.ReadJSON(&m); err != nil {
+			t.Fatalf("instance not ended: %v", err)
+		}
+		if m["type"] == "closed" {
+			if m["reason"] != "key revoked" {
+				t.Fatalf("closed for %v", m["reason"])
+			}
+			break
+		}
+	}
+	waitFor(t, func() bool { return ts.s.connectors.count(id) == 0 })
+}
+
+func TestHubRefusesAnInstanceOverTheLimit(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	for i := range maxConnectorInstances {
+		dialInstance(t, ts, "prod", fmt.Sprintf("inst-limit-%06d", i), `[]`, true)
+	}
+	tunnel, _, tok := ts.session(t, "prod")
+	ctrl, _, err := websocket.DefaultDialer.Dial(tunnel, map[string][]string{"Authorization": {"Bearer " + tok}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ctrl.Close() }()
+	_ = ctrl.WriteMessage(websocket.TextMessage, []byte(`{"type":"hello","instance_id":"inst-limit-over00","capabilities":{"targets":[]}}`))
+	var m map[string]any
+	_ = ctrl.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := ctrl.ReadJSON(&m); err != nil || m["type"] != "closed" || !strings.Contains(m["reason"].(string), "maximum") {
+		t.Fatalf("instance over the limit got %v %v", m, err)
+	}
+	if n := ts.s.connectors.count(ts.connectorID(t, "prod")); n != maxConnectorInstances {
+		t.Fatalf("%d instances, want %d", n, maxConnectorInstances)
+	}
+	// A reconnect under a known instance id replaces it rather than counting against the limit.
+	dialInstance(t, ts, "prod", "inst-limit-000000", `[]`, true)
+}
+
+func TestDataSocketIDIsSingleUse(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	ch := make(chan net.Conn, 1)
+	id := ts.s.connectors.addPending(ch)
+	connURL := "ws" + strings.TrimPrefix(ts.srv.URL, "http") + "/v1/connector-conns/" + id
+	ws, _, err := websocket.DefaultDialer.Dial(connURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ws.Close() }()
+	if c := <-ch; c == nil {
+		t.Fatal("first use got no socket")
+	} else {
+		defer func() { _ = c.Close() }()
+	}
+	if _, resp, err := websocket.DefaultDialer.Dial(connURL, nil); err == nil || resp == nil || resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("second use of one id: %v %v", resp, err)
+	}
+}
+
+func TestConnectorCounterReleasedAfterClose(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	dialInstance(t, ts, "prod", "inst-aaaaaaaaaaaa", `[{"name":"db","port":5432}]`, true)
+	id := ts.connectorID(t, "prod")
+	active := ts.s.connectors.counter(id)
+	c, result, err := ts.s.openPrivate(context.Background(), id, "db", 5432)
+	if err != nil {
+		t.Fatalf("open: %v %s", err, result)
+	}
+	if n := active.Load(); n != 1 {
+		t.Fatalf("open conns %d, want 1", n)
+	}
+	_ = c.Close()
+	_ = c.Close()
+	if n := active.Load(); n != 0 {
+		t.Fatalf("open conns after close %d, want 0", n)
+	}
+	if _, _, err := ts.s.openPrivate(context.Background(), id, "api", 443); err == nil {
+		t.Fatal("unannounced target opened")
+	}
+	if n := active.Load(); n != 0 {
+		t.Fatalf("open conns after a failed open %d, want 0", n)
+	}
+}

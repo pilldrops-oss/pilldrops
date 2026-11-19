@@ -233,3 +233,33 @@ func TestSessionURLsUseThePublicOrigin(t *testing.T) {
 		t.Errorf("behind the portal: %s", tun)
 	}
 }
+
+func TestConnectorKeyListAndRevoke(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"prod"}`)
+	id := ts.connectorID(t, "prod")
+	keyID := ts.jsonField(t, ts.do(t, "POST", "/v1/connectors/"+id+"/keys", ts.key, ""), "id")
+	list := func() string { return ts.body(ts.do(t, "GET", "/v1/connectors/"+id+"/keys", ts.key, "")) }
+	if got := list(); !strings.Contains(got, keyID) || strings.Contains(got, "pd_conn_") {
+		t.Fatalf("list: %s", got)
+	}
+	for _, c := range []struct {
+		method, path, key string
+		want              int
+	}{
+		{"GET", "/v1/connectors/" + id + "/keys", ts.otherOrgKey, http.StatusNotFound},
+		{"GET", "/v1/connectors/" + id + "/keys", ts.sandboxToken, http.StatusForbidden},
+		{"DELETE", "/v1/connectors/" + id + "/keys/" + keyID, ts.otherOrgKey, http.StatusNotFound},
+		{"DELETE", "/v1/connectors/" + id + "/keys/" + keyID, ts.sandboxToken, http.StatusForbidden},
+		{"DELETE", "/v1/connectors/" + id + "/keys/ck_nope", ts.key, http.StatusNotFound},
+		{"DELETE", "/v1/connectors/" + id + "/keys/" + keyID, ts.key, http.StatusNoContent},
+		{"DELETE", "/v1/connectors/" + id + "/keys/" + keyID, ts.key, http.StatusNotFound},
+	} {
+		if resp := ts.do(t, c.method, c.path, c.key, ""); resp.StatusCode != c.want {
+			t.Errorf("%s %s: %d, want %d", c.method, c.path, resp.StatusCode, c.want)
+		}
+	}
+	if got := list(); strings.Contains(got, keyID) {
+		t.Fatalf("revoked key still listed: %s", got)
+	}
+}
