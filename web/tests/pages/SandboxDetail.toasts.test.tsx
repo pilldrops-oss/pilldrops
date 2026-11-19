@@ -69,10 +69,18 @@ describe('sandbox detail success toasts (B22 toasts item)', () => {
     expect(await screen.findByText('TTL refreshed')).toBeInTheDocument()
   })
 
+  it('renews the time limit from the header', async () => {
+    vi.mocked(api.refreshSandbox).mockResolvedValue({ status: 'running' } as never)
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Renew' }))
+    expect(api.refreshSandbox).toHaveBeenCalledWith('sb1')
+    expect(await screen.findByText('TTL refreshed')).toBeInTheDocument()
+  })
+
   it('shows a success toast after saving the slug', async () => {
     vi.mocked(api.setSandboxSlug).mockResolvedValue({ ...sb, slug: 'myapp' })
     renderPage()
-    await userEvent.click(await screen.findByRole('tab', { name: 'Info' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }))
     const input = await screen.findByLabelText('Sandbox slug')
     await userEvent.type(input, 'myapp')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))

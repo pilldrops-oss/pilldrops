@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import SandboxDetail from '../../src/pages/SandboxDetail'
@@ -38,6 +38,10 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+async function openShare() {
+  await userEvent.click(await screen.findByRole('button', { name: /^Share/ }))
+}
+
 function renderPage() {
   return render(
     <ToastProvider>
@@ -56,10 +60,11 @@ describe('sandbox detail preview access', () => {
   it('flips the preview to public and re-reads the sandbox', async () => {
     vi.mocked(api.setPreviewAccess).mockResolvedValue({ id: 'sb1', public_preview: true, was: false })
     renderPage()
+    await openShare()
 
-    const select = await screen.findByRole('combobox', { name: 'Preview' })
-    expect(select).toHaveValue('token')
-    await userEvent.selectOptions(select, 'public')
+    const preview = screen.getByRole('group', { name: 'Preview' })
+    expect(within(preview).getByRole('button', { pressed: true })).toHaveTextContent('Token only')
+    await userEvent.click(within(preview).getByRole('button', { name: 'Public' }))
 
     await waitFor(() => expect(api.setPreviewAccess).toHaveBeenCalledWith('sb1', true))
     expect(await screen.findByText('Preview is now public')).toBeInTheDocument()
@@ -67,8 +72,8 @@ describe('sandbox detail preview access', () => {
 
   it('names the terminal and desktop ports as always needing a token', async () => {
     renderPage()
-    const select = await screen.findByRole('combobox', { name: 'Preview' })
-    expect(select.closest('label')?.getAttribute('title')).toMatch(/7681.*terminal.*6080.*desktop/)
+    await openShare()
+    expect(screen.getByText(/7681 \(terminal\)\s+and 6080 \(desktop\) always need one/)).toBeInTheDocument()
   })
 
   it('hides the control once the server says this caller may not change it', async () => {
@@ -76,18 +81,20 @@ describe('sandbox detail preview access', () => {
       new ApiError({ status: 404, method: 'POST', path: '/v1/sandboxes/sb1/preview-access', message: 'sandbox not found' }),
     )
     renderPage()
+    await openShare()
 
-    const select = await screen.findByRole('combobox', { name: 'Preview' })
-    await userEvent.selectOptions(select, 'public')
+    await userEvent.click(within(screen.getByRole('group', { name: 'Preview' })).getByRole('button', { name: 'Public' }))
 
-    await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Preview' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Preview' })).toBeNull())
   })
 
   it('is absent when the server has no public-preview concept', async () => {
     vi.mocked(api.getSandbox).mockResolvedValue({ ...sb, public_preview: undefined })
     renderPage()
     await screen.findByText('my-app', { selector: '.detail-name' })
-    expect(screen.queryByRole('combobox', { name: 'Preview' })).toBeNull()
+    await openShare()
+    expect(screen.getByRole('group', { name: 'API access' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Preview' })).toBeNull()
   })
 })
 

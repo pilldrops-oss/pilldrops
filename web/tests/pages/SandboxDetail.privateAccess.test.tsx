@@ -53,8 +53,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function renderPage() {
-  return render(
+async function renderPage() {
+  render(
     <ToastProvider>
       <ConfirmProvider>
         <MemoryRouter initialEntries={['/sandbox/sb1']}>
@@ -63,16 +63,18 @@ function renderPage() {
       </ConfirmProvider>
     </ToastProvider>,
   )
+  await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Access' }))
 }
 
 describe('sandbox detail private access', () => {
   it('lists a grant with its private name', async () => {
-    renderPage()
+    await renderPage()
     expect(await screen.findByText('db.private')).toBeInTheDocument()
   })
 
   it('adds a grant by picking a connector then a target', async () => {
-    renderPage()
+    await renderPage()
     await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Connector' }), 'prod')
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Target' }), 'db')
     await userEvent.click(screen.getByRole('button', { name: 'Add' }))
@@ -82,7 +84,7 @@ describe('sandbox detail private access', () => {
   it('disables Add while a grant is being submitted', async () => {
     let finish!: (g: typeof grant) => void
     vi.mocked(api.grantPrivate).mockReturnValue(new Promise(resolve => { finish = resolve }))
-    renderPage()
+    await renderPage()
     await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Connector' }), 'prod')
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Target' }), 'db')
     const add = screen.getByRole('button', { name: 'Add' })
@@ -95,7 +97,7 @@ describe('sandbox detail private access', () => {
   })
 
   it('asks before removing a grant', async () => {
-    renderPage()
+    await renderPage()
     await userEvent.click(await screen.findByRole('button', { name: 'Remove db' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Confirm' }))
     await waitFor(() => expect(api.revokePrivate).toHaveBeenCalledWith('sb1', 'prod', 'db'))
@@ -103,14 +105,14 @@ describe('sandbox detail private access', () => {
 
   it('explains an unsupported node and disables Add', async () => {
     vi.mocked(api.listPrivateGrants).mockResolvedValue({ grants: [], supported: false })
-    renderPage()
+    await renderPage()
     expect(await screen.findByText("Private access is not available on this sandbox's node.")).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled()
   })
 
   it('shows a member the list without Add or Remove', async () => {
     vi.mocked(useOrgRole).mockReturnValue('member')
-    renderPage()
+    await renderPage()
     await screen.findByText('db.private')
     expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Remove db' })).not.toBeInTheDocument()
@@ -120,7 +122,7 @@ describe('sandbox detail private access', () => {
     vi.mocked(api.grantPrivate).mockRejectedValue(
       new ApiError({ status: 409, code: 'private_name_taken', method: 'POST', path: '/v1/sandboxes/sb1/private', message: 'db.private is already granted from another connector' }),
     )
-    renderPage()
+    await renderPage()
     await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Connector' }), 'prod')
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Target' }), 'db')
     await userEvent.click(screen.getByRole('button', { name: 'Add' }))
@@ -131,7 +133,7 @@ describe('sandbox detail private access', () => {
     vi.mocked(api.listPrivateGrants).mockRejectedValue(
       new ApiError({ status: 501, code: 'no_private_ingress', method: 'GET', path: '/v1/sandboxes/sb1/private', message: 'off' }),
     )
-    renderPage()
+    await renderPage()
     await waitFor(() => expect(api.listPrivateGrants).toHaveBeenCalled())
     await screen.findByText('my-app')
     expect(screen.queryByText('Private access')).not.toBeInTheDocument()
@@ -139,19 +141,35 @@ describe('sandbox detail private access', () => {
 
   it('points to Connectors when there are none', async () => {
     vi.mocked(api.listConnectors).mockResolvedValue([])
-    renderPage()
+    await renderPage()
     expect(await screen.findByText(/No connectors yet/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Create one' })).toHaveAttribute('href', '/connectors')
   })
 
   it('toasts a failed connector fetch', async () => {
     vi.mocked(api.listConnectors).mockRejectedValue(new Error('connectors down'))
-    renderPage()
+    await renderPage()
     expect(await screen.findByText(/connectors down/)).toBeInTheDocument()
   })
 
+  it('opens from the Share menu', async () => {
+    render(
+      <ToastProvider>
+        <ConfirmProvider>
+          <MemoryRouter initialEntries={['/sandbox/sb1']}>
+            <Routes><Route path="/sandbox/:id" element={<SandboxDetail />} /></Routes>
+          </MemoryRouter>
+        </ConfirmProvider>
+      </ToastProvider>,
+    )
+    await userEvent.click(await screen.findByRole('button', { name: /^Share/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Private network access…' }))
+    expect(await screen.findByText('db.private')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true')
+  })
+
   it('keeps the grant when removal is cancelled', async () => {
-    renderPage()
+    await renderPage()
     await userEvent.click(await screen.findByRole('button', { name: 'Remove db' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
     expect(api.revokePrivate).not.toHaveBeenCalled()

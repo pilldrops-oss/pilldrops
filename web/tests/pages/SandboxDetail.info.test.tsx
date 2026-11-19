@@ -76,7 +76,7 @@ describe('sandbox detail (U4)', () => {
     vi.mocked(api.getSandbox).mockResolvedValue({ ...sb, boot_type: '', boot_ms: 0 })
     renderPage({ sandbox: { ...sb, boot_type: 'cold', boot_ms: 999 } })
     await waitFor(() => expect(api.getSandbox).toHaveBeenCalled())
-    await userEvent.click(screen.getByRole('tab', { name: 'Info' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'Settings' }))
     const bootType = await screen.findByText('Boot type')
     expect(bootType.closest('.info-row')?.textContent).toContain('—')
     expect(screen.getByText('Boot time').closest('.info-row')?.textContent).toContain('—')
@@ -93,16 +93,18 @@ describe('sandbox detail (U4)', () => {
   it('names the API-access control for what it does', async () => {
     vi.mocked(api.setSandboxVisibility).mockResolvedValue({} as never)
     renderPage()
-    const access = await screen.findByRole('combobox', { name: /API access/ })
-    await userEvent.selectOptions(access, 'private')
+    await userEvent.click(await screen.findByRole('button', { name: /^Share/ }))
+    const access = screen.getByRole('group', { name: 'API access' })
+    await userEvent.click(within(access).getByRole('button', { name: 'Only the key that created it' }))
     await waitFor(() => expect(api.setSandboxVisibility).toHaveBeenCalledWith('sb1', 'private'))
   })
 
-  it('words API access the same in the header control and on Info', async () => {
+  it('words API access the same in the Share menu and on Overview', async () => {
     renderPage()
-    const access = await screen.findByRole('combobox', { name: /API access/ })
-    const chosen = within(access).getByRole<HTMLOptionElement>('option', { selected: true }).textContent
-    await userEvent.click(screen.getByRole('tab', { name: 'Info' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Share/ }))
+    const access = screen.getByRole('group', { name: 'API access' })
+    const chosen = within(access).getByRole('button', { pressed: true }).textContent
+    await userEvent.click(screen.getByRole('tab', { name: 'Settings' }))
     expect(screen.getByText('API access', { selector: '.info-key' }).closest('.info-row')?.textContent).toContain(chosen)
   })
 
