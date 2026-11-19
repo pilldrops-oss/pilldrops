@@ -137,13 +137,14 @@ func (s *Store) SetAgentWebhookEnabled(ctx context.Context, orgID, sandboxID, id
 }
 
 // ListOrgWebhookDeliveries returns the recent deliveries of an org's
-// sandbox-event hooks, in every state, newest first.
+// sandbox-event hooks, in every state, newest first. A deleted hook keeps its
+// history: rows are picked by event name, which only org hooks deliver.
 func (s *Store) ListOrgWebhookDeliveries(ctx context.Context, orgID string, limit int) ([]AgentWebhookDelivery, error) {
 	rows, err := s.query(ctx, `SELECT id, webhook_id, sandbox_id, org_id, event_type,
 		event_seq, attempts, state, last_status, last_error, next_at, created_at, updated_at
 		FROM agent_webhook_deliveries
-		WHERE org_id = ? AND webhook_id IN (SELECT id FROM agent_webhooks WHERE org_id = ? AND sandbox_id = '')
-		ORDER BY created_at DESC, id DESC LIMIT ?`, orgID, orgID, limit)
+		WHERE org_id = ? AND event_type LIKE 'sandbox.%'
+		ORDER BY created_at DESC, id DESC LIMIT ?`, orgID, limit)
 	if err != nil {
 		return nil, err
 	}

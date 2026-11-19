@@ -119,3 +119,63 @@ func checkLifecycleEventFanOut(t *testing.T, s *Store, org string) {
 		t.Errorf("an old time-keyed delivery reads back as %d %q (%v), want %d python", gotAt, template, err, at)
 	}
 }
+
+func TestADeletedHookKeepsItsDeliveryHistory(t *testing.T) {
+	t.Run("sqlite", func(t *testing.T) {
+		checkDeliveryHistoryOutlivesTheHook(t, openTempStore(t), "acme", "other")
+	})
+	t.Run("postgres", func(t *testing.T) {
+		dsn := os.Getenv("SANDBOXD_TEST_POSTGRES_URL")
+		if dsn == "" {
+			t.Skip("set SANDBOXD_TEST_POSTGRES_URL to run Postgres tests")
+		}
+		s, err := Open(t.Context(), dsn)
+		if err != nil {
+			t.Fatalf("open postgres: %v", err)
+		}
+		defer s.Close()
+		org, other := fmt.Sprintf("hist-%d", time.Now().UnixNano()), fmt.Sprintf("hist-other-%d", time.Now().UnixNano())
+		t.Cleanup(func() {
+			for _, table := range []string{"agent_webhook_deliveries", "agent_webhooks", "sandbox_events"} {
+				_, _ = s.db.Exec(s.rebind(`DELETE FROM `+table+` WHERE org_id IN (?, ?)`), org, other)
+			}
+		})
+		checkDeliveryHistoryOutlivesTheHook(t, s, org, other)
+	})
+}
+
+func checkDeliveryHistoryOutlivesTheHook(t *testing.T, s *Store, org, other string) {
+	t.Helper()
+	ctx := t.Context()
+	hook := func(orgID, sandboxID string, events ...string) string {
+		t.Helper()
+		w, err := s.CreateAgentWebhook(ctx, AgentWebhook{OrgID: orgID, SandboxID: sandboxID, URL: "https://example.invalid/hook", Events: events}, "secret", 0)
+		if err != nil {
+			t.Fatalf("create hook: %v", err)
+		}
+		return w.ID
+	}
+	orgHook := hook(org, "", "sandbox.created")
+	agentHook := hook(org, "sb-agent", "turn.completed")
+	hook(other, "", "sandbox.created")
+	for _, o := range []string{org, other} {
+		if err := s.RecordEvent(ctx, EventRecord{OrgID: o, SandboxID: "sb-" + o, Event: "created", At: time.Now().Unix()}); err != nil {
+			t.Fatalf("record event: %v", err)
+		}
+	}
+	if _, _, err := s.EnqueueDelivery(ctx, AgentWebhookDelivery{WebhookID: agentHook, SandboxID: "sb-agent", OrgID: org,
+		EventType: "turn.completed", EventSeq: 1, NextAt: time.Now()}); err != nil {
+		t.Fatalf("enqueue agent delivery: %v", err)
+	}
+	if err := s.DeleteAgentWebhook(ctx, org, "", orgHook); err != nil {
+		t.Fatalf("delete hook: %v", err)
+	}
+
+	got, err := s.ListOrgWebhookDeliveries(ctx, org, 50)
+	if err != nil {
+		t.Fatalf("list deliveries: %v", err)
+	}
+	if len(got) != 1 || got[0].WebhookID != orgHook || got[0].EventType != "sandbox.created" {
+		t.Fatalf("deliveries after deleting the hook = %+v, want only its one sandbox.created delivery", got)
+	}
+}
