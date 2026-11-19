@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
@@ -119,5 +121,33 @@ func TestPrivSpliceKeepsReplyAfterGuestHalfClose(t *testing.T) {
 	got, err := io.ReadAll(client)
 	if err != nil || string(got) != "pong" {
 		t.Fatalf("client got %q %v", got, err)
+	}
+}
+
+func TestPrivateGateLimits(t *testing.T) {
+	t.Parallel()
+	g := newPrivateGate()
+	for i := range privateOpensPerSecond {
+		if !g.enter() {
+			t.Fatalf("open %d refused inside the burst", i)
+		}
+	}
+	if g.enter() {
+		t.Fatal("open past the per-second limit allowed")
+	}
+
+	g = newPrivateGate()
+	g.opens = rate.NewLimiter(rate.Inf, 0)
+	for range maxPrivateConnsPerSandbox {
+		if !g.enter() {
+			t.Fatal("refused below the concurrent limit")
+		}
+	}
+	if g.enter() {
+		t.Fatal("connection past the concurrent limit allowed")
+	}
+	g.leave()
+	if !g.enter() {
+		t.Fatal("a closed connection did not free its slot")
 	}
 }

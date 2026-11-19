@@ -35,7 +35,14 @@ type privateConnSet struct {
 	conns      map[*privateConn]struct{}
 	perSandbox map[string]int
 	limits     map[string]*rate.Limiter
+	refused    map[string]*privateRefusals
 	swept      time.Time
+}
+
+// privateRefusals counts a sandbox's rate-limited opens since its last warning.
+type privateRefusals struct {
+	n      int
+	warned time.Time
 }
 
 // add registers c, or reports false when its sandbox already holds the maximum.
@@ -82,6 +89,11 @@ func (p *privateConnSet) allow(sandboxID string) bool {
 				delete(p.limits, id)
 			}
 		}
+		for id, f := range p.refused {
+			if now.Sub(f.warned) >= time.Minute {
+				delete(p.refused, id)
+			}
+		}
 	}
 	l := p.limits[sandboxID]
 	if l == nil {
@@ -89,6 +101,28 @@ func (p *privateConnSet) allow(sandboxID string) bool {
 		p.limits[sandboxID] = l
 	}
 	return l.Allow()
+}
+
+// refuse counts one rate-limited open and returns how many to warn about:
+// the count since the sandbox's last warning, or 0 within a minute of it.
+func (p *privateConnSet) refuse(sandboxID string, now time.Time) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.refused == nil {
+		p.refused = map[string]*privateRefusals{}
+	}
+	f := p.refused[sandboxID]
+	if f == nil {
+		f = &privateRefusals{}
+		p.refused[sandboxID] = f
+	}
+	f.n++
+	if !f.warned.IsZero() && now.Sub(f.warned) < time.Minute {
+		return 0
+	}
+	n := f.n
+	f.n, f.warned = 0, now
+	return n
 }
 
 // closeFor closes the sandbox's connections to target; an empty target means all of them.
@@ -184,6 +218,15 @@ func (s *Server) handlePrivateDial(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	sbID, target := q.Get("sandbox"), q.Get("target")
 	port, _ := strconv.Atoi(q.Get("port"))
+	// Before any database read, and logged only in aggregate, so a connect
+	// loop costs the control plane no queries and the log no rows.
+	if !s.privateConns.allow(sbID) {
+		if n := s.privateConns.refuse(sbID, s.now()); n > 0 {
+			s.log().Warn("private opens rate limited", "component", "private", "sandbox", sbID, "node", nodeID, "refused", n)
+		}
+		writeErr(w, http.StatusTooManyRequests, "too many new private connections from this sandbox")
+		return
+	}
 	rec, found, err := st.SandboxByID(r.Context(), sbID)
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
@@ -226,11 +269,6 @@ func (s *Server) handlePrivateDial(w http.ResponseWriter, r *http.Request) {
 	if !portOK {
 		logRow("denied")
 		writeErr(w, http.StatusForbidden, "not granted")
-		return
-	}
-	if !s.privateConns.allow(sbID) {
-		logRow("rate_limited")
-		writeErr(w, http.StatusTooManyRequests, "too many new private connections from this sandbox")
 		return
 	}
 	slot := &privateSlot{}

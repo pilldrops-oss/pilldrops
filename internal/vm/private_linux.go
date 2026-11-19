@@ -25,6 +25,7 @@ type liveProxy struct {
 	l         net.Listener
 	routes    map[string]privateRoute // by IP
 	conns     map[net.Conn]*privConn  // by sandbox side
+	gate      *privateGate
 }
 
 // privConn is one proxied connection: its target, and its upstream once dialled.
@@ -107,7 +108,7 @@ func (m *Manager) SetPrivate(id, sandboxID string, ts []sandbox.PrivateTarget) e
 			privMu.Unlock()
 			return fmt.Errorf("netns %s: private proxy: %w", sb.NetNS, err)
 		}
-		p = &liveProxy{ns: sb.NetNS, sandboxID: sandboxID, l: l, conns: map[net.Conn]*privConn{}}
+		p = &liveProxy{ns: sb.NetNS, sandboxID: sandboxID, l: l, conns: map[net.Conn]*privConn{}, gate: newPrivateGate()}
 		privLive[id] = p
 		go m.servePrivate(id, p)
 	}
@@ -156,7 +157,7 @@ func (m *Manager) proxyPrivate(id string, p *liveProxy, c net.Conn) {
 	}
 	privMu.Lock()
 	r, ok := privateRouteTo(p.routes, dst)
-	ok = ok && privLive[id] == p
+	ok = ok && privLive[id] == p && p.gate.enter()
 	if ok {
 		p.conns[c] = &privConn{target: r.Target}
 	}
@@ -167,6 +168,7 @@ func (m *Manager) proxyPrivate(id string, p *liveProxy, c net.Conn) {
 	defer func() {
 		privMu.Lock()
 		delete(p.conns, c)
+		p.gate.leave()
 		privMu.Unlock()
 	}()
 	up, err := m.config.PrivateDial(context.Background(), p.sandboxID, r.Target.Name, r.Target.Port)

@@ -8,13 +8,41 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/time/rate"
+
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
 const (
 	privateProxyPort = 18445
 	privateSubnet    = "192.168.31.0/24"
+	// The control plane holds the same limits; refusing here keeps a connect
+	// loop in one sandbox from reaching it at all.
+	maxPrivateConnsPerSandbox = 100
+	privateOpensPerSecond     = 50
 )
+
+// privateGate is one sandbox's private connection limits on the node. Not
+// safe for concurrent use: callers hold privMu.
+type privateGate struct {
+	open  int
+	opens *rate.Limiter
+}
+
+func newPrivateGate() *privateGate {
+	return &privateGate{opens: rate.NewLimiter(privateOpensPerSecond, privateOpensPerSecond)}
+}
+
+// enter takes a connection slot and an open token, or reports false.
+func (g *privateGate) enter() bool {
+	if g.open >= maxPrivateConnsPerSandbox || !g.opens.Allow() {
+		return false
+	}
+	g.open++
+	return true
+}
+
+func (g *privateGate) leave() { g.open-- }
 
 // privateRoute is one granted target at its sandbox-local address. The
 // 192.168.31.0/24 range exists only inside the sandbox's own namespace.

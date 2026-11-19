@@ -257,12 +257,34 @@ func TestPrivateDialOpensPerSecondAnswers429(t *testing.T) {
 	cid := ts.connectorID(t, "prod")
 	waitFor(t, func() bool {
 		rows, _ := ts.s.st.Load().PrivateConns(t.Context(), cid, 10)
-		results := map[string]int{}
-		for _, r := range rows {
-			results[r.Result]++
-		}
-		return len(rows) == 2 && results["ok"] == 1 && results["rate_limited"] == 1
+		return len(rows) == 1 && rows[0].Result == "ok"
 	})
+	// The limit comes before the sandbox lookup: an unknown sandbox gets 429, not 403, once over it.
+	if got := ts.nodeDialStatus(t, node.key, "sb-none", "db", 5432); got != "403" {
+		t.Fatalf("first open for an unknown sandbox: %s", got)
+	}
+	if got := ts.nodeDialStatus(t, node.key, "sb-none", "db", 5432); got != "429" {
+		t.Fatalf("second open for an unknown sandbox: %s", got)
+	}
+}
+
+func TestPrivateConnSetRefuseWarnsOncePerMinute(t *testing.T) {
+	var set privateConnSet
+	t0 := time.Unix(1000, 0)
+	if n := set.refuse("a", t0); n != 1 {
+		t.Fatalf("first refusal: %d, want 1", n)
+	}
+	for i := 1; i <= 3; i++ {
+		if n := set.refuse("a", t0.Add(time.Duration(i)*time.Second)); n != 0 {
+			t.Fatalf("refusal within the minute warned: %d", n)
+		}
+	}
+	if n := set.refuse("b", t0); n != 1 {
+		t.Fatalf("another sandbox shares the warning: %d", n)
+	}
+	if n := set.refuse("a", t0.Add(time.Minute)); n != 4 {
+		t.Fatalf("after a minute: %d, want the 4 refusals since the last warning", n)
+	}
 }
 
 func TestPrivateConnSetSweepsIdleLimiters(t *testing.T) {
