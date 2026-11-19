@@ -58,6 +58,9 @@ var RetentionTargets = []RetentionTarget{
 	{
 		Name: "audit", DefaultDays: 365, table: "audit_log", column: "at",
 	},
+	{
+		Name: "private_connections", DefaultDays: 365, table: "private_connections", column: "started_at",
+	},
 }
 
 // PruneOlderThan deletes one target's rows older than a unix timestamp and

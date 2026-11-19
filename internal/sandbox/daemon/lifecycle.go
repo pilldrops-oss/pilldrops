@@ -302,6 +302,9 @@ func (d *Daemon) ResumeTimed(ctx context.Context, id string) (took time.Duration
 	if err := d.pushNetworks(ctx, id); err != nil {
 		d.log().Warn("resume: could not restore network membership", "sandbox_id", id, "error", err)
 	}
+	if err := d.pushPrivate(ctx, id); err != nil {
+		d.log().Warn("resume: could not restore private targets", "sandbox_id", id, "error", err)
+	}
 	// Relaunch the published app; a failure is logged, not fatal. A memory
 	// restore brought it back with the rest of the guest, so relaunching would
 	// leave two copies fighting over the port — the same guard RestoreCheckpoint

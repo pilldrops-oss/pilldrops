@@ -120,7 +120,7 @@ func TestHostRuleset6DropsBothDirectionsOnSandboxVeths(t *testing.T) {
 // An ip6 match in an `ip` family table is an nft load error that takes every sandbox's egress down.
 func TestIPv4TableStaysIPv4(t *testing.T) {
 	for name, rs := range map[string]string{
-		"in-ns": buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), "", "", false),
+		"in-ns": buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), "", "", false, false),
 		"host":  buildNetNSHostRuleset("eno1"),
 	} {
 		if strings.Contains(rs, "ip6 ") {

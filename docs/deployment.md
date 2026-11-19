@@ -426,6 +426,43 @@ open connections within 5 seconds.
 One replica carries all share traffic, and bandwidth is not capped per link. Each
 link's byte totals are in the `shares` table.
 
+## Private access
+
+Private access lets a sandbox reach a service on a customer's own network
+(a database, an internal API) without that network opening an inbound port. A
+connector program runs on that network and dials out to the control plane. An
+admin grants a sandbox a target the connector announced, and the sandbox reaches
+it as `<target>.private`, or by its real hostname when the connector gave one.
+
+1. On exactly one orchestrator replica set `PRIVATE_INGRESS=1`. It holds the
+   connectors' tunnels. On every other replica set `PRIVATE_INGRESS=remote`: they
+   answer the API but run no hub. With neither set, creating a connector or a
+   session, granting a sandbox a target, and listing its grants answer 501 `no_private_ingress`, and
+   `private_access` in `GET /v1/capabilities` is false.
+2. The portal forwards the connector API to its `PORTAL_ORCHESTRATOR_URL`, including
+   the two sockets the connector CLI opens, `GET /v1/connectors/{id}/tunnel` and
+   `GET /v1/connector-conns/{conn}`, with their WebSocket upgrades. That URL must
+   reach the replica with `PRIVATE_INGRESS=1`. Nodes open
+   `GET /internal/private/dial` with their node key straight to that replica, not
+   through the portal. Any other proxy or load balancer on these paths must send
+   them to that replica and pass WebSocket upgrades. A session's tunnel URLs use
+   `PORTAL_ORIGIN` when it is set, else the forwarded or direct host, so set
+   `PORTAL_ORIGIN` on the orchestrator when a portal fronts it.
+3. Nodes need `ORCHESTRATOR_URL` (`http` or `https`) and `NODE_API_KEY`, which
+   a joined node already has, to reach that dial route. Only nodes with
+   per-sandbox network namespaces advertise private access; a grant on a sandbox
+   placed elsewhere is refused with 409 `private_access_unsupported`.
+4. Connectors are outbound-only: the customer's network opens no port. A connector
+   authenticates with a `pd_conn_` key created through
+   `POST /v1/connectors/{id}/keys`.
+
+Every connection is logged per connector (`GET /v1/connectors/{id}/connections`)
+and kept for 365 days by default; set
+`PRIVATE_CONNECTIONS_RETAIN_DAYS` to change it. A connector may not announce a hostname under this
+platform's own domains or `localhost`; such a hello is refused. Limits: 10
+connectors per org, 50 targets and 5 instances per connector, 100 concurrent
+connections per sandbox, 1,000 per connector.
+
 ## Environment
 
 ### Control plane (`cmd/orchestrator`)

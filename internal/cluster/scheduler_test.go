@@ -275,6 +275,25 @@ func TestPickFiltersByTagNetworks(t *testing.T) {
 	}
 }
 
+func TestPickSkipsNodesWithoutPrivateAccess(t *testing.T) {
+	now := time.Now()
+	ttl := 30 * time.Second
+	plain := runtimeNode("plain", "firecracker", 8000, 3000, 5000, now) // tighter fit, wins by default
+	private := runtimeNode("private", "firecracker", 64000, 40000, 20000, now)
+	private.PrivateAccess = true
+
+	if got := Pick([]*Node{plain, private}, Request{MemMB: 1024}, now, ttl); got == nil || got.ID != "plain" {
+		t.Fatalf("Pick(no private access) = %v, want plain (best fit, control)", got)
+	}
+	got := Pick([]*Node{plain, private}, Request{MemMB: 1024, PrivateAccess: true}, now, ttl)
+	if got == nil || got.ID != "private" {
+		t.Fatalf("Pick(PrivateAccess) = %v, want private", got)
+	}
+	if got := Pick([]*Node{plain}, Request{MemMB: 1024, PrivateAccess: true}, now, ttl); got != nil {
+		t.Fatalf("Pick(PrivateAccess) with no capable node = %v, want nil", got)
+	}
+}
+
 // Best fit still packs, but not onto a node whose CPU is already saturated
 // while a cooler one has room; with no cool node the hot one still serves.
 func TestPickPassesOverACPUHotNode(t *testing.T) {

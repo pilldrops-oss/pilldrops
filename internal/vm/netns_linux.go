@@ -204,7 +204,7 @@ func setupNetNS(sandboxID string, uid int, tapName string, guestIP net.IP, rules
 	// Not optional: host chains only see the post-SNAT source, so every egress
 	// control must live in here. A new namespace is always untagged: membership
 	// is pushed after the boot, by SetNetworks, which re-renders this.
-	ruleset := buildNetNSRuleset(vn, tapName, hostIP, nsIP, guestIP, policy, divert, false)
+	ruleset := buildNetNSRuleset(vn, tapName, hostIP, nsIP, guestIP, policy, divert, false, false)
 	if err := applyRulesetInNS("/var/run/netns/"+name, ruleset); err != nil {
 		return nil, err
 	}
@@ -419,6 +419,7 @@ func teardownNetNS(name string) {
 	// membership here is what makes a reclaimed slot unreachable by its
 	// predecessor's peers. A caller that forgot to clear it cannot leave one.
 	forgetTagMemberByNS(name)
+	stopPrivateByNS(name)
 	// Same argument: the name layer's listener lives in this namespace, and a
 	// listener outliving it would hold a socket in a namespace nothing can
 	// reach and a policy for a sandbox that no longer exists.

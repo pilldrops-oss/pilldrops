@@ -1592,6 +1592,610 @@
         }
       }
     },
+    "/v1/connectors": {
+      "post": {
+        "summary": "Create a connector",
+        "description": "A connector is a small program on your own network that dials out to this control plane and announces the targets (name, port, optional hostname) a sandbox may be granted. It opens no inbound port. A sandbox's own key gets 403. The name is a lowercase DNS label, unique in the org. Needs a private ingress replica, else 501.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Lowercase DNS label."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Connector"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "The org already has a connector with this name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The org is at its limit of 10 connectors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "This deployment has no private ingress (code `no_private_ingress`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List connectors",
+        "description": "The org's connectors with whether an instance is online and the targets announced so far. The connector program does not announce IP addresses as hostnames.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connectors": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Connector"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/connectors/{id}": {
+      "delete": {
+        "summary": "Remove a connector",
+        "description": "A sandbox's own key gets 403. Its keys stop working, its instances are disconnected, and every sandbox granted one of its targets loses access.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Connector id."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed."
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/connectors/{id}/connections": {
+      "get": {
+        "summary": "Connection log for a connector",
+        "description": "The 200 most recent private connections through this connector, newest first. Rows are kept 365 days.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Connector id."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connections": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PrivateConnection"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/connectors/{id}/keys": {
+      "post": {
+        "summary": "Create a connector key",
+        "description": "A sandbox's own key gets 403. The `pd_conn_` key is in the reply once and cannot be read again. A connector's key can only open that connector's tunnel.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Connector id."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "key",
+                    "created_at"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "Shown once."
+                    },
+                    "created_at": {
+                      "type": "integer",
+                      "description": "Unix seconds."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "summary": "List a connector's keys",
+        "description": "A sandbox's own key gets 403. Key secrets are never returned.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Connector id."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ConnectorKey"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/connectors/{id}/keys/{key}": {
+      "delete": {
+        "summary": "Revoke a connector key",
+        "description": "Instances connected with the key are disconnected, and its tunnel tokens stop working. A sandbox's own key gets 403.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Connector id."
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Key id."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked."
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/connectors/session": {
+      "post": {
+        "summary": "Open a connector session",
+        "description": "Returns the tunnel URL and a short-lived tunnel token a connector uses to connect. Send either a `pd_conn_` connector key (the name is optional and must match the key's connector), or an API key: then the connector is created first if the name is new, under the rules of POST /v1/connectors.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Connector name."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "tunnel_url": {
+                      "type": "string"
+                    },
+                    "conn_url": {
+                      "type": "string"
+                    },
+                    "tunnel_token": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "With an API key, the connector could not be created because the name is already taken.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The org is at its limit of 10 connectors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "This deployment has no private ingress (code `no_private_ingress`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/private": {
+      "post": {
+        "summary": "Let a sandbox reach a private target",
+        "description": "A sandbox's own key gets 403. Inside the sandbox the target answers at `<target>.private` on its own port, and at its real hostname when the connector announced one. A sandbox keeps one target per name: a second grant with the same target name is 409 `private_name_taken`. A paused sandbox keeps the grant and applies it on resume. 409 `private_access_unsupported` when this sandbox's node has no per-sandbox network namespaces.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Sandbox id."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "connector",
+                  "target"
+                ],
+                "properties": {
+                  "connector": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Granted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connector": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "type": "string"
+                    },
+                    "names": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Names the target answers to inside the sandbox."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "The sandbox or connector does not exist, or the connector has not announced the target.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Code `private_name_taken` or `private_access_unsupported`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "This deployment has no private ingress (code `no_private_ingress`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The sandbox's node did not take the grant (code `private_push_failed`); the grant is rolled back.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List a sandbox's private grants",
+        "description": "`supported` is false when the sandbox's node cannot carry private connections.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Sandbox id."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "grants": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PrivateGrant"
+                      }
+                    },
+                    "supported": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "description": "This deployment has no private ingress (code `no_private_ingress`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/private/{connector}/{target}": {
+      "delete": {
+        "summary": "Take a private target away from a sandbox",
+        "description": "A sandbox's own key gets 403. Open connections to the target close.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Sandbox id."
+          },
+          {
+            "name": "connector",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Connector name."
+          },
+          {
+            "name": "target",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Target name."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked."
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/capabilities": {
       "get": {
         "summary": "What this node \u2014 or this fleet \u2014 can actually do",
@@ -1776,6 +2380,18 @@
           "start": {
             "type": "string",
             "description": "Long-running start command (deploy); its port is published."
+          },
+          "private": {
+            "type": "array",
+            "description": "Targets behind a connector to grant the new sandbox, all or nothing: if any grant fails the sandbox is removed. Same rules as POST /v1/sandboxes/{id}/private.",
+            "items": {
+              "type": "object",
+              "required": ["connector", "target"],
+              "properties": {
+                "connector": {"type": "string"},
+                "target": {"type": "string"}
+              }
+            }
           }
         }
       },
@@ -2200,6 +2816,10 @@
             "type": "boolean",
             "description": "A local app can be given a public link: a share domain is set and a replica is its ingress."
           },
+          "private_access": {
+            "type": "boolean",
+            "description": "Sandboxes can be granted targets behind a connector: a replica runs the connector hub and an online node has per-sandbox network namespaces."
+          },
           "nodes": {
             "$ref": "#/components/schemas/FleetNodeCounts"
           }
@@ -2238,6 +2858,126 @@
           "expires_at": {
             "type": "integer",
             "description": "Unix seconds."
+          }
+        }
+      },
+      "Connector": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "last_seen_at": {
+            "type": "integer",
+            "description": "Unix seconds, 0 if never connected."
+          },
+          "instances": {
+            "type": "integer",
+            "description": "Instances online now."
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "port"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer"
+                },
+                "host": {
+                  "type": "string",
+                  "description": "Real hostname, when the connector announced one."
+                }
+              }
+            }
+          }
+        }
+      },
+      "ConnectorKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "last_used_at": {
+            "type": "integer",
+            "description": "Unix seconds, 0 if never used."
+          }
+        }
+      },
+      "PrivateGrant": {
+        "type": "object",
+        "properties": {
+          "connector": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "online": {
+            "type": "boolean",
+            "description": "An instance of the connector is connected."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "PrivateConnection": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sandbox_id": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "ended_at": {
+            "type": "integer",
+            "description": "Unix seconds, 0 while open."
+          },
+          "bytes_in": {
+            "type": "integer"
+          },
+          "bytes_out": {
+            "type": "integer"
+          },
+          "result": {
+            "type": "string"
           }
         }
       },

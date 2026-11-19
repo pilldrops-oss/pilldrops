@@ -72,7 +72,7 @@ func Serve(l net.Listener, p Policy) {
 
 // handle decides and splices one diverted connection.
 func handle(c net.Conn, p Policy) {
-	dst, err := originalDst(c)
+	dst, err := OriginalDst(c)
 	if err != nil {
 		// Without the pre-NAT destination there is nothing to judge, and
 		// guessing would be a hole. Closed, and the guest sees a reset.

@@ -358,22 +358,28 @@ func (s *Server) registerArtifactReadRoutes(mux *http.ServeMux) {
 // still cryptographically valid, derived from NODE_KEY_SECRET and never
 // rotated by removal, so removed_nodes is the only thing that revokes it.
 func (s *Server) authNodeKey(r *http.Request) (ok, removed bool) {
+	nodeID, ok := s.authNode(r)
+	return ok, !ok && nodeID != ""
+}
+
+// authNode returns the registered node whose key the request carries. The
+// operator key is ok with an empty id; a removed node's key returns its id with
+// ok false, so a caller can tell revoked from unknown.
+func (s *Server) authNode(r *http.Request) (nodeID string, ok bool) {
 	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if got == "" {
-		return false, false
+		return "", false
 	}
-	matchedID := ""
 	for _, n := range s.reg.Nodes() {
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.nodeKeyFor(n.ID, n.Zone))) == 1 {
-			ok = true
-			matchedID = n.ID
+			nodeID = n.ID
 		}
 	}
-	if ok && s.nodeRemoved(r.Context(), matchedID) {
-		ok, removed = false, true
-	}
 	if s.apiKey != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.apiKey)) == 1 {
-		ok, removed = true, false
+		return "", true
 	}
-	return ok, removed
+	if nodeID == "" {
+		return "", false
+	}
+	return nodeID, !s.nodeRemoved(r.Context(), nodeID)
 }

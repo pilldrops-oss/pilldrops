@@ -223,6 +223,7 @@ export interface CustomDomain {
 export interface Capabilities {
   /** True only once PORTAL_SANDBOX_DOMAIN gives custom domains a CNAME target. */
   custom_domains: boolean
+  private_access?: boolean
 }
 
 /** Webhook is one of the org's sandbox-event webhooks; the signing secret is only in the create reply. */
@@ -738,3 +739,10 @@ export interface Volume {
   attached_to?: string
   created_at: number
 }
+
+export interface ConnectorTarget { name: string; port: number; host?: string }
+export interface Connector { id: string; name: string; created_at: number; last_seen_at: number; instances: number; online: boolean; targets: ConnectorTarget[] }
+export interface ConnectorKey { id: string; created_at: number; last_used_at: number }
+export interface PrivateGrant { connector: string; target: string; created_at: number; online: boolean; names: string[] }
+export interface PrivateConnection { id: string; sandbox_id: string; target: string; started_at: number; ended_at: number; bytes_in: number; bytes_out: number; result: 'ok' | 'denied' | 'offline' | 'dial_failed' | 'rate_limited' }
+export type OrgRole = 'owner' | 'admin' | 'member'

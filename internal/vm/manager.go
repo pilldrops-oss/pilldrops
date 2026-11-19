@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,6 +52,9 @@ type Config struct {
 	// fcbr0 bridge. The node writes the egress firewall into each namespace, since
 	// host FORWARD/INPUT rules never see the post-SNAT traffic.
 	NetNS bool
+	// PrivateDial opens a sandbox's connection to a granted private target
+	// through the control plane; nil on a node with none, which refuses grants.
+	PrivateDial func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error)
 }
 
 type Sandbox struct {

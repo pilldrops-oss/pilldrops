@@ -12,6 +12,7 @@ import (
 	"time"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
 // Fake is an in-memory Runtime. Boot returns a *fakeInstance that keeps files
@@ -27,6 +28,12 @@ type Fake struct {
 	// record what it was asked for. False (the default) is a runtime that
 	// refuses a create naming networks.
 	TagNetworks bool
+	// PrivateAccess makes Capabilities advertise private access and
+	// SetPrivate record into Private. False refuses SetPrivate.
+	PrivateAccess bool
+	// Private is the last target list pushed per sandbox; a sandbox whose list
+	// was emptied has no entry. Tests read it directly, once pushes are done.
+	Private map[string][]sandbox.PrivateTarget
 	// EgressPolicy makes Capabilities advertise egress enforcement. False (the
 	// default) is a runtime that refuses a create carrying network rules.
 	EgressPolicy bool
@@ -87,6 +94,7 @@ func (f *Fake) Capabilities() rt.Caps {
 		EgressDomains: f.EgressDomains,
 		Volumes:       f.Volumes,
 		NamedSnapshot: !f.NoSnapshotBoot,
+		PrivateAccess: f.PrivateAccess,
 	}
 }
 
@@ -104,6 +112,23 @@ func (f *Fake) setNetworks(id string, n rt.Networks) (string, error) {
 	}
 	f.networks[id] = append([]string(nil), n.Sets...)
 	return "10.128.0.2", nil
+}
+
+func (f *Fake) setPrivate(id string, ts []sandbox.PrivateTarget) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.PrivateAccess {
+		return rt.ErrUnsupported
+	}
+	if f.Private == nil {
+		f.Private = map[string][]sandbox.PrivateTarget{}
+	}
+	if len(ts) == 0 {
+		delete(f.Private, id)
+		return nil
+	}
+	f.Private[id] = append([]sandbox.PrivateTarget(nil), ts...)
+	return nil
 }
 
 // NetworksOf returns the set keys the daemon last pushed for a sandbox.
@@ -317,6 +342,14 @@ func (i *fakeInstance) SetNetworks(_ context.Context, n rt.Networks) (string, er
 		return "", rt.ErrUnsupported
 	}
 	return i.rtF.setNetworks(i.id, n)
+}
+
+// SetPrivate implements rt.PrivateRouter at the instance level, like SetNetworks.
+func (i *fakeInstance) SetPrivate(_ context.Context, ts []sandbox.PrivateTarget) error {
+	if i.rtF == nil {
+		return rt.ErrUnsupported
+	}
+	return i.rtF.setPrivate(i.id, ts)
 }
 
 // Stopped reports whether the given sandbox's instance received Stop.

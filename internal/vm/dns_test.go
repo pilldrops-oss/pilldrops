@@ -60,35 +60,35 @@ func TestPrivateZoneAnswers(t *testing.T) {
 	// quietly answered from the zone.
 	none := []string(nil)
 
-	rcode, ip := parse(t, answerDNS(query(t, "bravo.pd.", dnsmessage.TypeA), peers, none))
+	rcode, ip := parse(t, answerDNS(query(t, "bravo.pd.", dnsmessage.TypeA), peers, nil, none))
 	if rcode != dnsmessage.RCodeSuccess || ip != "10.128.6.70" {
 		t.Fatalf("bravo.pd -> %v/%q, want the peer's address", rcode, ip)
 	}
 
 	// Case folding: a guest that upper-cases the name gets the same answer.
-	if rcode, ip := parse(t, answerDNS(query(t, "BRAVO.pd.", dnsmessage.TypeA), peers, none)); rcode != dnsmessage.RCodeSuccess || ip != "10.128.6.70" {
+	if rcode, ip := parse(t, answerDNS(query(t, "BRAVO.pd.", dnsmessage.TypeA), peers, nil, none)); rcode != dnsmessage.RCodeSuccess || ip != "10.128.6.70" {
 		t.Errorf("BRAVO.pd -> %v/%q, want the same answer as the lowercase form", rcode, ip)
 	}
 
 	// A name in the zone that is not a peer is NXDOMAIN, and never forwarded:
 	// this resolver is authoritative for .pd.
-	if rcode, _ := parse(t, answerDNS(query(t, "charlie.pd.", dnsmessage.TypeA), peers, none)); rcode != dnsmessage.RCodeNameError {
+	if rcode, _ := parse(t, answerDNS(query(t, "charlie.pd.", dnsmessage.TypeA), peers, nil, none)); rcode != dnsmessage.RCodeNameError {
 		t.Errorf("charlie.pd -> %v, want NXDOMAIN", rcode)
 	}
 	// An untagged sandbox has no peers at all, so every .pd name is NXDOMAIN.
 	empty := func() map[string]string { return nil }
-	if rcode, _ := parse(t, answerDNS(query(t, "bravo.pd.", dnsmessage.TypeA), empty, none)); rcode != dnsmessage.RCodeNameError {
+	if rcode, _ := parse(t, answerDNS(query(t, "bravo.pd.", dnsmessage.TypeA), empty, nil, none)); rcode != dnsmessage.RCodeNameError {
 		t.Errorf("bravo.pd with no peers -> %v, want NXDOMAIN", rcode)
 	}
 	// AAAA for a peer: the zone has no IPv6 records, so NXDOMAIN rather than a
 	// forward that would leak the name and answer from the public internet.
-	if rcode, _ := parse(t, answerDNS(query(t, "bravo.pd.", dnsmessage.TypeAAAA), peers, none)); rcode != dnsmessage.RCodeNameError {
+	if rcode, _ := parse(t, answerDNS(query(t, "bravo.pd.", dnsmessage.TypeAAAA), peers, nil, none)); rcode != dnsmessage.RCodeNameError {
 		t.Errorf("bravo.pd AAAA -> %v, want NXDOMAIN", rcode)
 	}
 	// Anything outside the zone is forwarded; with no upstream there is nothing
 	// to say, which is the control that .pd answers did not come from a
 	// catch-all.
-	if got := answerDNS(query(t, "example.com.", dnsmessage.TypeA), peers, none); got != nil {
+	if got := answerDNS(query(t, "example.com.", dnsmessage.TypeA), peers, nil, none); got != nil {
 		t.Errorf("example.com produced a local answer (%d bytes); it must be forwarded", len(got))
 	}
 }
@@ -105,7 +105,7 @@ func TestServeDNSOverASocket(t *testing.T) {
 	}
 	defer pc.Close()
 	peers := func() map[string]string { return map[string]string{"alpha": "10.128.6.66"} }
-	go serveDNS(pc, peers, nil)
+	go serveDNS(pc, peers, nil, nil)
 
 	c, err := net.Dial("udp", pc.LocalAddr().String())
 	if err != nil {
@@ -122,5 +122,25 @@ func TestServeDNSOverASocket(t *testing.T) {
 	}
 	if rcode, ip := parse(t, buf[:n]); rcode != dnsmessage.RCodeSuccess || ip != "10.128.6.66" {
 		t.Fatalf("over the socket: alpha.pd -> %v/%q", rcode, ip)
+	}
+}
+
+func TestPrivateZoneAnswersAndRefusesUnknown(t *testing.T) {
+	t.Parallel()
+	peers := func() map[string]string { return nil }
+	priv := func() map[string]string {
+		return map[string]string{"db.private.": "192.168.31.2", "internal.corp.": "192.168.31.3"}
+	}
+	for name, want := range map[string]string{"db.private.": "192.168.31.2", "INTERNAL.corp.": "192.168.31.3"} {
+		if rcode, ip := parse(t, answerDNS(query(t, name, dnsmessage.TypeA), peers, priv, nil)); rcode != dnsmessage.RCodeSuccess || ip != want {
+			t.Errorf("%s -> %v/%q, want %q", name, rcode, ip, want)
+		}
+	}
+	// forward points at TEST-NET, so a leaked query would time out and fail here.
+	if rcode, _ := parse(t, answerDNS(query(t, "nope.private.", dnsmessage.TypeA), peers, priv, []string{"192.0.2.1"})); rcode != dnsmessage.RCodeNameError {
+		t.Errorf("unknown .private: %v", rcode)
+	}
+	if rcode, ip := parse(t, answerDNS(query(t, "db.private.", dnsmessage.TypeAAAA), peers, priv, nil)); rcode != dnsmessage.RCodeSuccess || ip != "" {
+		t.Errorf("AAAA: %v/%q", rcode, ip)
 	}
 }

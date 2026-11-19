@@ -69,7 +69,7 @@ func renderEgressPolicy(rules *egress.Rules, tapName string) (chain, divert stri
 // statement that nft refuses in the egress chain, and prerouting is an earlier
 // hook anyway, so a diverted packet is judged on its name before any address
 // denial in the chain below can kill it.
-func buildNetNSRuleset(vn, tapName string, hostIP, nsIP, guestIP net.IP, policy, divert string, tagged bool) string {
+func buildNetNSRuleset(vn, tapName string, hostIP, nsIP, guestIP net.IP, policy, divert string, tagged, private bool) string {
 	tail := policy
 	if tail == "" {
 		tail = "\t\tudp dport 53 accept\n\t\ttcp dport { 53, 80, 443 } accept\n\t\tdrop"
@@ -79,7 +79,7 @@ table ip sandbox {
 	chain prerouting {
 		type nat hook prerouting priority dstnat;
 		iifname %q ip daddr %s dnat to %s
-%s%s	}
+%s%s%s	}
 	chain postrouting {
 		type nat hook postrouting priority srcnat;
 		oifname %q ip saddr 192.168.0.0/16 masquerade
@@ -92,14 +92,14 @@ table ip sandbox {
 	}
 	chain egress {
 		ip daddr 169.254.0.0/16 drop
-%s%s		ip daddr 10.0.0.0/8 drop
+%s%s%s		ip daddr 10.0.0.0/8 drop
 		ip daddr 172.16.0.0/12 drop
 		ip daddr 100.64.0.0/10 drop
 %s
 	}
 }
-`, vn, nsIP, guestIP, taggedDNSRedirect(tagged, tapName), divert,
-		vn, vn, tapName, tapName, localAPIEgressRule(hostIP), taggedEgressRule(tagged), tail)
+`, vn, nsIP, guestIP, privateRedirect(private, tapName), taggedDNSRedirect(tagged || private, tapName), divert,
+		vn, vn, tapName, tapName, privateEgressDrop(private), localAPIEgressRule(hostIP), taggedEgressRule(tagged), tail)
 }
 
 // netnsSupernet is the slot supernet every 10.128 literal in this package

@@ -197,6 +197,16 @@ func (a StoreAdapter) SandboxRecord(ctx context.Context, id string) (PersistedSa
 	return persistedOf(r), true, nil
 }
 
+// SandboxPrivate reads the sandbox's private targets column; "" when there is no row.
+func (a StoreAdapter) SandboxPrivate(ctx context.Context, id string) (string, error) {
+	r, _, err := a.S.SandboxByID(ctx, id)
+	return r.Private, err
+}
+
+func (a StoreAdapter) SetSandboxPrivate(ctx context.Context, id, targetsJSON string) error {
+	return a.S.SetSandboxPrivate(ctx, id, targetsJSON)
+}
+
 // SandboxIDsOnTemplate finds every stored record on a template.
 func (a StoreAdapter) SandboxIDsOnTemplate(ctx context.Context, template string) ([]string, error) {
 	return a.S.SandboxIDsOnTemplate(ctx, template)

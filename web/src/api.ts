@@ -17,6 +17,10 @@ import type {
   LimitsInfo,
   VaultSecret,
   CustomDomain,
+  Connector,
+  ConnectorKey,
+  PrivateConnection,
+  PrivateGrant,
   Capabilities,
   ClusterStats,
   ObjectStoreView,
@@ -417,6 +421,25 @@ export const addDomain = (host: string, sandboxId?: string, port?: number) =>
   request<CustomDomain>('POST', '/v1/domains', { host, sandbox_id: sandboxId || undefined, port })
 export const removeDomain = (host: string) =>
   request<void>('DELETE', `/v1/domains/${encodeURIComponent(host)}`, undefined)
+
+export const listConnectors = async () =>
+  (await request<{ connectors: Connector[] }>('GET', '/v1/connectors', undefined)).connectors
+export const createConnector = (name: string) => request<Connector>('POST', '/v1/connectors', { name })
+export const revokeConnector = (id: string) => request<void>('DELETE', `/v1/connectors/${encodeURIComponent(id)}`, undefined)
+export const listConnectorKeys = async (id: string) =>
+  (await request<{ keys: ConnectorKey[] }>('GET', `/v1/connectors/${encodeURIComponent(id)}/keys`, undefined)).keys
+export const createConnectorKey = (id: string) =>
+  request<ConnectorKey & { key: string }>('POST', `/v1/connectors/${encodeURIComponent(id)}/keys`, undefined)
+export const revokeConnectorKey = (id: string, keyId: string) =>
+  request<void>('DELETE', `/v1/connectors/${encodeURIComponent(id)}/keys/${encodeURIComponent(keyId)}`, undefined)
+export const listConnectorConnections = async (id: string) =>
+  (await request<{ connections: PrivateConnection[] }>('GET', `/v1/connectors/${encodeURIComponent(id)}/connections`, undefined)).connections
+export const listPrivateGrants = (sandboxId: string) =>
+  request<{ grants: PrivateGrant[]; supported: boolean }>('GET', `/v1/sandboxes/${sandboxId}/private`, undefined)
+export const grantPrivate = (sandboxId: string, connector: string, target: string) =>
+  request<PrivateGrant>('POST', `/v1/sandboxes/${sandboxId}/private`, { connector, target })
+export const revokePrivate = (sandboxId: string, connector: string, target: string) =>
+  request<void>('DELETE', `/v1/sandboxes/${sandboxId}/private/${encodeURIComponent(connector)}/${encodeURIComponent(target)}`, undefined)
 
 export const listWebhooks = () =>
   request<{ webhooks: Webhook[] | null; deliverable_events: string[] }>('GET', '/v1/webhooks', undefined)

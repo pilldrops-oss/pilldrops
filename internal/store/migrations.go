@@ -2108,4 +2108,99 @@ BEGIN SELECT RAISE(ABORT, 'sandboxes_state_known'); END`,
 			`ALTER TABLE sandboxes ADD COLUMN IF NOT EXISTS ports TEXT NOT NULL DEFAULT ''`,
 		},
 	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 78,
+		name:    "private_networking",
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS connectors (
+				id           TEXT PRIMARY KEY,
+				name         TEXT NOT NULL,
+				org_id       TEXT NOT NULL,
+				created_by   TEXT NOT NULL DEFAULT '',
+				created_at   INTEGER NOT NULL,
+				last_seen_at INTEGER NOT NULL DEFAULT 0,
+				revoked_at   INTEGER NOT NULL DEFAULT 0,
+				targets      TEXT NOT NULL DEFAULT '[]'
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS connectors_org_name ON connectors (org_id, name) WHERE revoked_at = 0`,
+			`CREATE TABLE IF NOT EXISTS connector_keys (
+				id           TEXT PRIMARY KEY,
+				connector_id TEXT NOT NULL,
+				key_hash     TEXT NOT NULL UNIQUE,
+				created_at   INTEGER NOT NULL,
+				last_used_at INTEGER NOT NULL DEFAULT 0,
+				revoked_at   INTEGER NOT NULL DEFAULT 0
+			)`,
+			`CREATE INDEX IF NOT EXISTS connector_keys_connector ON connector_keys (connector_id)`,
+			`CREATE TABLE IF NOT EXISTS sandbox_private_grants (
+				sandbox_id   TEXT NOT NULL,
+				connector_id TEXT NOT NULL,
+				target       TEXT NOT NULL,
+				created_at   INTEGER NOT NULL,
+				PRIMARY KEY (sandbox_id, target)
+			)`,
+			`CREATE INDEX IF NOT EXISTS sandbox_private_grants_connector ON sandbox_private_grants (connector_id)`,
+			`CREATE TABLE IF NOT EXISTS private_connections (
+				id           TEXT PRIMARY KEY,
+				org_id       TEXT NOT NULL,
+				sandbox_id   TEXT NOT NULL,
+				connector_id TEXT NOT NULL,
+				target       TEXT NOT NULL,
+				node_id      TEXT NOT NULL DEFAULT '',
+				started_at   INTEGER NOT NULL,
+				ended_at     INTEGER NOT NULL DEFAULT 0,
+				bytes_in     INTEGER NOT NULL DEFAULT 0,
+				bytes_out    INTEGER NOT NULL DEFAULT 0,
+				result       TEXT NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS private_connections_connector ON private_connections (connector_id, started_at)`,
+			`ALTER TABLE sandboxes ADD COLUMN private_targets TEXT NOT NULL DEFAULT '[]'`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS connectors (
+				id           TEXT PRIMARY KEY,
+				name         TEXT NOT NULL,
+				org_id       TEXT NOT NULL,
+				created_by   TEXT NOT NULL DEFAULT '',
+				created_at   BIGINT NOT NULL,
+				last_seen_at BIGINT NOT NULL DEFAULT 0,
+				revoked_at   BIGINT NOT NULL DEFAULT 0,
+				targets      TEXT NOT NULL DEFAULT '[]'
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS connectors_org_name ON connectors (org_id, name) WHERE revoked_at = 0`,
+			`CREATE TABLE IF NOT EXISTS connector_keys (
+				id           TEXT PRIMARY KEY,
+				connector_id TEXT NOT NULL,
+				key_hash     TEXT NOT NULL UNIQUE,
+				created_at   BIGINT NOT NULL,
+				last_used_at BIGINT NOT NULL DEFAULT 0,
+				revoked_at   BIGINT NOT NULL DEFAULT 0
+			)`,
+			`CREATE INDEX IF NOT EXISTS connector_keys_connector ON connector_keys (connector_id)`,
+			`CREATE TABLE IF NOT EXISTS sandbox_private_grants (
+				sandbox_id   TEXT NOT NULL,
+				connector_id TEXT NOT NULL,
+				target       TEXT NOT NULL,
+				created_at   BIGINT NOT NULL,
+				PRIMARY KEY (sandbox_id, target)
+			)`,
+			`CREATE INDEX IF NOT EXISTS sandbox_private_grants_connector ON sandbox_private_grants (connector_id)`,
+			`CREATE TABLE IF NOT EXISTS private_connections (
+				id           TEXT PRIMARY KEY,
+				org_id       TEXT NOT NULL,
+				sandbox_id   TEXT NOT NULL,
+				connector_id TEXT NOT NULL,
+				target       TEXT NOT NULL,
+				node_id      TEXT NOT NULL DEFAULT '',
+				started_at   BIGINT NOT NULL,
+				ended_at     BIGINT NOT NULL DEFAULT 0,
+				bytes_in     BIGINT NOT NULL DEFAULT 0,
+				bytes_out    BIGINT NOT NULL DEFAULT 0,
+				result       TEXT NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS private_connections_connector ON private_connections (connector_id, started_at)`,
+			`ALTER TABLE sandboxes ADD COLUMN IF NOT EXISTS private_targets TEXT NOT NULL DEFAULT '[]'`,
+		},
+	},
 }

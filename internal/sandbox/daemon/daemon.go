@@ -458,6 +458,11 @@ func (d *Daemon) finishCreate(ctx context.Context, sb *Sandbox, spec CreateSpec)
 			return SandboxInfo{}, fmt.Errorf("join networks: %w", err)
 		}
 	}
+	// A moved-in sandbox brings its stored grants. Never fatal: undoing a moved-in
+	// create with Destroy would delete the original's row, backups and archive.
+	if err := d.pushPrivate(ctx, id); err != nil {
+		d.log().Warn("create: could not restore private targets", "sandbox_id", id, "error", err)
+	}
 	d.mu.Lock()
 	info = sb.info()
 	rec := d.recordOf(sb)

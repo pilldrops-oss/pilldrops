@@ -35,7 +35,7 @@ const (
 // serveDNS answers queries on pc until pc is closed. peers is asked per query,
 // not captured, so a membership change is visible to the next lookup. forward
 // is the upstream list; an empty list makes every non-.pd name SERVFAIL.
-func serveDNS(pc net.PacketConn, peers func() map[string]string, forward []string) {
+func serveDNS(pc net.PacketConn, peers, private func() map[string]string, forward []string) {
 	buf := make([]byte, dnsMaxMsg)
 	for {
 		n, addr, err := pc.ReadFrom(buf)
@@ -51,7 +51,7 @@ func serveDNS(pc net.PacketConn, peers func() map[string]string, forward []strin
 		// One goroutine per query: a forwarded lookup must not stall the
 		// answers this resolver can give from memory.
 		go func() {
-			if resp := answerDNS(req, peers, forward); resp != nil {
+			if resp := answerDNS(req, peers, private, forward); resp != nil {
 				_, _ = pc.WriteTo(resp, addr)
 			}
 		}()
@@ -59,7 +59,7 @@ func serveDNS(pc net.PacketConn, peers func() map[string]string, forward []strin
 }
 
 // answerDNS builds the reply to one query, or nil when there is nothing to say.
-func answerDNS(req []byte, peers func() map[string]string, forward []string) []byte {
+func answerDNS(req []byte, peers, private func() map[string]string, forward []string) []byte {
 	var p dnsmessage.Parser
 	hdr, err := p.Start(req)
 	if err != nil {
@@ -70,6 +70,19 @@ func answerDNS(req []byte, peers func() map[string]string, forward []string) []b
 		return nil
 	}
 	name := q.Name.String()
+	if private != nil {
+		lower := strings.ToLower(name)
+		if ip, ok := private()[lower]; ok {
+			if q.Type != dnsmessage.TypeA {
+				return buildNoData(hdr.ID, q)
+			}
+			return buildPDAnswer(hdr.ID, q, ip)
+		}
+		// Like .pd, the .private zone is ours: an unknown name never leaves the node.
+		if strings.HasSuffix(lower, ".private.") {
+			return buildPDAnswer(hdr.ID, q, "")
+		}
+	}
 	if !strings.HasSuffix(strings.ToLower(name), pdZone) {
 		return forwardDNS(req, forward)
 	}
@@ -113,6 +126,22 @@ func buildPDAnswer(id uint16, q dnsmessage.Question, ip string) []byte {
 		}, a); err != nil {
 			return nil
 		}
+	}
+	out, err := b.Finish()
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+// buildNoData renders an empty NOERROR reply: the name exists, this type does not.
+func buildNoData(id uint16, q dnsmessage.Question) []byte {
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, Response: true, Authoritative: true, RecursionAvailable: true})
+	if err := b.StartQuestions(); err != nil {
+		return nil
+	}
+	if err := b.Question(q); err != nil {
+		return nil
 	}
 	out, err := b.Finish()
 	if err != nil {

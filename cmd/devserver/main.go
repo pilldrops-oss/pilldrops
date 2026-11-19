@@ -99,6 +99,9 @@ func registerFleetPassthrough(r chi.Router, passthrough http.HandlerFunc) {
 		// Volumes live on nodes; the control plane places them and pins creates.
 		"/v1/volumes", "/v1/volumes/{id}",
 		"/v1/shares", "/v1/shares/{id}", "/v1/shares/{id}/token",
+		// The tunnel, data socket and session routes are in registerConnectorRoutes.
+		"/v1/connectors", "/v1/connectors/{id}", "/v1/connectors/{id}/connections",
+		"/v1/connectors/{id}/keys", "/v1/connectors/{id}/keys/{key}",
 		"/v1/capabilities",
 		"/v1/limits",
 		"/v1/launch-stats",
@@ -2582,6 +2585,8 @@ func main() {
 	apiAuth := newAPIAuth(keyStore, requireAuth)
 
 	r := chi.NewRouter()
+	// root is the router outside every auth group.
+	root := r
 	r.Use(chimid.Recoverer)
 	// JSON only: streams, downloads and previews pass through untouched.
 	r.Use(chimid.Compress(5, "application/json"))
@@ -3024,6 +3029,9 @@ func main() {
 			fleetProxy(w, r, func(w http.ResponseWriter) { answerWithoutFleet(w, r) })
 		}
 		registerFleetPassthrough(r, fleetPassthrough)
+		if sockets := connectorProxy(orchURL); proxyMode && sockets != nil {
+			registerConnectorRoutes(root, sockets, apiAuth(http.HandlerFunc(fleetPassthrough)))
+		}
 
 		// Long-lived server on an existing sandbox; explicit route so the proxy engages.
 		r.Post("/v1/sandboxes/{id}/start", func(w http.ResponseWriter, r *http.Request) {

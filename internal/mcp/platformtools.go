@@ -470,6 +470,42 @@ func platformTools() []tool {
 			},
 		},
 		{
+			name: "list_connectors",
+			desc: "The org's private-network connectors: name, whether an instance is online, and the targets it " +
+				"announces (name and port, and a hostname when it has one). A sandbox can be granted " +
+				"a target with grant_private_target.",
+			schema: obj(map[string]any{}),
+			run: func(a map[string]any, be Backend) map[string]any {
+				return call(be, "GET", "/v1/connectors", nil)
+			},
+		},
+		{
+			name: "grant_private_target",
+			desc: "Let one sandbox reach a target behind a connector. Inside the sandbox it is <target>.private on " +
+				"the target's own port, and also its real hostname when the connector announced one. Owners and " +
+				"admins only; refused on nodes without private access.",
+			schema: obj(map[string]any{
+				"sandbox_id": prop("string", "The sandbox id."),
+				"connector":  prop("string", "Connector name."),
+				"target":     prop("string", "Target name the connector announced."),
+			}, "sandbox_id", "connector", "target"),
+			run: func(a map[string]any, be Backend) map[string]any {
+				return call(be, "POST", sbPath(a, "/private"), map[string]any{"connector": str(a, "connector"), "target": str(a, "target")})
+			},
+		},
+		{
+			name: "revoke_private_target",
+			desc: "Stop a sandbox reaching a target behind a connector. Open connections to it close.",
+			schema: obj(map[string]any{
+				"sandbox_id": prop("string", "The sandbox id."),
+				"connector":  prop("string", "Connector name."),
+				"target":     prop("string", "Target name."),
+			}, "sandbox_id", "connector", "target"),
+			run: func(a map[string]any, be Backend) map[string]any {
+				return call(be, "DELETE", sbPath(a, "/private/"+url.PathEscape(str(a, "connector"))+"/"+url.PathEscape(str(a, "target"))), nil)
+			},
+		},
+		{
 			name: "remove_domain",
 			desc: "Detach a custom hostname. It stops routing at once and its certificate is no longer " +
 				"served, so anything pointing at it breaks; the sandbox keeps its ordinary preview URL. " +

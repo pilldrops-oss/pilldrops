@@ -195,6 +195,8 @@ func StartHeartbeat(ctx context.Context, d *daemon.Daemon, dataDir, selfURL, run
 			// Placement reads this: a create naming network tags may only land
 			// on a node whose runtime can actually partition them.
 			"tag_networks": caps.TagNetworks,
+			// A sandbox granted a private connection is placed only where the node can carry one.
+			"private_access": caps.PrivateAccess,
 			// Same, for a create whose egress rules name a domain: only a node
 			// running the name layer can enforce one.
 			"egress_domains": caps.EgressDomains,

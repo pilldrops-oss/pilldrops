@@ -12,7 +12,7 @@ import (
 
 // The in-ns ruleset is the only egress control in netns mode.
 func TestNetNSRulesetExpressesTheEgressPolicy(t *testing.T) {
-	rs := buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), "", "", false)
+	rs := buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), "", "", false, false)
 	for _, want := range []string{
 		"policy drop",
 		"ip daddr 169.254.0.0/16 drop", // metadata
@@ -49,7 +49,7 @@ func TestEgressPolicyReplacesTheOpenDefaultTail(t *testing.T) {
 		t.Errorf("an address-only policy diverted to the name layer, which decides nothing it "+
 			"could not: %q", divert)
 	}
-	rs := buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), policy, divert, false)
+	rs := buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), policy, divert, false, false)
 
 	if strings.Contains(rs, "tcp dport { 53, 80, 443 } accept") {
 		t.Errorf("the open default survived under a policy, so the allow list decides nothing:\n%s", rs)
@@ -118,12 +118,12 @@ func TestDomainRulesDivertFromPreroutingNotTheFilterChain(t *testing.T) {
 func TestLocalAPIPortOpensOnePortToTheHostVeth(t *testing.T) {
 	t.Setenv("PILLDROPS_LOCAL_API_PORT", "")
 	host, ns, guest := net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2")
-	base := buildNetNSRuleset("vn7", "tap0", host, ns, guest, "", "", false)
+	base := buildNetNSRuleset("vn7", "tap0", host, ns, guest, "", "", false, false)
 	if strings.Contains(base, "dport 18103") || localAPIHostRule() != "" {
 		t.Fatal("a rule rendered with the variable unset")
 	}
 	t.Setenv("PILLDROPS_LOCAL_API_PORT", "18103")
-	rs := buildNetNSRuleset("vn7", "tap0", host, ns, guest, "", "", false)
+	rs := buildNetNSRuleset("vn7", "tap0", host, ns, guest, "", "", false, false)
 	rule := "ip daddr 10.128.0.29 tcp dport 18103 accept"
 	i, j := strings.Index(rs, rule), strings.Index(rs, "ip daddr 10.0.0.0/8 drop")
 	if i < 0 || j < 0 || i > j {
