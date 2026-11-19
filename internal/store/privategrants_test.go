@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -80,6 +81,41 @@ func TestSandboxesGrantedConnectorAndSetPrivate(t *testing.T) {
 		rec, ok, err := st.SandboxByID(ctx, id)
 		if err != nil || !ok || rec.Private != targets {
 			t.Fatalf("private = %q %v %v", rec.Private, ok, err)
+		}
+	})
+}
+
+// Every destroy path ends in DeleteSandbox; a grant that outlived its sandbox
+// would route a later sandbox reusing the id.
+func TestDeleteSandboxDropsItsGrants(t *testing.T) {
+	eachStore(t, func(t *testing.T, st *Store, sfx string) {
+		ctx := t.Context()
+		cid := "cd" + sfx
+		if err := st.InsertConnector(ctx, Connector{ID: cid, Name: "d", OrgID: "org-del" + sfx}); err != nil {
+			t.Fatal(err)
+		}
+		for _, del := range []func(context.Context, string) error{st.DeleteSandbox, st.ForgetSandbox} {
+			gone, kept := "sbd1"+sfx, "sbd2"+sfx
+			for _, id := range []string{gone, kept} {
+				if err := st.SaveSandbox(ctx, SandboxRecord{ID: id, Template: "t", OrgID: "o", State: "running"}); err != nil {
+					t.Fatal(err)
+				}
+				if err := st.AddPrivateGrant(ctx, PrivateGrant{SandboxID: id, ConnectorID: cid, Target: "db"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := del(ctx, gone); err != nil {
+				t.Fatal(err)
+			}
+			if gs, err := st.PrivateGrants(ctx, gone); err != nil || len(gs) != 0 {
+				t.Fatalf("grants outlived the sandbox: %v %v", gs, err)
+			}
+			if gs, err := st.PrivateGrants(ctx, kept); err != nil || len(gs) != 1 {
+				t.Fatalf("another sandbox's grant: %v %v", gs, err)
+			}
+			if err := st.DeleteSandbox(ctx, kept); err != nil {
+				t.Fatal(err)
+			}
 		}
 	})
 }

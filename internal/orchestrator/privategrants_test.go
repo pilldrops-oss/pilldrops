@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pilldrops-oss/pilldrops/internal/cluster"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
@@ -19,6 +20,7 @@ type privateFakeNode struct {
 	deleted    []string
 	failDelete bool
 	creates    []string
+	onPatch    func(body string) // runs before the PATCH is recorded
 }
 
 func (n *privateFakeNode) lastPatch(t *testing.T, id string) string {
@@ -72,6 +74,9 @@ func (ts *connectorTestServer) fakeNodeNamed(t *testing.T, id string, supports b
 			w.WriteHeader(http.StatusConflict)
 			_, _ = w.Write([]byte(`{"code":"private_access_unsupported"}`))
 		case r.Method == "PATCH":
+			if n.onPatch != nil {
+				n.onPatch(string(b))
+			}
 			n.mu.Lock()
 			n.patches[strings.TrimPrefix(r.URL.Path, "/v1/sandboxes/")] = string(b)
 			n.mu.Unlock()
@@ -329,5 +334,106 @@ func TestDestroyDropsGrants(t *testing.T) {
 	}
 	if gs, _ := ts.s.st.Load().PrivateGrants(t.Context(), "sb1"); len(gs) != 0 {
 		t.Fatalf("grants left: %v", gs)
+	}
+}
+
+// A grant's push held at the node must not land after a later revoke's push.
+func TestConcurrentGrantAndRevokeLeaveTheNodeCurrent(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.fakeNode(t, true)
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"prod"}`)
+	ts.announce(t, "prod", `[{"name":"db","port":5432},{"name":"api","port":443}]`)
+	ts.body(ts.do(t, "POST", "/v1/sandboxes/sb1/private", ts.key, `{"connector":"prod","target":"db"}`))
+
+	held, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	node.onPatch = func(body string) {
+		if strings.Contains(body, `"api"`) {
+			once.Do(func() { close(held); <-release })
+		}
+	}
+	send := func(method, path, body string) chan int {
+		done := make(chan int, 1)
+		req, _ := http.NewRequest(method, ts.srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+ts.key)
+		go func() {
+			resp, err := ts.srv.Client().Do(req)
+			if err != nil {
+				done <- 0
+				return
+			}
+			_ = resp.Body.Close()
+			done <- resp.StatusCode
+		}()
+		return done
+	}
+	granted := send("POST", "/v1/sandboxes/sb1/private", `{"connector":"prod","target":"api"}`)
+	<-held
+	revoked := send("DELETE", "/v1/sandboxes/sb1/private/prod/api", "")
+	revokeCode := 0
+	select {
+	case revokeCode = <-revoked: // unserialized: the revoke's push reached the node first
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(release)
+	if code := <-granted; code != http.StatusCreated {
+		t.Fatalf("grant: %d", code)
+	}
+	if revokeCode == 0 {
+		revokeCode = <-revoked
+	}
+	if revokeCode != http.StatusNoContent {
+		t.Fatalf("revoke: %d", revokeCode)
+	}
+	if got := node.lastPatch(t, "sb1"); strings.Contains(got, `"api"`) || !strings.Contains(got, `"db"`) {
+		t.Fatalf("node left with a stale target list: %s", got)
+	}
+}
+
+func TestSandboxLocksSerializeAndForgetIdleEntries(t *testing.T) {
+	var l sandboxLocks
+	unlock := l.lock("sb1")
+	got := make(chan struct{})
+	go func() { l.lock("sb1")(); close(got) }()
+	select {
+	case <-got:
+		t.Fatal("a second holder got the lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	l.lock("sb2")() // another sandbox does not wait
+	unlock()
+	<-got
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.m) != 0 {
+		t.Fatalf("idle entries kept: %d", len(l.m))
+	}
+}
+
+// Two targets announcing one hostname would share one address in the sandbox.
+func TestGrantRefusesASecondTargetWithTheSameHost(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.fakeNode(t, true)
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"prod"}`)
+	ts.do(t, "POST", "/v1/connectors", ts.key, `{"name":"lab"}`)
+	ts.announce(t, "prod", `[{"name":"api","port":443,"host":"internal.corp"}]`)
+	ts.announce(t, "lab", `[{"name":"web","port":443,"host":"Internal.Corp."}]`)
+	if resp := ts.do(t, "POST", "/v1/sandboxes/sb1/private", ts.key, `{"connector":"prod","target":"api"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("first grant: %d %s", resp.StatusCode, ts.body(resp))
+	}
+	resp := ts.do(t, "POST", "/v1/sandboxes/sb1/private", ts.key, `{"connector":"lab","target":"web"}`)
+	if b := ts.body(resp); resp.StatusCode != http.StatusConflict || !strings.Contains(b, "private_name_taken") || !strings.Contains(b, "internal.corp") {
+		t.Fatalf("second grant on one host: %d %s", resp.StatusCode, b)
+	}
+	if got := node.lastPatch(t, "sb1"); strings.Contains(got, `"web"`) {
+		t.Fatalf("refused grant reached the node: %s", got)
+	}
+
+	resp = ts.do(t, "POST", "/v1/sandboxes", ts.key, `{"template":"base","private":[{"connector":"prod","target":"api"},{"connector":"lab","target":"web"}]}`)
+	if b := ts.body(resp); resp.StatusCode != http.StatusConflict || !strings.Contains(b, "private_name_taken") {
+		t.Fatalf("create with two targets on one host: %d %s", resp.StatusCode, b)
+	}
+	if !node.wasDeleted("sbnew") {
+		t.Fatal("sandbox kept after its grant was refused")
 	}
 }

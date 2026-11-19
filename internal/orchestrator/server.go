@@ -92,6 +92,8 @@ type Server struct {
 	connectors connectorHub
 	// privateConns tracks open private connections so a revoke or destroy can cut them.
 	privateConns privateConnSet
+	// privatePushes serializes grant changes and pushes per sandbox.
+	privatePushes sandboxLocks
 
 	// logger is the structured logger. Use the ...Context variants so
 	// request_id and trace_id are stamped from the context.

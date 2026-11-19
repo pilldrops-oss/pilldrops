@@ -1987,7 +1987,7 @@
     "/v1/sandboxes/{id}/private": {
       "post": {
         "summary": "Let a sandbox reach a private target",
-        "description": "A sandbox's own key gets 403. Inside the sandbox the target answers at `<target>.private` on its own port, and at its real hostname when the connector announced one. A sandbox keeps one target per name: a second grant with the same target name is 409 `private_name_taken`. A paused sandbox keeps the grant and applies it on resume. 409 `private_access_unsupported` when this sandbox's node has no per-sandbox network namespaces.",
+        "description": "A sandbox's own key gets 403. Inside the sandbox the target answers at `<target>.private` on its own port, and at its real hostname when the connector announced one. A sandbox keeps one target per name and per hostname: a second grant with the same target name, or with a target announcing a hostname another granted target already announces, is 409 `private_name_taken`. A paused sandbox keeps the grant and applies it on resume. 409 `private_access_unsupported` when this sandbox's node has no per-sandbox network namespaces.",
         "parameters": [
           {
             "name": "id",
@@ -2084,7 +2084,7 @@
             }
           },
           "502": {
-            "description": "The sandbox's node did not take the grant (code `private_push_failed`); the grant is rolled back.",
+            "description": "The sandbox's node did not take the grant (code `private_push_failed`); the grant is rolled back. The status is 502 or the node's own 5xx.",
             "content": {
               "application/json": {
                 "schema": {

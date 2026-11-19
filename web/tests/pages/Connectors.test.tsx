@@ -119,6 +119,18 @@ describe('Connectors', () => {
     await waitFor(() => expect(api.revokeConnector).toHaveBeenCalledWith('cn_1'))
   })
 
+  it('closes the open panel when its connector is removed', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([conn()])
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Keys for prod' }))
+    expect(await screen.findByRole('button', { name: 'Create key' })).toBeInTheDocument()
+    vi.mocked(api.listConnectors).mockResolvedValue([])
+    await userEvent.click(screen.getByRole('button', { name: 'Remove prod' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Confirm' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Create key' })).not.toBeInTheDocument())
+    expect(await screen.findByText('No connectors yet.')).toBeInTheDocument()
+  })
+
   it('asks before revoking a key', async () => {
     vi.mocked(api.listConnectors).mockResolvedValue([conn()])
     vi.mocked(api.listConnectorKeys).mockResolvedValue([{ id: 'ck_9', created_at: 1, last_used_at: 0 }])

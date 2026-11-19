@@ -330,16 +330,19 @@ func (s *Store) SandboxByID(ctx context.Context, id string) (SandboxRecord, bool
 	return s.oneSandbox(ctx, `WHERE id = ?`, id)
 }
 
-// DeleteSandbox removes a sandbox record, the custom domains pointed at it and
-// its port forwards. The child rows are deleted here rather than by a foreign
-// key: SQLite ignores ON DELETE CASCADE without PRAGMA foreign_keys, and a host
-// or a public port left routing at a destroyed sandbox would keep answering for
-// its next holder.
+// DeleteSandbox removes a sandbox record, the custom domains pointed at it, its
+// port forwards and its private grants. The child rows are deleted here rather
+// than by a foreign key: SQLite ignores ON DELETE CASCADE without PRAGMA
+// foreign_keys, and a host, a public port or a grant left behind by a destroyed
+// sandbox would keep answering for its next holder.
 func (s *Store) DeleteSandbox(ctx context.Context, id string) error {
 	if _, err := s.exec(ctx, `DELETE FROM custom_domains WHERE sandbox_id = ?`, id); err != nil {
 		return err
 	}
 	if _, err := s.exec(ctx, `DELETE FROM port_forwards WHERE sandbox_id = ?`, id); err != nil {
+		return err
+	}
+	if err := s.DeletePrivateGrantsForSandbox(ctx, id); err != nil {
 		return err
 	}
 	_, err := s.exec(ctx, `DELETE FROM sandboxes WHERE id = ?`, id)

@@ -79,6 +79,21 @@ describe('sandbox detail private access', () => {
     await waitFor(() => expect(api.grantPrivate).toHaveBeenCalledWith('sb1', 'prod', 'db'))
   })
 
+  it('disables Add while a grant is being submitted', async () => {
+    let finish!: (g: typeof grant) => void
+    vi.mocked(api.grantPrivate).mockReturnValue(new Promise(resolve => { finish = resolve }))
+    renderPage()
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Connector' }), 'prod')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Target' }), 'db')
+    const add = screen.getByRole('button', { name: 'Add' })
+    await userEvent.click(add)
+    await waitFor(() => expect(add).toBeDisabled())
+    await userEvent.click(add)
+    expect(api.grantPrivate).toHaveBeenCalledTimes(1)
+    finish(grant)
+    await waitFor(() => expect(api.listPrivateGrants).toHaveBeenCalledTimes(2))
+  })
+
   it('asks before removing a grant', async () => {
     renderPage()
     await userEvent.click(await screen.findByRole('button', { name: 'Remove db' }))

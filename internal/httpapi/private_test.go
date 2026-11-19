@@ -35,3 +35,15 @@ func TestPatchPrivate(t *testing.T) {
 		}
 	}
 }
+
+// The control plane strips "private" from a customer's PATCH, so a body that
+// set only that arrives here as {}; naming "private" back would mislead them.
+func TestEmptyPatchDoesNotOfferPrivate(t *testing.T) {
+	srv, key := newFakeRuntimeServer(t, runtimetest.NewFake())
+	_, out := do(t, "POST", srv.URL+"/v1/sandboxes", key, `{"template":"base"}`)
+	id, _ := out["id"].(string)
+	code, out := do(t, "PATCH", srv.URL+"/v1/sandboxes/"+id, key, `{}`)
+	if msg, _ := out["error"].(string); code != http.StatusBadRequest || !contains(msg, "name") || contains(msg, "private") {
+		t.Fatalf("empty patch: %d %v", code, out)
+	}
+}
