@@ -200,9 +200,13 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	// Caller-supplied names are checked before the platform appends its own.
 	for _, kv := range body.Env {
-		name, _, _ := strings.Cut(kv, "=")
+		name, value, _ := strings.Cut(kv, "=")
 		if err := sandbox.ValidEnvName(name); err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if modelHoldsKey(name, value) {
+			writeErr(w, http.StatusBadRequest, errKeyAsModel)
 			return
 		}
 	}
