@@ -631,9 +631,7 @@ func (s *Server) revokeSandboxGrant(w http.ResponseWriter, r *http.Request, st *
 	}
 	if _, err := s.pushPrivate(r.Context(), st, rec.ID, org); err != nil {
 		// The push may have failed before it cut anything, so cut this grant's connections here.
-		if g.Kind == store.GrantKindTarget {
-			s.privateConns.closeFor(rec.ID, g.Value)
-		}
+		s.privateConns.closeFor(rec.ID, g.Value)
 		s.log().Warn("private revoke not pushed", "component", "private", "sandbox", rec.ID, "err", err)
 	}
 	s.auditPrivate(r, st, "private.revoke", rec.ID, grantDetail(g.ConnectorName, g))

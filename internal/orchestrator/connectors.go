@@ -355,7 +355,7 @@ func (s *Server) handleConnectorLog(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, p := range rows {
-		out = append(out, map[string]any{"id": p.ID, "sandbox_id": p.SandboxID, "target": p.Target, "started_at": p.StartedAt,
+		out = append(out, map[string]any{"id": p.ID, "sandbox_id": p.SandboxID, "target": p.Target, "dest": p.Dest, "started_at": p.StartedAt,
 			"ended_at": p.EndedAt, "bytes_in": p.BytesIn, "bytes_out": p.BytesOut, "result": p.Result})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"connections": out})

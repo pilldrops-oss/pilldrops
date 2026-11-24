@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/store"
 )
 
@@ -208,16 +210,64 @@ func newPrivateConnID() string {
 	return "pc_" + hex.EncodeToString(b)
 }
 
-// handlePrivateDial carries one sandbox connection to a granted target. The
-// node has already routed it by name; this re-checks everything, because a
-// node key is not proof the sandbox may reach the target.
+// destGrant is what lets one dest dial through: the connector, the grant value
+// the log files it under, and for a DNS-learned address the instance that
+// answered and the name it answered for.
+type destGrant struct {
+	connectorID, value, instance, name, suffix string
+	subnet                                     bool
+}
+
+// authorizeDest finds the grant that lets a sandbox dial a: a subnet grant
+// containing it, preferring one whose connector has an online instance
+// covering a, else a live answer under a suffix still granted from the
+// connector that gave it. A subnet wins, so a name answered inside a granted
+// range goes the way the range does. The platform's own ranges never pass.
+func (s *Server) authorizeDest(gs []store.Grant, sandboxID string, a netip.Addr, now time.Time) (destGrant, bool) {
+	if len(sandbox.Shadowed(netip.PrefixFrom(a, 32))) > 0 {
+		return destGrant{}, false
+	}
+	var fallback destGrant
+	for _, g := range gs {
+		if g.Kind != store.GrantKindSubnet {
+			continue
+		}
+		if p, err := netip.ParsePrefix(g.Value); err == nil && p.Contains(a) {
+			dg := destGrant{connectorID: g.ConnectorID, value: g.Value, subnet: true}
+			if s.connectors.covers(g.ConnectorID, a) {
+				return dg, true
+			}
+			if fallback.connectorID == "" {
+				fallback = dg
+			}
+		}
+	}
+	if fallback.connectorID != "" {
+		return fallback, true
+	}
+	e, ok := s.privateDNS.lookup(sandboxID, a, now)
+	if !ok {
+		return destGrant{}, false
+	}
+	for _, g := range gs {
+		if g.Kind == store.GrantKindDNS && g.ConnectorID == e.connectorID && g.Value == e.suffix {
+			return destGrant{connectorID: g.ConnectorID, value: g.Value, instance: e.instanceID, name: e.name, suffix: e.suffix}, true
+		}
+	}
+	return destGrant{}, false
+}
+
+// handlePrivateDial carries one sandbox connection to a granted target, or,
+// with dest, to an address under a subnet or split-DNS grant. The node has
+// already routed it; this re-checks everything, because a node key is not
+// proof the sandbox may reach it.
 func (s *Server) handlePrivateDial(w http.ResponseWriter, r *http.Request) {
 	nodeID, st, ok := s.privateNode(w, r)
 	if !ok {
 		return
 	}
 	q := r.URL.Query()
-	sbID, target := q.Get("sandbox"), q.Get("target")
+	sbID, target, rawDest := q.Get("sandbox"), q.Get("target"), q.Get("dest")
 	port, _ := strconv.Atoi(q.Get("port"))
 	// Before any database read, and logged only in aggregate, so a connect
 	// loop costs the control plane no queries and the log no rows.
@@ -237,7 +287,7 @@ func (s *Server) handlePrivateDial(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "this node does not run that sandbox")
 		return
 	}
-	row := store.PrivateConn{ID: newPrivateConnID(), OrgID: rec.OrgID, SandboxID: sbID, Target: target, NodeID: nodeID, StartedAt: s.now().Unix()}
+	row := store.PrivateConn{ID: newPrivateConnID(), OrgID: rec.OrgID, SandboxID: sbID, Target: target, Dest: rawDest, NodeID: nodeID, StartedAt: s.now().Unix()}
 	logRow := func(result string) {
 		row.Result, row.EndedAt = result, s.now().Unix()
 		if err := st.InsertPrivateConn(context.WithoutCancel(r.Context()), row); err != nil {
@@ -249,46 +299,66 @@ func (s *Server) handlePrivateDial(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	var g store.Grant
-	granted := false
-	for _, x := range gs {
-		if x.Kind == store.GrantKindTarget && x.Value == target {
-			g, granted = x, true
-			break
+	var open func(context.Context) (net.Conn, string, error)
+	if rawDest != "" {
+		dest, err := netip.ParseAddrPort(rawDest)
+		granted := err == nil && dest.Addr().Is4() && dest.Port() != 0
+		var g destGrant
+		if granted {
+			g, granted = s.authorizeDest(gs, sbID, dest.Addr(), s.now())
+		}
+		if !granted {
+			logRow("denied")
+			writeErr(w, http.StatusForbidden, "not granted")
+			return
+		}
+		row.ConnectorID, row.Target = g.connectorID, g.value
+		open = func(ctx context.Context) (net.Conn, string, error) { return s.openDest(ctx, g, dest) }
+	} else {
+		granted := false
+		for _, g := range gs {
+			if g.Kind == store.GrantKindTarget && g.Value == target {
+				row.ConnectorID, granted = g.ConnectorID, true
+				break
+			}
+		}
+		if !granted {
+			logRow("denied")
+			writeErr(w, http.StatusForbidden, "not granted")
+			return
+		}
+		connectorID := row.ConnectorID
+		open = func(ctx context.Context) (net.Conn, string, error) {
+			return s.openPrivate(ctx, connectorID, target, port)
 		}
 	}
-	if !granted {
-		logRow("denied")
-		writeErr(w, http.StatusForbidden, "not granted")
-		return
-	}
-	row.ConnectorID = g.ConnectorID
-	c, found, err := st.ConnectorByID(r.Context(), "", g.ConnectorID)
+	c, found, err := st.ConnectorByID(r.Context(), "", row.ConnectorID)
 	if err != nil {
 		logRow("offline")
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	portOK := false
-	if found && c.RevokedAt == 0 {
+	allowed := found && c.RevokedAt == 0
+	if allowed && rawDest == "" {
+		allowed = false
 		for _, t := range s.connectors.union(c.ID, c.Targets) {
-			portOK = portOK || (t.Name == target && t.Port == port)
+			allowed = allowed || (t.Name == target && t.Port == port)
 		}
 	}
-	if !portOK {
+	if !allowed {
 		logRow("denied")
 		writeErr(w, http.StatusForbidden, "not granted")
 		return
 	}
 	slot := &privateSlot{}
-	pc := &privateConn{sandboxID: sbID, connectorID: g.ConnectorID, target: target, close: slot.close}
+	pc := &privateConn{sandboxID: sbID, connectorID: row.ConnectorID, target: row.Target, close: slot.close}
 	if !s.privateConns.add(pc) {
 		logRow("rate_limited")
 		writeErr(w, http.StatusTooManyRequests, "this sandbox has too many open private connections")
 		return
 	}
 	defer s.privateConns.remove(pc)
-	up, result, err := s.openPrivate(r.Context(), g.ConnectorID, target, port)
+	up, result, err := open(r.Context())
 	if err != nil {
 		logRow(result)
 		writeErr(w, http.StatusBadGateway, "connector "+c.Name+": "+result)

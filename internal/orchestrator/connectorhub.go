@@ -299,10 +299,24 @@ func (h *connectorHub) counter(connectorID string) *atomic.Int64 {
 
 var errPrivateUnavailable = errors.New("connector unavailable")
 
-// openPrivate asks up to two instances to open target and returns the data
-// connection. The result string is the log code on failure.
+// openPrivate asks up to two instances serving target to open it.
 func (s *Server) openPrivate(ctx context.Context, connectorID, target string, port int) (net.Conn, string, error) {
-	cands := s.connectors.candidates(connectorID, target, port)
+	return s.openOn(ctx, connectorID, s.connectors.candidates(connectorID, target, port),
+		map[string]any{"type": "open", "proto": "tcp", "target": target, "port": port})
+}
+
+// openDest asks up to two instances that can reach dest to open it.
+func (s *Server) openDest(ctx context.Context, g destGrant, dest netip.AddrPort) (net.Conn, string, error) {
+	msg := map[string]any{"type": "open", "proto": "tcp", "dest": dest.String()}
+	if g.name != "" {
+		msg["name"] = g.name
+	}
+	return s.openOn(ctx, g.connectorID, s.connectors.destCandidates(g.connectorID, dest.Addr(), g), msg)
+}
+
+// openOn sends msg under a fresh id to up to two of cands in turn and returns
+// the data connection. The result string is the log code on failure.
+func (s *Server) openOn(ctx context.Context, connectorID string, cands []*connectorInstance, msg map[string]any) (net.Conn, string, error) {
 	if len(cands) == 0 {
 		return nil, "offline", errPrivateUnavailable
 	}
@@ -315,7 +329,9 @@ func (s *Server) openPrivate(ctx context.Context, connectorID, target string, po
 	for _, in := range cands[:min(2, len(cands))] {
 		ch := make(chan net.Conn, 1)
 		id := s.connectors.addPending(ch)
-		if err := in.send(map[string]any{"type": "open", "id": id, "proto": "tcp", "target": target, "port": port}); err != nil {
+		m := maps.Clone(msg)
+		m["id"] = id
+		if err := in.send(m); err != nil {
 			s.connectors.abandonPending(id, ch)
 			continue
 		}
@@ -339,6 +355,40 @@ func (s *Server) openPrivate(ctx context.Context, connectorID, target string, po
 	}
 	active.Add(-1)
 	return nil, result, errPrivateUnavailable
+}
+
+// covers reports whether an online instance of the connector announces a subnet containing a.
+func (h *connectorHub) covers(connectorID string, a netip.Addr) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, in := range h.instances[connectorID] {
+		if in.coversAddr(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// destCandidates returns the instances that can open a, rotated: those
+// announcing a covering subnet for a subnet grant, or the grant's suffix for a
+// DNS-learned address, with the instance that answered the lookup first.
+func (h *connectorHub) destCandidates(connectorID string, a netip.Addr, g destGrant) []*connectorInstance {
+	h.mu.Lock()
+	var out []*connectorInstance
+	for _, in := range h.instances[connectorID] {
+		if (g.subnet && in.coversAddr(a)) || (!g.subnet && in.servesSuffix(g.suffix)) {
+			out = append(out, in)
+		}
+	}
+	h.mu.Unlock()
+	out = h.rotate(out)
+	for i, in := range out {
+		if in.instanceID == g.instance && i > 0 {
+			out[0], out[i] = out[i], out[0]
+			break
+		}
+	}
+	return out
 }
 
 type connectorConn struct {
