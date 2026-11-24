@@ -15,6 +15,15 @@ import (
 // Post-launch config is applied per exec, so a change lands on the next
 // command without restarting the sandbox.
 
+const errKeyAsModel = "the model looks like an API key (it starts with sk-): put the key in the API key " +
+	"field and a model name such as claude-sonnet-4-6 in the model field"
+
+// modelHoldsKey catches a key pasted into a model setting, which the agent
+// would otherwise report only as an invalid key.
+func modelHoldsKey(name, value string) bool {
+	return (name == "MODEL" || strings.HasSuffix(name, "_MODEL")) && strings.HasPrefix(strings.TrimSpace(value), "sk-")
+}
+
 // secretish decides whether a value is masked on read-back. Deliberately generous.
 func secretish(name string) bool {
 	n := strings.ToUpper(name)
@@ -61,11 +70,19 @@ func (s *Server) handleConfigSet(w http.ResponseWriter, r *http.Request) {
 			"retention": body.Backups.Retention,
 		})
 	}
-	for name := range body.Env {
+	for name, value := range body.Env {
 		if err := sandbox.ValidEnvName(name); err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if modelHoldsKey(name, value) {
+			writeErr(w, http.StatusBadRequest, errKeyAsModel)
+			return
+		}
+	}
+	if modelHoldsKey("MODEL", body.Model) {
+		writeErr(w, http.StatusBadRequest, errKeyAsModel)
+		return
 	}
 
 	env := body.Env

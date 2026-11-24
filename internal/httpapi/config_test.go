@@ -111,3 +111,23 @@ func jsonOf(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+func TestConfigRejectsKeyAsModel(t *testing.T) {
+	srv, key, sb, _ := newCronSandbox(t)
+	for _, body := range []string{
+		`{"model":"sk-ant-api03-pasted"}`,
+		`{"env":{"ANTHROPIC_MODEL":" sk-ant-api03-pasted"}}`,
+	} {
+		if code, _ := do(t, "POST", srv+"/v1/sandboxes/"+sb+"/config", key, body); code != http.StatusBadRequest {
+			t.Errorf("config %s = %d, want 400", body, code)
+		}
+	}
+	if code, _ := do(t, "POST", srv+"/v1/sandboxes", key,
+		`{"template":"base","env":["ANTHROPIC_MODEL=sk-ant-api03-pasted"]}`); code != http.StatusBadRequest {
+		t.Errorf("create with a key as the model = %d, want 400", code)
+	}
+	if code, out := do(t, "POST", srv+"/v1/sandboxes/"+sb+"/config", key,
+		`{"model":"claude-sonnet-4-6","env":{"ANTHROPIC_API_KEY":"sk-ant-api03-real"}}`); code != http.StatusOK {
+		t.Errorf("a model name and a key in its own variable = %d %v, want 200", code, out)
+	}
+}
