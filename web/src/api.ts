@@ -21,6 +21,8 @@ import type {
   ConnectorKey,
   PrivateConnection,
   PrivateGrant,
+  GrantKind,
+  TagGrant,
   Capabilities,
   ClusterStats,
   ObjectStoreView,
@@ -435,11 +437,17 @@ export const revokeConnectorKey = (id: string, keyId: string) =>
 export const listConnectorConnections = async (id: string) =>
   (await request<{ connections: PrivateConnection[] }>('GET', `/v1/connectors/${encodeURIComponent(id)}/connections`, undefined)).connections
 export const listPrivateGrants = (sandboxId: string) =>
-  request<{ grants: PrivateGrant[]; supported: boolean }>('GET', `/v1/sandboxes/${sandboxId}/private`, undefined)
-export const grantPrivate = (sandboxId: string, connector: string, target: string) =>
-  request<PrivateGrant>('POST', `/v1/sandboxes/${sandboxId}/private`, { connector, target })
-export const revokePrivate = (sandboxId: string, connector: string, target: string) =>
-  request<void>('DELETE', `/v1/sandboxes/${sandboxId}/private/${encodeURIComponent(connector)}/${encodeURIComponent(target)}`, undefined)
+  request<{ grants: PrivateGrant[]; supported: boolean; routes_supported: boolean }>('GET', `/v1/sandboxes/${sandboxId}/private`, undefined)
+export const grantPrivate = (sandboxId: string, connector: string, kind: GrantKind, value: string) =>
+  request<PrivateGrant>('POST', `/v1/sandboxes/${sandboxId}/private`, { connector, [kind]: value })
+export const revokePrivate = (sandboxId: string, grantId: string) =>
+  request<void>('DELETE', `/v1/sandboxes/${sandboxId}/private/${encodeURIComponent(grantId)}`, undefined)
+export const listTagGrants = async () =>
+  (await request<{ grants: TagGrant[] }>('GET', '/v1/private/grants', undefined)).grants
+export const grantTag = (tag: string, connector: string, kind: GrantKind, value: string) =>
+  request<TagGrant & { sandboxes: number; unsupported: string[] }>('POST', '/v1/private/grants', { tag, connector, [kind]: value })
+export const revokeTagGrant = (id: string) =>
+  request<void>('DELETE', `/v1/private/grants/${encodeURIComponent(id)}`, undefined)
 
 export const listWebhooks = () =>
   request<{ webhooks: Webhook[] | null; deliverable_events: string[] }>('GET', '/v1/webhooks', undefined)
