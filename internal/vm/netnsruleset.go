@@ -64,19 +64,20 @@ func renderEgressPolicy(rules *egress.Rules, tapName string) (chain, divert stri
 // of the 10/8 drop so a guest can reach a control plane on this host.
 // tagged adds the one line a sandbox on a network needs; false renders exactly
 // what this function rendered before tag networks existed.
+// private also declares the private_dst set, holding privateElements.
 // divert, when non-empty, hands the guest's name-bearing connections to the
 // name layer. It goes in prerouting, after the node's DNAT: `redirect` is a nat
 // statement that nft refuses in the egress chain, and prerouting is an earlier
 // hook anyway, so a diverted packet is judged on its name before any address
 // denial in the chain below can kill it.
-func buildNetNSRuleset(vn, tapName string, hostIP, nsIP, guestIP net.IP, policy, divert string, tagged, private bool) string {
+func buildNetNSRuleset(vn, tapName string, hostIP, nsIP, guestIP net.IP, policy, divert string, tagged, private bool, privateElements string) string {
 	tail := policy
 	if tail == "" {
 		tail = "\t\tudp dport 53 accept\n\t\ttcp dport { 53, 80, 443 } accept\n\t\tdrop"
 	}
 	return fmt.Sprintf(`flush ruleset
 table ip sandbox {
-	chain prerouting {
+%s	chain prerouting {
 		type nat hook prerouting priority dstnat;
 		iifname %q ip daddr %s dnat to %s
 %s%s%s	}
@@ -98,7 +99,7 @@ table ip sandbox {
 %s
 	}
 }
-`, vn, nsIP, guestIP, privateRedirect(private, tapName), taggedDNSRedirect(tagged || private, tapName), divert,
+`, privateSet(private, privateElements), vn, nsIP, guestIP, privateRedirect(private, tapName), taggedDNSRedirect(tagged || private, tapName), divert,
 		vn, vn, tapName, tapName, privateEgressDrop(private), localAPIEgressRule(hostIP), taggedEgressRule(tagged), tail)
 }
 
@@ -139,4 +140,11 @@ func netnsBaseChainRules(chain string) [][]string {
 		{chain, "-s", netnsSupernet, "-j", "ACCEPT"},
 		{chain, "-d", netnsSupernet, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
 	}
+}
+
+func privateSet(on bool, elements string) string {
+	if !on {
+		return ""
+	}
+	return privateSetDecl(elements)
 }

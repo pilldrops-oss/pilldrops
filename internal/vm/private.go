@@ -3,10 +3,13 @@ package vm
 import (
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"golang.org/x/time/rate"
 
@@ -78,14 +81,17 @@ func privateRedirect(on bool, tapName string) string {
 	if !on {
 		return ""
 	}
-	return fmt.Sprintf("\t\tiifname %q ip daddr %s meta l4proto tcp redirect to :%d\n", tapName, privateSubnet, privateProxyPort)
+	return fmt.Sprintf("\t\tiifname %q ip daddr %s meta l4proto tcp redirect to :%d\n", tapName, privateSubnet, privateProxyPort) +
+		fmt.Sprintf("\t\tiifname %q ip daddr @%s meta l4proto tcp redirect to :%d\n", tapName, privateSetName, privateProxyPort)
 }
 
+// privateEgressDrop keeps UDP to a private address from leaving directly: a
+// customer may announce a public range. UDP through connectors is phase 3.
 func privateEgressDrop(on bool) string {
 	if !on {
 		return ""
 	}
-	return "\t\tip daddr " + privateSubnet + " drop\n"
+	return "\t\tip daddr " + privateSubnet + " drop\n\t\tip daddr @" + privateSetName + " drop\n"
 }
 
 var privatePrefix = netip.MustParsePrefix(privateSubnet)
@@ -133,4 +139,101 @@ func privSplice(guest, up net.Conn) {
 	go half(up, guest)
 	<-done
 	<-done
+}
+
+const (
+	privateSetName       = "private_dst"
+	dnsMinTimeout        = 30 * time.Second
+	dnsMaxTimeout        = 300 * time.Second
+	maxLearnedPerSandbox = 1024
+)
+
+// learnedAddr is an address a split-DNS answer routes through a connector.
+type learnedAddr struct {
+	suffix  string
+	expires time.Time
+}
+
+func coveredBy(ps []netip.Prefix, a netip.Addr) bool {
+	for _, p := range ps {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// coversDest reports whether a connection to a goes through the connector: a
+// granted subnet holds it, or a split-DNS answer that has not expired.
+func coversDest(subnets []netip.Prefix, learned map[netip.Addr]learnedAddr, a netip.Addr, now time.Time) bool {
+	if coveredBy(subnets, a) {
+		return true
+	}
+	l, ok := learned[a]
+	return ok && l.expires.After(now)
+}
+
+// privateSetElements renders the set's contents: the static subnets, then each
+// live learned address with the whole seconds it has left. An address inside a
+// subnet is left out: it is covered already, and nft refuses an interval
+// element inside another.
+func privateSetElements(subnets []netip.Prefix, learned map[netip.Addr]learnedAddr, now time.Time) string {
+	els := make([]string, 0, len(subnets)+len(learned))
+	for _, p := range subnets {
+		els = append(els, p.String())
+	}
+	for _, a := range slices.SortedFunc(maps.Keys(learned), netip.Addr.Compare) {
+		left := learned[a].expires.Sub(now) / time.Second
+		if left < 1 || coveredBy(subnets, a) {
+			continue
+		}
+		els = append(els, fmt.Sprintf("%s timeout %ds", a, left))
+	}
+	return strings.Join(els, ", ")
+}
+
+// privateSetDecl declares the set inside table ip sandbox, holding elements.
+func privateSetDecl(elements string) string {
+	out := "\tset " + privateSetName + " {\n\t\ttype ipv4_addr\n\t\tflags interval, timeout\n"
+	if elements != "" {
+		out += "\t\telements = { " + elements + " }\n"
+	}
+	return out + "\t}\n"
+}
+
+// privateSetRefill replaces the set's contents in one atomic nft batch.
+func privateSetRefill(elements string) string {
+	out := "flush set ip sandbox " + privateSetName + "\n"
+	if elements != "" {
+		out += "add element ip sandbox " + privateSetName + " { " + elements + " }\n"
+	}
+	return out
+}
+
+// privateSetAdd adds one learned address that is not in the set yet.
+func privateSetAdd(a netip.Addr, timeout time.Duration) string {
+	return fmt.Sprintf("add element ip sandbox %s { %s timeout %ds }\n", privateSetName, a, int(timeout/time.Second))
+}
+
+// dnsTimeouts turns an answer's TTL into the set timeout, clamped to 30-300 s,
+// and the TTL the guest is told, never longer than the set keeps the address.
+func dnsTimeouts(ttl uint32) (time.Duration, uint32) {
+	timeout := max(dnsMinTimeout, min(time.Duration(ttl)*time.Second, dnsMaxTimeout))
+	return timeout, min(ttl, uint32(dnsMaxTimeout/time.Second))
+}
+
+// learnPlan says how an answered address enters the set. Not there: add it.
+// There with under half the new timeout left: refill the whole set, since an
+// nft add does not extend an element that exists. Otherwise leave it, and tell
+// the guest no more than the time it has left.
+func learnPlan(prev learnedAddr, known bool, now time.Time, answerTTL uint32) (expires time.Time, ttl uint32, add, refill bool) {
+	timeout, ttl := dnsTimeouts(answerTTL)
+	if !known {
+		return now.Add(timeout), ttl, true, false
+	}
+	left := prev.expires.Sub(now)
+	if left < timeout/2 {
+		return now.Add(timeout), ttl, false, true
+	}
+	return prev.expires, min(ttl, uint32(left/time.Second)), false, false
 }

@@ -42,7 +42,7 @@ table ip sandbox {
 func TestUntaggedRulesetIsUnchanged(t *testing.T) {
 	t.Setenv("PILLDROPS_LOCAL_API_PORT", "")
 	host, ns, guest := net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2")
-	got := buildNetNSRuleset("vn7", "tap0", host, ns, guest, "", "", false, false)
+	got := buildNetNSRuleset("vn7", "tap0", host, ns, guest, "", "", false, false, "")
 	if got != untaggedGolden {
 		t.Fatalf("an untagged sandbox's ruleset changed.\n--- got ---\n%s\n--- want ---\n%s", got, untaggedGolden)
 	}
@@ -53,7 +53,7 @@ func TestUntaggedRulesetIsUnchanged(t *testing.T) {
 func TestTaggedRulesetAddsOneLineAheadOfTheDrop(t *testing.T) {
 	t.Setenv("PILLDROPS_LOCAL_API_PORT", "")
 	host, ns, guest := net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2")
-	rs := buildNetNSRuleset("vn7", "tap0", host, ns, guest, "", "", true, false)
+	rs := buildNetNSRuleset("vn7", "tap0", host, ns, guest, "", "", true, false, "")
 	const rule = "ip daddr 10.128.0.0/16 accept"
 	i, j := strings.Index(rs, rule), strings.Index(rs, "ip daddr 10.0.0.0/8 drop")
 	if i < 0 || j < 0 || i > j {

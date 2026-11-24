@@ -67,7 +67,7 @@ func TestLiveIPv4RulesetsLoad(t *testing.T) {
 	ns := liveNetNS(t)
 
 	for name, rs := range map[string]string{
-		"in-namespace": buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), "", "", false, false),
+		"in-namespace": buildNetNSRuleset("vn7", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"), "", "", false, false, ""),
 		"host":         buildNetNSHostRuleset("eth0"),
 	} {
 		t.Run(name, func(t *testing.T) {
