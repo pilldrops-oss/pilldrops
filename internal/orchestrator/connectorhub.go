@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"maps"
 	"net"
@@ -193,6 +194,24 @@ func (h *connectorHub) candidates(connectorID, target string, port int) []*conne
 		}
 	}
 	h.mu.Unlock()
+	return h.rotate(out)
+}
+
+// suffixCandidates returns instances that announced suffix or one above it, rotated.
+func (h *connectorHub) suffixCandidates(connectorID, suffix string) []*connectorInstance {
+	h.mu.Lock()
+	var out []*connectorInstance
+	for _, in := range h.instances[connectorID] {
+		if in.servesSuffix(suffix) {
+			out = append(out, in)
+		}
+	}
+	h.mu.Unlock()
+	return h.rotate(out)
+}
+
+// rotate sorts instances by id and starts at the next one, so load spreads.
+func (h *connectorHub) rotate(out []*connectorInstance) []*connectorInstance {
 	sort.Slice(out, func(i, j int) bool { return out[i].instanceID < out[j].instanceID })
 	if n := len(out); n > 1 {
 		k := int(h.next.Add(1) % uint64(n))
@@ -438,18 +457,25 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 	go s.superviseConnector(st, in)
 	ctrl.SetPongHandler(func(string) error { return ctrl.SetReadDeadline(time.Now().Add(shareReadWait)) })
 	for {
+		_ = ctrl.SetReadDeadline(time.Now().Add(shareReadWait))
+		_, raw, err := ctrl.ReadMessage()
+		if err != nil {
+			return
+		}
 		var m struct {
 			Type string `json:"type"`
 			ID   string `json:"id"`
 		}
-		_ = ctrl.SetReadDeadline(time.Now().Add(shareReadWait))
-		if err := ctrl.ReadJSON(&m); err != nil {
-			return
+		if json.Unmarshal(raw, &m) != nil {
+			continue
 		}
-		if m.Type == "fail" {
+		switch m.Type {
+		case "fail":
 			if ch := s.connectors.takePending(m.ID); ch != nil {
 				ch <- nil
 			}
+		case "dns_answer":
+			s.privateDNS.deliver(m.ID, raw)
 		}
 	}
 }

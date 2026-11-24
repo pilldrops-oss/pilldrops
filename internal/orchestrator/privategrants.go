@@ -721,4 +721,5 @@ func (s *Server) dropPrivate(ctx context.Context, sandboxID string) {
 		_ = st.DeletePrivateGrantsForSandbox(ctx, sandboxID) //nolint:errcheck // best-effort: the sandbox is gone, orphan grants route nowhere
 	}
 	s.privateConns.closeFor(sandboxID, "")
+	s.privateDNS.forget(sandboxID)
 }

@@ -92,6 +92,7 @@ type Server struct {
 	connectors connectorHub
 	// privateConns tracks open private connections so a revoke or destroy can cut them.
 	privateConns privateConnSet
+	privateDNS   privateDNS
 	// privatePushes serializes grant changes and pushes per sandbox.
 	privatePushes sandboxLocks
 

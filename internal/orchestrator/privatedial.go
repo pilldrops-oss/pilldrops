@@ -212,26 +212,8 @@ func newPrivateConnID() string {
 // node has already routed it by name; this re-checks everything, because a
 // node key is not proof the sandbox may reach the target.
 func (s *Server) handlePrivateDial(w http.ResponseWriter, r *http.Request) {
-	if !privateIngressEnabled() {
-		writeErr(w, http.StatusServiceUnavailable, "this replica does not run the connector hub")
-		return
-	}
-	nodeID, ok := s.authNode(r)
-	if !ok && nodeID != "" {
-		writeErr(w, http.StatusForbidden, "node removed: this id was revoked by an operator")
-		return
-	}
+	nodeID, st, ok := s.privateNode(w, r)
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "node key required")
-		return
-	}
-	if nodeID == "" {
-		writeErr(w, http.StatusForbidden, "only a node may open private connections")
-		return
-	}
-	st := s.st.Load()
-	if st == nil {
-		writeErr(w, http.StatusServiceUnavailable, "store unavailable")
 		return
 	}
 	q := r.URL.Query()
@@ -341,4 +323,31 @@ func splicePrivate(a, b net.Conn) {
 	go half(b, a)
 	<-done
 	<-done
+}
+
+// privateNode authenticates a node calling the hub's internal routes.
+func (s *Server) privateNode(w http.ResponseWriter, r *http.Request) (string, *store.Store, bool) {
+	if !privateIngressEnabled() {
+		writeErr(w, http.StatusServiceUnavailable, "this replica does not run the connector hub")
+		return "", nil, false
+	}
+	nodeID, ok := s.authNode(r)
+	if !ok && nodeID != "" {
+		writeErr(w, http.StatusForbidden, "node removed: this id was revoked by an operator")
+		return "", nil, false
+	}
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "node key required")
+		return "", nil, false
+	}
+	if nodeID == "" {
+		writeErr(w, http.StatusForbidden, "only a node may open private connections")
+		return "", nil, false
+	}
+	st := s.st.Load()
+	if st == nil {
+		writeErr(w, http.StatusServiceUnavailable, "store unavailable")
+		return "", nil, false
+	}
+	return nodeID, st, true
 }
