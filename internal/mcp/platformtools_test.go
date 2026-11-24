@@ -14,6 +14,26 @@ func TestPlatformToolsCallTheRouteTheyClaim(t *testing.T) {
 		args               map[string]any
 		method, path, body string
 	}{
+		"grant a subnet": {
+			tool: "grant_private_target", args: map[string]any{"sandbox_id": "sb_1", "connector": "prod", "subnet": "10.0.5.0/24"},
+			method: "POST", path: "/v1/sandboxes/sb_1/private", body: `{"connector":"prod","subnet":"10.0.5.0/24"}`,
+		},
+		"grant a target, as phase 1": {
+			tool: "grant_private_target", args: map[string]any{"sandbox_id": "sb_1", "connector": "prod", "target": "db"},
+			method: "POST", path: "/v1/sandboxes/sb_1/private", body: `{"connector":"prod","target":"db"}`,
+		},
+		"grant to a tag": {
+			tool: "grant_private_tag", args: map[string]any{"tag": "backend", "connector": "prod", "dns": "corp.internal"},
+			method: "POST", path: "/v1/private/grants", body: `{"connector":"prod","dns":"corp.internal","tag":"backend"}`,
+		},
+		"revoke a tag grant": {
+			tool: "revoke_private_grant", args: map[string]any{"grant_id": "pg_1"},
+			method: "DELETE", path: "/v1/private/grants/pg_1", body: "",
+		},
+		"revoke a sandbox grant": {
+			tool: "revoke_private_grant", args: map[string]any{"grant_id": "pg_1", "sandbox_id": "sb_1"},
+			method: "DELETE", path: "/v1/sandboxes/sb_1/private/pg_1", body: "",
+		},
 		"create_volume": {
 			tool: "create_volume", args: map[string]any{"name": "data", "size_mb": float64(1024)},
 			method: "POST", path: "/v1/volumes", body: `{"name":"data","size_mb":1024}`,
