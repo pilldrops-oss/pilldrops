@@ -321,14 +321,15 @@ func (s *Server) handleShareControl(w http.ResponseWriter, r *http.Request) {
 		done:     make(chan struct{}),
 	}
 	t.proxy, t.transport = s.newShareProxy(t)
-	refreshEvery := shareRefreshEvery // read before put, so a test's restore of it is ordered after
+	// Read before put, so a test's restore of them is ordered after.
+	refreshEvery, pingEvery := shareRefreshEvery, sharePingEvery
 	if old := s.shares.put(t); old != nil {
 		old.end("")
 	}
 	slog.Info("share connected", "component", "share", "name", sh.Name, "org", sh.OrgID)
 	s.touchShare(st, id)
 
-	go s.superviseShare(st, t, refreshEvery)
+	go s.superviseShare(st, t, refreshEvery, pingEvery)
 
 	// Reading is what notices a dead peer and delivers pongs; the CLI sends nothing else.
 	_ = ctrl.SetReadDeadline(time.Now().Add(shareReadWait))
@@ -368,10 +369,10 @@ func (s *Server) touchShare(st *store.Store, id string) {
 // superviseShare pings, records that the tunnel is alive, and re-reads the row,
 // because a close or takedown may have been handled by another replica. A store
 // error leaves the tunnel up: an outage should not cut every link.
-func (s *Server) superviseShare(st *store.Store, t *shareTunnel, refreshEvery time.Duration) {
+func (s *Server) superviseShare(st *store.Store, t *shareTunnel, refreshEvery, pingEvery time.Duration) {
 	refresh := time.NewTicker(refreshEvery)
 	defer refresh.Stop()
-	ping := time.NewTicker(sharePingEvery)
+	ping := time.NewTicker(pingEvery)
 	defer ping.Stop()
 	touch := time.NewTicker(shareTouchEvery)
 	defer touch.Stop()
