@@ -21,18 +21,24 @@ type Connector struct {
 	CreatedAt, LastSeenAt      int64
 	RevokedAt                  int64
 	Targets                    []ConnectorTarget
+	Subnets, Suffixes          []string
 }
 
-const connectorCols = `id, name, org_id, created_by, created_at, last_seen_at, revoked_at, targets`
+const connectorCols = `id, name, org_id, created_by, created_at, last_seen_at, revoked_at, targets, subnets, dns_suffixes`
 
 func scanConnector(sc interface{ Scan(...any) error }) (Connector, error) {
 	var c Connector
-	var targets string
-	if err := sc.Scan(&c.ID, &c.Name, &c.OrgID, &c.CreatedBy, &c.CreatedAt, &c.LastSeenAt, &c.RevokedAt, &targets); err != nil {
+	var targets, subnets, suffixes string
+	if err := sc.Scan(&c.ID, &c.Name, &c.OrgID, &c.CreatedBy, &c.CreatedAt, &c.LastSeenAt, &c.RevokedAt, &targets, &subnets, &suffixes); err != nil {
 		return Connector{}, err
 	}
-	if err := json.Unmarshal([]byte(targets), &c.Targets); err != nil {
-		return Connector{}, err
+	for _, f := range []struct {
+		raw string
+		dst any
+	}{{targets, &c.Targets}, {subnets, &c.Subnets}, {suffixes, &c.Suffixes}} {
+		if err := json.Unmarshal([]byte(f.raw), f.dst); err != nil {
+			return Connector{}, err
+		}
 	}
 	return c, nil
 }
@@ -46,7 +52,7 @@ func isUniqueViolation(err error) bool {
 }
 
 func (s *Store) InsertConnector(ctx context.Context, c Connector) error {
-	_, err := s.exec(ctx, `INSERT INTO connectors (`+connectorCols+`) VALUES (?, ?, ?, ?, ?, ?, 0, '[]')`,
+	_, err := s.exec(ctx, `INSERT INTO connectors (`+connectorCols+`) VALUES (?, ?, ?, ?, ?, ?, 0, '[]', '[]', '[]')`,
 		c.ID, c.Name, c.OrgID, c.CreatedBy, c.CreatedAt, c.LastSeenAt)
 	if isUniqueViolation(err) {
 		return ErrConnectorNameTaken
@@ -108,6 +114,24 @@ func (s *Store) SetConnectorTargets(ctx context.Context, id string, ts []Connect
 	return err
 }
 
+// SetConnectorAnnounced stores what the connector's instances announce now.
+func (s *Store) SetConnectorAnnounced(ctx context.Context, id string, ts []ConnectorTarget, subnets, suffixes []string, now int64) error {
+	if ts == nil {
+		ts = []ConnectorTarget{}
+	}
+	if subnets == nil {
+		subnets = []string{}
+	}
+	if suffixes == nil {
+		suffixes = []string{}
+	}
+	tb, _ := json.Marshal(ts)
+	sb, _ := json.Marshal(subnets)
+	db, _ := json.Marshal(suffixes)
+	_, err := s.exec(ctx, `UPDATE connectors SET targets = ?, subnets = ?, dns_suffixes = ?, last_seen_at = ? WHERE id = ?`, string(tb), string(sb), string(db), now, id)
+	return err
+}
+
 func (s *Store) TouchConnector(ctx context.Context, id string, now int64) error {
 	_, err := s.exec(ctx, `UPDATE connectors SET last_seen_at = ? WHERE id = ?`, now, id)
 	return err
@@ -130,6 +154,9 @@ func (s *Store) RevokeConnector(ctx context.Context, org, id string, now int64) 
 		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, s.rebind(`DELETE FROM sandbox_private_grants WHERE connector_id = ?`), id); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, s.rebind(`DELETE FROM private_grants WHERE connector_id = ?`), id); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()

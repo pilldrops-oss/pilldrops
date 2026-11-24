@@ -36,7 +36,7 @@ func eachStore(t *testing.T, fn func(t *testing.T, st *Store, sfx string)) {
 		sfx := fmt.Sprintf("-%d", time.Now().UnixNano())
 		t.Cleanup(func() {
 			for table, col := range map[string]string{
-				"connectors": "id", "connector_keys": "connector_id", "sandbox_private_grants": "sandbox_id",
+				"connectors": "id", "connector_keys": "connector_id", "sandbox_private_grants": "sandbox_id", "private_grants": "subject",
 				"private_connections": "connector_id", "sandboxes": "id",
 			} {
 				_, _ = st.db.Exec(st.rebind(`DELETE FROM `+table+` WHERE `+col+` LIKE ?`), "%"+sfx)

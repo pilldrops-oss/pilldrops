@@ -2203,4 +2203,59 @@ BEGIN SELECT RAISE(ABORT, 'sandboxes_state_known'); END`,
 			`ALTER TABLE sandboxes ADD COLUMN IF NOT EXISTS private_targets TEXT NOT NULL DEFAULT '[]'`,
 		},
 	},
+	{
+		// PLACEHOLDER VERSION — CLAIM A NUMBER AT MERGE, as the note on 58 says.
+		version: 79,
+		name:    "private_routes",
+		// One table for every grant: to a sandbox or a network tag, of a target,
+		// a subnet or a DNS suffix. sandbox_private_grants stays until every node
+		// runs this phase, since an older node's DeleteSandbox still deletes from it.
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS private_grants (
+				id           TEXT PRIMARY KEY,
+				org_id       TEXT NOT NULL,
+				connector_id TEXT NOT NULL,
+				subject_kind TEXT NOT NULL,
+				subject      TEXT NOT NULL,
+				kind         TEXT NOT NULL,
+				value        TEXT NOT NULL,
+				created_at   INTEGER NOT NULL
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS private_grants_unique ON private_grants (subject_kind, subject, connector_id, kind, value)`,
+			`CREATE INDEX IF NOT EXISTS private_grants_connector ON private_grants (connector_id)`,
+			`CREATE INDEX IF NOT EXISTS private_grants_org_subject ON private_grants (org_id, subject_kind, subject)`,
+			// WHERE true: SQLite needs it to parse ON CONFLICT after INSERT ... SELECT.
+			`INSERT INTO private_grants (id, org_id, connector_id, subject_kind, subject, kind, value, created_at)
+				SELECT 'pg_' || lower(hex(randomblob(12))), c.org_id, g.connector_id, 'sandbox', g.sandbox_id, 'target', g.target, g.created_at
+				FROM sandbox_private_grants g JOIN connectors c ON c.id = g.connector_id WHERE true
+				ON CONFLICT DO NOTHING`,
+			`ALTER TABLE connectors ADD COLUMN subnets TEXT NOT NULL DEFAULT '[]'`,
+			`ALTER TABLE connectors ADD COLUMN dns_suffixes TEXT NOT NULL DEFAULT '[]'`,
+			`ALTER TABLE sandboxes ADD COLUMN private_routes TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE private_connections ADD COLUMN dest TEXT NOT NULL DEFAULT ''`,
+		},
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS private_grants (
+				id           TEXT PRIMARY KEY,
+				org_id       TEXT NOT NULL,
+				connector_id TEXT NOT NULL,
+				subject_kind TEXT NOT NULL,
+				subject      TEXT NOT NULL,
+				kind         TEXT NOT NULL,
+				value        TEXT NOT NULL,
+				created_at   BIGINT NOT NULL
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS private_grants_unique ON private_grants (subject_kind, subject, connector_id, kind, value)`,
+			`CREATE INDEX IF NOT EXISTS private_grants_connector ON private_grants (connector_id)`,
+			`CREATE INDEX IF NOT EXISTS private_grants_org_subject ON private_grants (org_id, subject_kind, subject)`,
+			`INSERT INTO private_grants (id, org_id, connector_id, subject_kind, subject, kind, value, created_at)
+				SELECT 'pg_' || substr(md5(random()::text || g.sandbox_id || g.target), 1, 24), c.org_id, g.connector_id, 'sandbox', g.sandbox_id, 'target', g.target, g.created_at
+				FROM sandbox_private_grants g JOIN connectors c ON c.id = g.connector_id
+				ON CONFLICT DO NOTHING`,
+			`ALTER TABLE connectors ADD COLUMN IF NOT EXISTS subnets TEXT NOT NULL DEFAULT '[]'`,
+			`ALTER TABLE connectors ADD COLUMN IF NOT EXISTS dns_suffixes TEXT NOT NULL DEFAULT '[]'`,
+			`ALTER TABLE sandboxes ADD COLUMN IF NOT EXISTS private_routes TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE private_connections ADD COLUMN IF NOT EXISTS dest TEXT NOT NULL DEFAULT ''`,
+		},
+	},
 }
