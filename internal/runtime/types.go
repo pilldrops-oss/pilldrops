@@ -536,6 +536,14 @@ type PrivateRouter interface {
 	SetPrivate(ctx context.Context, ts []sandbox.PrivateTarget) error
 }
 
+// PrivateRouteSetter is an optional Instance capability: the sandbox reaches
+// granted subnets and names under granted DNS suffixes through its
+// connectors. SetPrivateRoutes replaces both lists, takes effect on the running
+// sandbox, and closes connections they no longer cover.
+type PrivateRouteSetter interface {
+	SetPrivateRoutes(ctx context.Context, r sandbox.PrivateRoutes) error
+}
+
 // Forker is a Runtime that can copy a sandbox, memory, disk and running
 // processes, into a new instance. The child comes up running either way.
 type Forker interface {

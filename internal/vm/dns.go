@@ -229,7 +229,7 @@ func splitAnswer(id uint16, q dnsmessage.Question, relay func(qtype string) (san
 	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, Response: true, RecursionAvailable: true})
 	b.EnableCompression()
 	if b.StartQuestions() != nil || b.Question(q) != nil || b.StartAnswers() != nil {
-		return nil
+		return buildRCode(id, q, dnsmessage.RCodeServerFailure)
 	}
 	owner := q.Name
 	for _, a := range reply.Answers[:min(len(reply.Answers), maxSplitAnswers)] {
@@ -242,12 +242,13 @@ func splitAnswer(id uint16, q dnsmessage.Question, relay func(qtype string) (san
 			}
 			h.Type = dnsmessage.TypeCNAME
 			if b.CNAMEResource(h, dnsmessage.CNAMEResource{CNAME: next}) != nil {
-				return nil
+				return buildRCode(id, q, dnsmessage.RCodeServerFailure)
 			}
 			owner = next
 		case "A":
 			ip, err := netip.ParseAddr(a.Value)
-			if err != nil || !ip.Is4() {
+			// Platform addresses are never routed, as the hub also drops them.
+			if err != nil || !ip.Is4() || len(sandbox.Shadowed(netip.PrefixFrom(ip, 32))) > 0 {
 				continue
 			}
 			ttl, ok := learn(ip, a.TTL)
@@ -256,13 +257,13 @@ func splitAnswer(id uint16, q dnsmessage.Question, relay func(qtype string) (san
 			}
 			h.Type, h.TTL = dnsmessage.TypeA, ttl
 			if b.AResource(h, dnsmessage.AResource{A: ip.As4()}) != nil {
-				return nil
+				return buildRCode(id, q, dnsmessage.RCodeServerFailure)
 			}
 		}
 	}
 	out, err := b.Finish()
 	if err != nil {
-		return nil
+		return buildRCode(id, q, dnsmessage.RCodeServerFailure)
 	}
 	return out
 }

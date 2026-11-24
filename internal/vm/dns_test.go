@@ -214,6 +214,13 @@ func TestSplitAnswer(t *testing.T) {
 	if m := unpack(t, splitAnswer(7, q(dnsmessage.TypeA), many, learn)); len(m.Answers) != 32 {
 		t.Errorf("answers must be capped at 32: %d", len(m.Answers))
 	}
+	platform := func(string) (sandbox.PrivateDNSReply, error) {
+		return sandbox.PrivateDNSReply{Answers: []sandbox.PrivateDNSAnswer{{Type: "A", Value: "10.128.0.6", TTL: 60}, {Type: "A", Value: "192.168.31.2", TTL: 60}}}, nil
+	}
+	learned = nil
+	if m := unpack(t, splitAnswer(7, q(dnsmessage.TypeA), platform, learn)); len(m.Answers) != 0 || len(learned) != 0 {
+		t.Errorf("platform addresses must be neither answered nor learned: %+v learned %v", m.Answers, learned)
+	}
 	refused := func(netip.Addr, uint32) (uint32, bool) { return 0, false }
 	if m := unpack(t, splitAnswer(7, q(dnsmessage.TypeA), chain, refused)); m.RCode != dnsmessage.RCodeServerFailure {
 		t.Errorf("an address the set could not take must not be handed to the guest: %v", m.RCode)

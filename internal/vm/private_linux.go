@@ -7,11 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
+	"slices"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"go.uber.org/zap"
+	"golang.org/x/net/dns/dnsmessage"
 	"golang.org/x/sys/unix"
 
 	"github.com/pilldrops-oss/pilldrops/internal/egressproxy"
@@ -30,11 +35,22 @@ type liveProxy struct {
 	routes    map[string]privateRoute // by IP
 	conns     map[net.Conn]*privConn  // by sandbox side
 	gate      *privateGate
+	// subnets and suffixes are the sandbox's routes; learned holds the addresses
+	// split-DNS answers put in the set. Guarded by privMu like the rest.
+	subnets  []netip.Prefix
+	suffixes []string
+	learned  map[netip.Addr]learnedAddr
+	dialDest func(ctx context.Context, sandboxID string, dest netip.AddrPort) (net.Conn, error)
+	resolve  func(ctx context.Context, sandboxID, name, qtype string) (sandbox.PrivateDNSReply, error)
+	// setMu orders writes to the namespace's set, so a refill rendered before
+	// an add never lands after it. Taken before privMu, never under it.
+	setMu sync.Mutex
 }
 
 // privConn is one proxied connection: its target, and its upstream once dialled.
 type privConn struct {
 	target sandbox.PrivateTarget
+	dest   netip.AddrPort // zero for a named target
 	up     net.Conn
 }
 
@@ -85,13 +101,11 @@ func privateLookup(id string) map[string]string {
 	return privateDNS(routes)
 }
 
-// SetPrivate replaces the targets a sandbox may reach and applies them to the
-// running sandbox. An empty list closes the proxy and every connection it
-// holds. id is the vm-layer id; sandboxID is the daemon's, which dials carry.
-func (m *Manager) SetPrivate(id, sandboxID string, ts []sandbox.PrivateTarget) error {
-	if err := sandbox.ValidPrivateTargets(ts); err != nil {
-		return err
-	}
+// applyPrivate runs update on the sandbox's proxy under privMu, starts the
+// proxy when that leaves it something to route and closes it when nothing is
+// left, then re-renders the namespace on that change, or refills the set when
+// update says its contents changed. update returns the connections to close.
+func (m *Manager) applyPrivate(id, sandboxID string, needRoutes bool, update func(p *liveProxy) (dropped []net.Conn, refill bool)) error {
 	m.mu.RLock()
 	sb, ok := m.active[id]
 	m.mu.RUnlock()
@@ -104,40 +118,37 @@ func (m *Manager) SetPrivate(id, sandboxID string, ts []sandbox.PrivateTarget) e
 	if m.config.PrivateDial == nil {
 		return fmt.Errorf("%w: this node has no control plane to reach connectors through", rt.ErrUnsupported)
 	}
+	if needRoutes && (m.config.PrivateDialDest == nil || m.config.PrivateDNS == nil) {
+		return fmt.Errorf("%w: this node cannot carry subnet or DNS grants", rt.ErrUnsupported)
+	}
 	slot, _, okName := parseNetNSName(sb.NetNS)
 	if !okName {
 		return fmt.Errorf("namespace %q does not carry a slot", sb.NetNS)
 	}
-	routes := assignPrivate(ts)
 
-	var dropped []net.Conn
 	privMu.Lock()
 	p := privLive[id]
-	was, now := p != nil, len(routes) > 0
-	if now && p == nil {
+	was := p != nil
+	if p == nil {
+		p = &liveProxy{ns: sb.NetNS, sandboxID: sandboxID, routes: map[string]privateRoute{}, conns: map[net.Conn]*privConn{},
+			gate: newPrivateGate(), learned: map[netip.Addr]learnedAddr{}, dialDest: m.config.PrivateDialDest, resolve: m.config.PrivateDNS}
+	}
+	dropped, refill := update(p)
+	now := len(p.routes) > 0 || len(p.subnets) > 0 || len(p.suffixes) > 0
+	switch {
+	case now && !was:
 		// Listening before the redirect exists, or the first connection is refused.
 		l, err := listenTCPInNS(netnsRunDir+"/"+sb.NetNS, net.JoinHostPort(netnsTapGW, fmt.Sprint(privateProxyPort)))
 		if err != nil {
 			privMu.Unlock()
+			closeConns(dropped)
 			return fmt.Errorf("netns %s: private proxy: %w", sb.NetNS, err)
 		}
-		p = &liveProxy{ns: sb.NetNS, sandboxID: sandboxID, l: l, conns: map[net.Conn]*privConn{}, gate: newPrivateGate()}
+		p.l = l
 		privLive[id] = p
 		go m.servePrivate(id, p)
-	}
-	if now {
-		p.routes = routesByIP(routes)
-		granted := make(map[sandbox.PrivateTarget]bool, len(routes))
-		for _, r := range routes {
-			granted[r.Target] = true
-		}
-		for c, pc := range p.conns {
-			if !granted[pc.target] {
-				dropped = append(dropped, p.dropLocked(c)...)
-			}
-		}
-	} else if p != nil {
-		dropped = closeProxyLocked(id, p)
+	case !now && was:
+		dropped = append(dropped, closeProxyLocked(id, p)...)
 	}
 	privMu.Unlock()
 	closeConns(dropped)
@@ -149,8 +160,199 @@ func (m *Manager) SetPrivate(id, sandboxID string, ts []sandbox.PrivateTarget) e
 			}
 			return err
 		}
+		return nil
+	}
+	if now && refill {
+		return refillPrivateSet(p)
 	}
 	return nil
+}
+
+// SetPrivate replaces the targets a sandbox may reach and applies them to the
+// running sandbox. Emptying every target and route closes the proxy and every
+// connection it holds. id is the vm-layer id; sandboxID is the daemon's, which
+// dials carry.
+func (m *Manager) SetPrivate(id, sandboxID string, ts []sandbox.PrivateTarget) error {
+	if err := sandbox.ValidPrivateTargets(ts); err != nil {
+		return err
+	}
+	routes := routesByIP(assignPrivate(ts))
+	return m.applyPrivate(id, sandboxID, false, func(p *liveProxy) ([]net.Conn, bool) {
+		p.routes = routes
+		granted := make(map[sandbox.PrivateTarget]bool, len(routes))
+		for _, r := range routes {
+			granted[r.Target] = true
+		}
+		var dropped []net.Conn
+		for c, pc := range p.conns {
+			if !pc.dest.IsValid() && !granted[pc.target] {
+				dropped = append(dropped, p.dropLocked(c)...)
+			}
+		}
+		return dropped, false
+	})
+}
+
+// SetPrivateRoutes replaces the subnets and split-DNS suffixes a sandbox
+// routes through its connectors, replaces the set's contents, and closes
+// connections whose destination nothing covers any more.
+func (m *Manager) SetPrivateRoutes(id, sandboxID string, r sandbox.PrivateRoutes) error {
+	if err := sandbox.ValidPrivateRoutes(r); err != nil {
+		return err
+	}
+	parsed := make([]netip.Prefix, 0, len(r.Subnets))
+	for _, s := range r.Subnets {
+		parsed = append(parsed, netip.MustParsePrefix(s))
+	}
+	// Folded: nft refuses an interval set element that overlaps another.
+	subnets := sandbox.CarvePlatform(parsed)
+	suffixes := append([]string(nil), r.DNS...)
+	return m.applyPrivate(id, sandboxID, !r.Empty(), func(p *liveProxy) ([]net.Conn, bool) {
+		p.subnets, p.suffixes = subnets, suffixes
+		if p.learned == nil {
+			p.learned = map[netip.Addr]learnedAddr{}
+		}
+		for a, l := range p.learned {
+			if !slices.Contains(suffixes, l.suffix) || coveredBy(subnets, a) {
+				delete(p.learned, a)
+			}
+		}
+		now := time.Now()
+		var dropped []net.Conn
+		for c, pc := range p.conns {
+			if pc.dest.IsValid() && !coversDest(p.subnets, p.learned, pc.dest.Addr(), now) {
+				dropped = append(dropped, p.dropLocked(c)...)
+			}
+		}
+		return dropped, true
+	})
+}
+
+// refillPrivateSet replaces the namespace's set with the proxy's contents.
+func refillPrivateSet(p *liveProxy) error {
+	p.setMu.Lock()
+	defer p.setMu.Unlock()
+	privMu.Lock()
+	script, ns := privateSetRefill(privateSetElements(p.subnets, p.learned, time.Now())), p.ns
+	privMu.Unlock()
+	return applyRulesetInNS(netnsRunDir+"/"+ns, script)
+}
+
+// privateElements renders a running sandbox's set for a ruleset reload.
+func privateElements(id string) string {
+	privMu.Lock()
+	defer privMu.Unlock()
+	if p := privLive[id]; p != nil {
+		return privateSetElements(p.subnets, p.learned, time.Now())
+	}
+	return ""
+}
+
+// lockPrivateSet holds a sandbox's set writes while its ruleset reloads, so an
+// address learned meanwhile is in the rendered set or added after it.
+func lockPrivateSet(id string) (unlock func()) {
+	privMu.Lock()
+	p := privLive[id]
+	privMu.Unlock()
+	if p == nil {
+		return func() {}
+	}
+	p.setMu.Lock()
+	return p.setMu.Unlock
+}
+
+// learnAddr routes an address a split-DNS answer named, before the answer goes
+// back to the guest, and returns the TTL the guest may cache it for. false
+// means the set could not take it.
+func learnAddr(id, suffix string, a netip.Addr, answerTTL uint32) (uint32, bool) {
+	privMu.Lock()
+	p := privLive[id]
+	privMu.Unlock()
+	if p == nil {
+		return 0, false
+	}
+	p.setMu.Lock()
+	defer p.setMu.Unlock()
+	now := time.Now()
+	privMu.Lock()
+	if privLive[id] != p {
+		privMu.Unlock()
+		return 0, false
+	}
+	if coveredBy(p.subnets, a) {
+		privMu.Unlock()
+		_, ttl := dnsTimeouts(answerTTL)
+		return ttl, true
+	}
+	if p.learned == nil {
+		p.learned = map[netip.Addr]learnedAddr{}
+	}
+	prev, known := p.learned[a]
+	expires, ttl, add, refill := learnPlan(prev, known, now, answerTTL)
+	if add && len(p.learned) >= maxLearnedPerSandbox {
+		dropOldestLearned(p.learned)
+		add, refill = false, true
+	}
+	p.learned[a] = learnedAddr{suffix: suffix, expires: expires}
+	var script string
+	switch {
+	case add:
+		script = privateSetAdd(a, expires.Sub(now))
+	case refill:
+		script = privateSetRefill(privateSetElements(p.subnets, p.learned, now))
+	}
+	ns := p.ns
+	privMu.Unlock()
+	if script == "" {
+		return ttl, true
+	}
+	if err := applyRulesetInNS(netnsRunDir+"/"+ns, script); err != nil {
+		privMu.Lock()
+		delete(p.learned, a)
+		privMu.Unlock()
+		return 0, false
+	}
+	return ttl, true
+}
+
+// dropOldestLearned removes the learned address nearest its expiry.
+func dropOldestLearned(m map[netip.Addr]learnedAddr) {
+	var oldest netip.Addr
+	for a, l := range m {
+		if !oldest.IsValid() || l.expires.Before(m[oldest].expires) {
+			oldest = a
+		}
+	}
+	delete(m, oldest)
+}
+
+// privateSplit is the resolver hook for a sandbox's granted suffixes: the
+// lookup goes to the control plane and each answered address is routed first.
+func privateSplit(id string) splitDNS {
+	return func(qid uint16, q dnsmessage.Question) ([]byte, bool) {
+		name := strings.TrimSuffix(strings.ToLower(q.Name.String()), ".")
+		privMu.Lock()
+		var (
+			suffixes []string
+			resolve  func(context.Context, string, string, string) (sandbox.PrivateDNSReply, error)
+			sbID     string
+		)
+		if p := privLive[id]; p != nil {
+			suffixes, resolve, sbID = p.suffixes, p.resolve, p.sandboxID
+		}
+		privMu.Unlock()
+		suffix, ok := sandbox.LongestSuffix(name, suffixes)
+		if !ok || resolve == nil {
+			return nil, false
+		}
+		relay := func(qtype string) (sandbox.PrivateDNSReply, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), dnsForwardTimeout)
+			defer cancel()
+			return resolve(ctx, sbID, name, qtype)
+		}
+		learn := func(a netip.Addr, ttl uint32) (uint32, bool) { return learnAddr(id, suffix, a, ttl) }
+		return splitAnswer(qid, q, relay, learn), true
+	}
 }
 
 func (m *Manager) servePrivate(id string, p *liveProxy) {
@@ -170,11 +372,16 @@ func (m *Manager) proxyPrivate(id string, p *liveProxy, c net.Conn) {
 		return
 	}
 	privMu.Lock()
-	r, ok := privateRouteTo(p.routes, dst)
-	ok = ok && privLive[id] == p && p.gate.enter()
-	if ok {
-		p.conns[c] = &privConn{target: r.Target}
+	r, named := privateRouteTo(p.routes, dst)
+	var dest netip.AddrPort
+	if a := dst.Addr().Unmap(); !named && coversDest(p.subnets, p.learned, a, time.Now()) {
+		dest = netip.AddrPortFrom(a, dst.Port())
 	}
+	ok := (named || dest.IsValid()) && privLive[id] == p && p.gate.enter()
+	if ok {
+		p.conns[c] = &privConn{target: r.Target, dest: dest}
+	}
+	dialDest := p.dialDest
 	privMu.Unlock()
 	if !ok {
 		return
@@ -185,9 +392,14 @@ func (m *Manager) proxyPrivate(id string, p *liveProxy, c net.Conn) {
 		p.gate.leave()
 		privMu.Unlock()
 	}()
-	up, err := m.config.PrivateDial(context.Background(), p.sandboxID, r.Target.Name, r.Target.Port)
+	var up net.Conn
+	if dest.IsValid() {
+		up, err = dialDest(context.Background(), p.sandboxID, dest)
+	} else {
+		up, err = m.config.PrivateDial(context.Background(), p.sandboxID, r.Target.Name, r.Target.Port)
+	}
 	if err != nil {
-		m.log.Warn("private dial failed", zap.String("sandbox", p.sandboxID), zap.String("target", r.Target.Name), zap.Error(err))
+		m.log.Warn("private dial failed", zap.String("sandbox", p.sandboxID), zap.String("target", r.Target.Name), zap.Stringer("dest", dest), zap.Error(err))
 		return
 	}
 	defer func() { _ = up.Close() }()

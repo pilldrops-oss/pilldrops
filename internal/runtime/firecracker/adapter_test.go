@@ -40,11 +40,17 @@ func (f *fakeBackend) SetPrivate(id, sandboxID string, _ []sandbox.PrivateTarget
 	return nil
 }
 
+func (f *fakeBackend) SetPrivateRoutes(id, sandboxID string, _ sandbox.PrivateRoutes) error {
+	f.routesIDs = []string{id, sandboxID}
+	return nil
+}
+
 type fakeBackend struct {
 	bootedFrom    string
 	bootedEgress  *egress.Rules
 	networks      map[string][]string
 	privateIDs    []string
+	routesIDs     []string
 	execs         []string
 	detachedExecs []string
 	execOut       map[string]string
@@ -622,5 +628,31 @@ func TestSetPrivateCarriesDaemonSandboxID(t *testing.T) {
 	}
 	if len(be.privateIDs) != 2 || be.privateIDs[0] != "vm_123" || be.privateIDs[1] != "sb1" {
 		t.Fatalf("backend got ids %v, want [vm_123 sb1]", be.privateIDs)
+	}
+}
+
+func TestPrivateRoutesNeedsTheUplink(t *testing.T) {
+	r := newWithBackend(newFake())
+	for _, tc := range []struct{ netns, dial, uplink, want bool }{
+		{true, true, false, false}, {true, false, true, false}, {false, true, true, false}, {true, true, true, true},
+	} {
+		r.netns, r.privateDial, r.privateRoutes = tc.netns, tc.dial, tc.uplink
+		if got := r.Capabilities().PrivateRoutes; got != tc.want {
+			t.Errorf("%+v: PrivateRoutes %v", tc, got)
+		}
+	}
+}
+
+func TestSetPrivateRoutesCarriesDaemonSandboxID(t *testing.T) {
+	be := newFake()
+	inst, err := newWithBackend(be).Boot(context.Background(), rt.BootSpec{SandboxID: "sb1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inst.(rt.PrivateRouteSetter).SetPrivateRoutes(context.Background(), sandbox.PrivateRoutes{Subnets: []string{"10.0.5.0/24"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(be.routesIDs) != 2 || be.routesIDs[0] != "vm_123" || be.routesIDs[1] != "sb1" {
+		t.Fatalf("backend got ids %v", be.routesIDs)
 	}
 }

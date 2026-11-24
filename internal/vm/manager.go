@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/egress"
 	"github.com/pilldrops-oss/pilldrops/internal/envd"
 	"github.com/pilldrops-oss/pilldrops/internal/runtime"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
 type Config struct {
@@ -55,6 +57,11 @@ type Config struct {
 	// PrivateDial opens a sandbox's connection to a granted private target
 	// through the control plane; nil on a node with none, which refuses grants.
 	PrivateDial func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error)
+	// PrivateDialDest opens a sandbox's connection to an address under a subnet
+	// or split-DNS grant, and PrivateDNS relays a lookup under a granted
+	// suffix. Both nil on a node that cannot carry those grants.
+	PrivateDialDest func(ctx context.Context, sandboxID string, dest netip.AddrPort) (net.Conn, error)
+	PrivateDNS      func(ctx context.Context, sandboxID, name, qtype string) (sandbox.PrivateDNSReply, error)
 }
 
 type Sandbox struct {

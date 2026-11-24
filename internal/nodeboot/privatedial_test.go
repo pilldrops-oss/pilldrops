@@ -2,9 +2,11 @@ package nodeboot
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 
 	"github.com/gorilla/websocket"
@@ -72,5 +74,60 @@ func TestPrivateDialerUsesTheNodeKey(t *testing.T) {
 	t.Setenv("NODE_API_KEY", "sf_node_k")
 	if privateDialer() == nil {
 		t.Fatal("no dialer with a node key")
+	}
+}
+
+func TestPrivateDestDialerSendsTheDest(t *testing.T) {
+	up := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.URL.Path != "/internal/private/dial" || r.Header.Get("Authorization") != "Bearer sf_node_x" ||
+			q.Get("sandbox") != "sb1" || q.Get("dest") != "10.0.5.7:5432" || q.Has("target") {
+			http.Error(w, "bad", http.StatusForbidden)
+			return
+		}
+		ws, err := up.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		_, msg, _ := ws.ReadMessage()
+		_ = ws.WriteMessage(websocket.BinaryMessage, msg)
+	}))
+	defer srv.Close()
+	dial := NewPrivateDestDialer(srv.URL, "sf_node_x")
+	c, err := dial(context.Background(), "sb1", netip.MustParseAddrPort("10.0.5.7:5432"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	_, _ = c.Write([]byte("hi"))
+	buf := make([]byte, 2)
+	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "hi" {
+		t.Fatalf("%q %v", buf, err)
+	}
+	if _, err := dial(context.Background(), "sb2", netip.MustParseAddrPort("10.0.5.7:5432")); err == nil {
+		t.Fatal("refused dial returned a conn")
+	}
+}
+
+func TestPrivateResolverPostsAndDecodes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var q map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&q)
+		if r.Method != http.MethodPost || r.URL.Path != "/internal/private/dns" || r.Header.Get("Authorization") != "Bearer sf_node_x" ||
+			q["sandbox"] != "sb1" || q["name"] != "wiki.corp.internal" || q["qtype"] != "A" {
+			http.Error(w, "bad", http.StatusForbidden)
+			return
+		}
+		_, _ = io.WriteString(w, `{"rcode":0,"answers":[{"type":"A","value":"10.9.9.9","ttl":60}]}`)
+	}))
+	defer srv.Close()
+	resolve := NewPrivateResolver(srv.URL, "sf_node_x")
+	got, err := resolve(context.Background(), "sb1", "wiki.corp.internal", "A")
+	if err != nil || got.RCode != 0 || len(got.Answers) != 1 || got.Answers[0].Value != "10.9.9.9" || got.Answers[0].TTL != 60 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if _, err := resolve(context.Background(), "sb2", "wiki.corp.internal", "A"); err == nil {
+		t.Fatal("a refused lookup returned an answer")
 	}
 }

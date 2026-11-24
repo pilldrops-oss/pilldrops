@@ -147,8 +147,9 @@ var nsSyncMu sync.Mutex
 func (m *Manager) syncNamespace(id string, sb *Sandbox, slot int) error {
 	nsSyncMu.Lock()
 	defer nsSyncMu.Unlock()
+	defer lockPrivateSet(id)()
 	tagged, private := isTagged(id), privateOn(id)
-	if err := m.reapplyNetNSRuleset(sb, slot, tagged, private); err != nil {
+	if err := m.reapplyNetNSRuleset(id, sb, slot, tagged, private); err != nil {
 		return err
 	}
 	if err := setPrivateLocalRoute(netnsRunDir+"/"+sb.NetNS, private); err != nil {
@@ -166,7 +167,7 @@ func isTagged(id string) bool {
 // reapplyNetNSRuleset re-renders and reloads a running sandbox's in-namespace
 // ruleset with its current tagged and private state. The egress policy is
 // re-rendered from the same rules the boot used, so a policied sandbox keeps its policy.
-func (m *Manager) reapplyNetNSRuleset(sb *Sandbox, slot int, tagged, private bool) error {
+func (m *Manager) reapplyNetNSRuleset(id string, sb *Sandbox, slot int, tagged, private bool) error {
 	policy, divert, err := renderEgressPolicy(sb.Egress, sb.TapName)
 	if err != nil {
 		return err
@@ -176,7 +177,7 @@ func (m *Manager) reapplyNetNSRuleset(sb *Sandbox, slot int, tagged, private boo
 	if guestIP == nil {
 		return fmt.Errorf("sandbox %s has no usable VM IP %q", sb.ID, sb.VMIP)
 	}
-	ruleset := buildNetNSRuleset(vethNS(slot), sb.TapName, hostIP, nsIP, guestIP, policy, divert, tagged, private, "")
+	ruleset := buildNetNSRuleset(vethNS(slot), sb.TapName, hostIP, nsIP, guestIP, policy, divert, tagged, private, privateElements(id))
 	return applyRulesetInNS(netnsRunDir+"/"+sb.NetNS, ruleset)
 }
 
@@ -230,7 +231,7 @@ func startResolver(id, nsName string) error {
 	}
 	tagLive[id].dns = pc
 	tagMu.Unlock()
-	go serveDNS(pc, func() map[string]string { return TagPeers(id) }, func() map[string]string { return privateLookup(id) }, nil, guestResolvers)
+	go serveDNS(pc, func() map[string]string { return TagPeers(id) }, func() map[string]string { return privateLookup(id) }, privateSplit(id), guestResolvers)
 	return nil
 }
 
