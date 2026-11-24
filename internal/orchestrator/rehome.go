@@ -58,7 +58,8 @@ func (s *Server) rehome(w http.ResponseWriter, r *http.Request, rec store.Sandbo
 	ctx, cancel := context.WithTimeout(withOperator(r.Context()), rehomeWait)
 	defer cancel()
 
-	place := cluster.Request{VCPU: rec.VCPU, MemMB: rec.MemMiB, Template: rec.Template, PrivateAccess: hasPrivateTargets(rec.Private)}
+	place := cluster.Request{VCPU: rec.VCPU, MemMB: rec.MemMiB, Template: rec.Template, PrivateAccess: hasPrivateTargets(rec.Private),
+		PrivateRoutes: hasPrivateRoutes(rec.PrivateRoutes)}
 	var lastErr error
 	for tries := 0; tries < maxCreateTries; tries++ {
 		node := s.reg.PickAndReserve(place, s.now(), cluster.NodeTTL)

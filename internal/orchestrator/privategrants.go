@@ -653,8 +653,15 @@ func privateNames(ts []store.ConnectorTarget, target string) []string {
 // hasPrivateTargets reports whether a stored private_targets list names any target.
 func hasPrivateTargets(raw string) bool { return raw != "" && raw != "[]" }
 
-// stripPrivate removes the control-plane-only "private" key before the body goes
-// to a node. Any spelling: the node's JSON decoding matches keys case-insensitively.
+// hasPrivateRoutes reports whether a stored private_routes value routes anything.
+func hasPrivateRoutes(raw string) bool {
+	var r sandbox.PrivateRoutes
+	return json.Unmarshal([]byte(raw), &r) == nil && !r.Empty()
+}
+
+// stripPrivate removes the control-plane-only "private" and "private_routes" keys
+// before the body goes to a node. Any spelling: the node's JSON decoding matches
+// keys case-insensitively.
 func stripPrivate(w http.ResponseWriter, body []byte) ([]byte, bool) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil {
@@ -662,7 +669,7 @@ func stripPrivate(w http.ResponseWriter, body []byte) ([]byte, bool) {
 		return nil, false
 	}
 	for k := range fields {
-		if strings.EqualFold(k, "private") {
+		if strings.EqualFold(k, "private") || strings.EqualFold(k, "private_routes") {
 			delete(fields, k)
 		}
 	}

@@ -171,7 +171,7 @@ func (s *Server) moveSandbox(ctx context.Context, st *store.Store, rec store.San
 	// does the snapshot rewrite, placement and routing; the move context lets
 	// the id through and keeps it off the source node.
 	body, _ := json.Marshal(map[string]string{"snapshot": name, "id": rec.ID})
-	createCtx := context.WithValue(withOrg(withOperator(ctx), org), moveCtxKey{}, moveCtx{from: from.ID, private: hasPrivateTargets(rec.Private)})
+	createCtx := context.WithValue(withOrg(withOperator(ctx), org), moveCtxKey{}, moveCtx{from: from.ID, private: hasPrivateTargets(rec.Private), routes: hasPrivateRoutes(rec.PrivateRoutes)})
 	// The target has to download the capture before it can boot it, so its
 	// first answer is usually "still fetching, retry". That is progress, not a
 	// failure: keep asking until the download lands or the deadline passes.

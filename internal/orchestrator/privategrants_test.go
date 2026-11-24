@@ -14,13 +14,14 @@ import (
 )
 
 type privateFakeNode struct {
-	id, key    string
-	mu         sync.Mutex
-	patches    map[string]string
-	deleted    []string
-	failDelete bool
-	creates    []string
-	onPatch    func(body string) // runs before the PATCH is recorded
+	id, key      string
+	mu           sync.Mutex
+	patches      map[string]string
+	deleted      []string
+	failDelete   bool
+	creates      []string
+	onPatch      func(body string) // runs before the PATCH is recorded
+	createAnswer string            // POST reply; "" is the default sbnew
 }
 
 func (n *privateFakeNode) lastPatch(t *testing.T, id string) string {
@@ -91,9 +92,13 @@ func (ts *connectorTestServer) fakeNodeNamed(t *testing.T, id string, supports b
 		case r.Method == "POST":
 			n.mu.Lock()
 			n.creates = append(n.creates, string(b))
+			ans := n.createAnswer
 			n.mu.Unlock()
+			if ans == "" {
+				ans = `{"id":"sbnew","template":"base","status":"running"}`
+			}
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":"sbnew","template":"base","status":"running"}`))
+			_, _ = w.Write([]byte(ans))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

@@ -266,6 +266,16 @@ func (s *Store) SandboxByIdentityHash(ctx context.Context, hash string) (Sandbox
 // adopts the sandbox; a node that restarts drops its own unrestorable rows.
 const StateLost = "lost"
 
+// Ended reports whether a sandbox row in state is no longer live, as the org's
+// live counts read it (CountLiveForOrg).
+func Ended(state string) bool {
+	switch state {
+	case "destroyed", "stopped", "error", StateLost:
+		return true
+	}
+	return false
+}
+
 // MarkNodeSandboxesLost flips every live row a reaped node owned to StateLost,
 // so they stop counting against the org's concurrency and read as gone rather
 // than as running forever. Returns how many rows changed.
