@@ -79,3 +79,21 @@ func TestAnyWithCapability(t *testing.T) {
 		t.Error("a cordoned node still counted; nothing would take the create it enables")
 	}
 }
+
+func TestPrivateRoutesSurvivesMetaAndAnswersCapability(t *testing.T) {
+	now := time.Now()
+	r := NewRegistry()
+	if err := r.Upsert(NodeUpsert{ID: "n1", URL: "http://n1", Key: "k", Cap: Capacity{MemTotalMB: 64000, MemAvailMB: 40000}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if r.AnyWithCapability(CapPrivateRoutes, now, 30*time.Second) {
+		t.Fatal("no node reports private_routes yet")
+	}
+	r.SetNodeMeta("n1", NodeMeta{Runtime: "firecracker", PrivateAccess: true, PrivateRoutes: true})
+	if !r.AnyWithCapability(CapPrivateRoutes, now, 30*time.Second) {
+		t.Fatal("capable node not counted")
+	}
+	if n, ok := r.Node("n1"); !ok || !n.PrivateRoutes {
+		t.Fatalf("node lost the bit: %+v", n)
+	}
+}

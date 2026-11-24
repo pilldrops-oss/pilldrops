@@ -301,6 +301,7 @@ type Capability string
 const (
 	CapTagNetworks   Capability = "tag_networks"
 	CapPrivateAccess Capability = "private_access"
+	CapPrivateRoutes Capability = "private_routes"
 	CapEgressDomains Capability = "egress_domains"
 	CapNamedSnapshot Capability = "named_snapshot"
 	CapVolumes       Capability = "volumes"
@@ -320,6 +321,10 @@ func (r *Registry) AnyWithCapability(c Capability, now time.Time, ttl time.Durat
 			}
 		case CapPrivateAccess:
 			if n.PrivateAccess {
+				return true
+			}
+		case CapPrivateRoutes:
+			if n.PrivateRoutes {
 				return true
 			}
 		case CapEgressDomains:

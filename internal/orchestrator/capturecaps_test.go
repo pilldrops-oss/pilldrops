@@ -86,3 +86,15 @@ func TestTheHeartbeatKeysReachTheFleetAnswer(t *testing.T) {
 		t.Error("the registry does not see named_snapshot from a node that heartbeats it")
 	}
 }
+
+func TestHeartbeatPrivateRoutesReachesPlacement(t *testing.T) {
+	s := fleetServer("apikey", "nodetoken")
+	srv := httptest.NewServer(s.Routes())
+	defer srv.Close()
+	registerNode(t, srv, `{"id":"n1","url":"http://n1","zone":"fsn1","runtime":"firecracker","isolation":true,
+		"private_access":true,"private_routes":true,
+		"capacity":{"cpu_cores":8,"mem_total_mb":64000,"mem_available_mb":32000}}`)
+	if !s.reg.AnyWithCapability(cluster.CapPrivateRoutes, s.now(), cluster.NodeTTL) {
+		t.Error("the registry does not see private_routes from a node that heartbeats it")
+	}
+}

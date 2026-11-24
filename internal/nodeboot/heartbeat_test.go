@@ -170,6 +170,7 @@ func TestTheHeartbeatSendsTheCapabilityKeysTheControlPlaneReads(t *testing.T) {
 	for key, caps := range map[string]string{
 		"tag_networks":   "caps.TagNetworks",
 		"private_access": "caps.PrivateAccess",
+		"private_routes": "caps.PrivateRoutes",
 		"checkpoint":     "caps.Checkpoint",
 		"named_snapshot": "caps.NamedSnapshot",
 		"standby":        "caps.Standby",
