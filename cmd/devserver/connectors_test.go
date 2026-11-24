@@ -58,6 +58,7 @@ func TestPortalForwardsConnectorRoutesAndSockets(t *testing.T) {
 		{"GET", "/v1/connectors"}, {"POST", "/v1/connectors"}, {"DELETE", "/v1/connectors/cn1"},
 		{"GET", "/v1/connectors/cn1/connections"}, {"POST", "/v1/connectors/cn1/keys"}, {"DELETE", "/v1/connectors/cn1/keys/ck1"},
 		{"GET", "/v1/sandboxes/sb1/private"}, {"POST", "/v1/sandboxes/sb1/private"}, {"DELETE", "/v1/sandboxes/sb1/private/cn1/db"},
+		{"DELETE", "/v1/sandboxes/sb1/private/pg_1"}, {"POST", "/v1/private/grants"}, {"GET", "/v1/private/grants"}, {"DELETE", "/v1/private/grants/pg_1"},
 	} {
 		if resp := call(c.method, c.path, "pd_customer"); resp.StatusCode != http.StatusOK {
 			t.Errorf("%s %s: %d", c.method, c.path, resp.StatusCode)

@@ -1987,7 +1987,7 @@
     "/v1/sandboxes/{id}/private": {
       "post": {
         "summary": "Let a sandbox reach a private target",
-        "description": "A sandbox's own key gets 403. Inside the sandbox the target answers at `<target>.private` on its own port, and at its real hostname when the connector announced one. A sandbox keeps one target per name and per hostname: a second grant with the same target name, or with a target announcing a hostname another granted target already announces, is 409 `private_name_taken`. A paused sandbox keeps the grant and applies it on resume. 409 `private_access_unsupported` when this sandbox's node has no per-sandbox network namespaces.",
+        "description": "A sandbox's own key gets 403. Give exactly one of `target`, `subnet` or `dns`. A subnet in the platform's own ranges (10.128.0.0/16, 192.168.30.0/23, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8) is not routed: the reply lists those parts in `shadowed`, and a subnet wholly inside them is 400. One address may not route through two connectors (overlapping subnets, or the same suffix): 409 `private_route_conflict`. 409 `private_routes_unsupported` when this sandbox's node cannot carry subnet or DNS grants. 429 past 50 grants, counting the sandbox's tags'. Inside the sandbox a target answers at `<target>.private` on its own port, and at its real hostname when the connector announced one. A sandbox keeps one target per name and per hostname: a second grant with the same target name, or with a target announcing a hostname another granted target already announces, is 409 `private_name_taken`. A paused sandbox keeps the grant and applies it on resume. 409 `private_access_unsupported` when this sandbox's node has no per-sandbox network namespaces.",
         "parameters": [
           {
             "name": "id",
@@ -2006,8 +2006,7 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "connector",
-                  "target"
+                  "connector"
                 ],
                 "properties": {
                   "connector": {
@@ -2015,6 +2014,14 @@
                   },
                   "target": {
                     "type": "string"
+                  },
+                  "subnet": {
+                    "type": "string",
+                    "description": "IPv4 CIDR inside a subnet the connector announced; /8 to /32."
+                  },
+                  "dns": {
+                    "type": "string",
+                    "description": "DNS suffix at or under one the connector announced."
                   }
                 }
               }
@@ -2041,6 +2048,32 @@
                         "type": "string"
                       },
                       "description": "Names the target answers to inside the sandbox."
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": ["target", "subnet", "dns"]
+                    },
+                    "value": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "online": {
+                      "type": "boolean"
+                    },
+                    "created_at": {
+                      "type": "integer",
+                      "description": "Unix seconds."
+                    },
+                    "shadowed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   }
                 }
@@ -2064,7 +2097,7 @@
             }
           },
           "409": {
-            "description": "Code `private_name_taken` or `private_access_unsupported`.",
+            "description": "Code `private_name_taken`, `private_access_unsupported`, `private_route_conflict` or `private_routes_unsupported`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2083,6 +2116,9 @@
               }
             }
           },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
           "502": {
             "description": "The sandbox's node did not take the grant (code `private_push_failed`); the grant is rolled back. The status is 502 or the node's own 5xx.",
             "content": {
@@ -2097,7 +2133,7 @@
       },
       "get": {
         "summary": "List a sandbox's private grants",
-        "description": "`supported` is false when the sandbox's node cannot carry private connections.",
+        "description": "`supported` is false when the sandbox's node cannot carry private connections, and `routes_supported` when it cannot carry subnet or DNS grants. Grants that reach the sandbox through a tag are included, with `source` `tag:<name>`.",
         "parameters": [
           {
             "name": "id",
@@ -2125,6 +2161,9 @@
                     },
                     "supported": {
                       "type": "boolean"
+                    },
+                    "routes_supported": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -2147,6 +2186,71 @@
               }
             }
           }
+        }
+      }
+    },
+    "/v1/sandboxes/{id}/private/{grant}": {
+      "delete": {
+        "summary": "Revoke one of a sandbox's own private grants",
+        "description": "A sandbox's own key gets 403. A grant that reaches the sandbox through a tag is revoked on the tag. Open connections it carried close.",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}, "description": "Sandbox id."},
+          {"name": "grant", "in": "path", "required": true, "schema": {"type": "string"}, "description": "Grant id (pg_...)."}
+        ],
+        "responses": {
+          "204": {"description": "Revoked."},
+          "403": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/v1/private/grants": {
+      "post": {
+        "summary": "Grant every sandbox in a network tag",
+        "description": "Every sandbox naming the tag in its networks reaches what the grant names, including sandboxes that join later; leaving the tag removes access. A sandbox's own key gets 403, as for sandbox grants; joining a tag that carries grants (create, PATCH `networks`, fork) is refused to it too. The reply's `unsupported` lists members whose node cannot carry the grant yet. 409 `private_route_conflict` or `private_name_taken` names the member it would conflict on. 429 past 100 tag grants per org.",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "required": ["tag", "connector"], "properties": {
+            "tag": {"type": "string"}, "connector": {"type": "string"},
+            "target": {"type": "string"}, "subnet": {"type": "string"}, "dns": {"type": "string"}
+          }}}}
+        },
+        "responses": {
+          "201": {"description": "Granted.", "content": {"application/json": {"schema": {"type": "object", "properties": {
+            "id": {"type": "string"}, "tag": {"type": "string"}, "connector": {"type": "string"},
+            "kind": {"type": "string", "enum": ["target", "subnet", "dns"]}, "value": {"type": "string"},
+            "sandboxes": {"type": "integer"}, "unsupported": {"type": "array", "items": {"type": "string"}},
+            "shadowed": {"type": "array", "items": {"type": "string"}}
+          }}}}},
+          "400": {"$ref": "#/components/responses/Error"},
+          "403": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"},
+          "409": {"$ref": "#/components/responses/Error"},
+          "429": {"$ref": "#/components/responses/Error"},
+          "501": {"$ref": "#/components/responses/Error"}
+        }
+      },
+      "get": {
+        "summary": "List tag grants",
+        "description": "Any member may read them; a sandbox's own key gets 403.",
+        "parameters": [{"name": "tag", "in": "query", "required": false, "schema": {"type": "string"}, "description": "Only this tag's grants."}],
+        "responses": {
+          "200": {"description": "Tag grants.", "content": {"application/json": {"schema": {"type": "object", "properties": {
+            "grants": {"type": "array", "items": {"type": "object"}}
+          }}}}},
+          "403": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/v1/private/grants/{id}": {
+      "delete": {
+        "summary": "Revoke a tag grant",
+        "description": "Every sandbox in the tag loses it; open connections it carried close.",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}, "description": "Grant id (pg_...)."}],
+        "responses": {
+          "204": {"description": "Revoked."},
+          "403": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"}
         }
       }
     },
@@ -2906,6 +3010,24 @@
                 }
               }
             }
+          },
+          "subnets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IPv4 CIDRs the connector announced."
+          },
+          "dns": {
+            "type": "object",
+            "properties": {
+              "suffixes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },
@@ -2928,8 +3050,29 @@
       "PrivateGrant": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string"
+          },
           "connector": {
             "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["target", "subnet", "dns"]
+          },
+          "value": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "`sandbox`, or `tag:<name>` when the grant reaches the sandbox through a tag."
+          },
+          "shadowed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Parts of a subnet grant inside the platform's own ranges, which are not routed."
           },
           "target": {
             "type": "string"
@@ -2961,6 +3104,10 @@
           },
           "target": {
             "type": "string"
+          },
+          "dest": {
+            "type": "string",
+            "description": "The ip:port dialled for a subnet or DNS grant; empty for a target."
           },
           "started_at": {
             "type": "integer",
