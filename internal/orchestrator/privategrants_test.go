@@ -177,7 +177,7 @@ func TestGrantOnNodeWithoutSupportRollsBack(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict || strings.Contains(body, "docker") || strings.Contains(body, "firecracker") {
 		t.Fatalf("got %d %s", resp.StatusCode, body)
 	}
-	if gs, _ := ts.s.st.Load().PrivateGrants(t.Context(), "sb1"); len(gs) != 0 {
+	if gs, _ := ts.s.st.Load().SandboxGrants(t.Context(), "sb1"); len(gs) != 0 {
 		t.Fatal("grant kept after the node refused")
 	}
 }
@@ -262,7 +262,7 @@ func TestCreateCleanupSurvivesNodeDeleteFailure(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("create: %d %s", resp.StatusCode, ts.body(resp))
 	}
-	if gs, _ := ts.s.st.Load().PrivateGrants(t.Context(), "sbnew"); len(gs) != 0 {
+	if gs, _ := ts.s.st.Load().SandboxGrants(t.Context(), "sbnew"); len(gs) != 0 {
 		t.Fatalf("grants left after cleanup: %v", gs)
 	}
 	if _, ok := ts.s.reg.NodeFor("sbnew"); ok {
@@ -332,7 +332,7 @@ func TestDestroyDropsGrants(t *testing.T) {
 	if resp := ts.do(t, "DELETE", "/v1/sandboxes/sb1", ts.key, ""); resp.StatusCode != http.StatusOK {
 		t.Fatalf("destroy: %d %s", resp.StatusCode, ts.body(resp))
 	}
-	if gs, _ := ts.s.st.Load().PrivateGrants(t.Context(), "sb1"); len(gs) != 0 {
+	if gs, _ := ts.s.st.Load().SandboxGrants(t.Context(), "sb1"); len(gs) != 0 {
 		t.Fatalf("grants left: %v", gs)
 	}
 }

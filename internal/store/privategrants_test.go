@@ -282,54 +282,9 @@ func TestRevokeConnectorDropsGrantsInBothTables(t *testing.T) {
 	})
 }
 
-func TestPrivateGrantNamesAreUniquePerSandbox(t *testing.T) {
+func TestSetSandboxPrivateRoundTrips(t *testing.T) {
 	eachStore(t, func(t *testing.T, st *Store, sfx string) {
 		ctx := t.Context()
-		org := "org-grants" + sfx
-		a, b := "cg_a"+sfx, "cg_b"+sfx
-		for _, c := range []Connector{{ID: a, Name: "a", OrgID: org}, {ID: b, Name: "b", OrgID: org}} {
-			if err := st.InsertConnector(ctx, c); err != nil {
-				t.Fatal(err)
-			}
-		}
-		sb := "sbg" + sfx
-		if err := st.AddPrivateGrant(ctx, PrivateGrant{SandboxID: sb, ConnectorID: a, Target: "db"}); err != nil {
-			t.Fatal(err)
-		}
-		err := st.AddPrivateGrant(ctx, PrivateGrant{SandboxID: sb, ConnectorID: b, Target: "db"})
-		if !errors.Is(err, ErrPrivateNameTaken) {
-			t.Fatalf("second db on one sandbox: %v", err)
-		}
-		g, ok, err := st.PrivateGrantFor(ctx, sb, "db")
-		if err != nil || !ok || g.ConnectorID != a || g.ConnectorName != "a" {
-			t.Fatalf("grant for: %+v %v %v", g, ok, err)
-		}
-		if ok, _ := st.RemovePrivateGrant(ctx, sb, a, "db"); !ok {
-			t.Fatal("remove")
-		}
-		if _, ok, _ := st.PrivateGrantFor(ctx, sb, "db"); ok {
-			t.Fatal("grant survives remove")
-		}
-	})
-}
-
-func TestSandboxesGrantedConnectorAndSetPrivate(t *testing.T) {
-	eachStore(t, func(t *testing.T, st *Store, sfx string) {
-		ctx := t.Context()
-		cid := "cs" + sfx
-		if err := st.InsertConnector(ctx, Connector{ID: cid, Name: "s", OrgID: "org-sgc" + sfx}); err != nil {
-			t.Fatal(err)
-		}
-		for _, g := range []PrivateGrant{{SandboxID: "sbs1" + sfx, Target: "db"}, {SandboxID: "sbs1" + sfx, Target: "api"}, {SandboxID: "sbs2" + sfx, Target: "db"}} {
-			g.ConnectorID = cid
-			if err := st.AddPrivateGrant(ctx, g); err != nil {
-				t.Fatal(err)
-			}
-		}
-		ids, err := st.SandboxesGrantedConnector(ctx, cid)
-		if err != nil || len(ids) != 2 {
-			t.Fatalf("granted sandboxes: %v %v", ids, err)
-		}
 		id := "sbp" + sfx
 		if err := st.SaveSandbox(ctx, SandboxRecord{ID: id, Template: "t", OrgID: "o", State: "running"}); err != nil {
 			t.Fatal(err)

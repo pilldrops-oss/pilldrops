@@ -309,7 +309,12 @@ func (s *Server) handleConnectorRevoke(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	granted, err := st.SandboxesGrantedConnector(r.Context(), c.ID)
+	gs, err := st.GrantsOnConnector(r.Context(), c.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	granted, err := grantSubjects(r.Context(), st, org, gs)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

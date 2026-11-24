@@ -24,8 +24,8 @@ var privateOpensPerSecond = 50
 
 // privateConn is one open private connection a sandbox holds through a connector.
 type privateConn struct {
-	sandboxID, target string
-	close             func()
+	sandboxID, connectorID, target string
+	close                          func()
 }
 
 // privateConnSet tracks open private connections so a revoke or destroy can cut
@@ -140,6 +140,25 @@ func (p *privateConnSet) closeFor(sandboxID, target string) {
 	}
 }
 
+// closeUngranted closes the sandbox's connections no grant in gs still covers.
+func (p *privateConnSet) closeUngranted(sandboxID string, gs []store.Grant) {
+	keep := map[[2]string]bool{}
+	for _, g := range gs {
+		keep[[2]string{g.ConnectorID, g.Value}] = true
+	}
+	p.mu.Lock()
+	var hit []*privateConn
+	for c := range p.conns {
+		if c.sandboxID == sandboxID && !keep[[2]string{c.connectorID, c.target}] {
+			hit = append(hit, c)
+		}
+	}
+	p.mu.Unlock()
+	for _, c := range hit {
+		c.close()
+	}
+}
+
 // privateSlot is a sandbox's place in privateConnSet, taken before the upstream
 // exists so a full sandbox gets 429 rather than a dial. A cut before the
 // upstream arrives closes it as soon as it does.
@@ -243,10 +262,18 @@ func (s *Server) handlePrivateDial(w http.ResponseWriter, r *http.Request) {
 			s.log().Warn("private connection not logged", "component", "private", "sandbox", sbID, "err", err)
 		}
 	}
-	g, granted, err := st.PrivateGrantFor(r.Context(), sbID, target)
+	gs, err := st.EffectiveGrants(r.Context(), rec.OrgID, sbID, recordTags(rec))
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
+	}
+	var g store.Grant
+	granted := false
+	for _, x := range gs {
+		if x.Kind == store.GrantKindTarget && x.Value == target {
+			g, granted = x, true
+			break
+		}
 	}
 	if !granted {
 		logRow("denied")
@@ -272,7 +299,7 @@ func (s *Server) handlePrivateDial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slot := &privateSlot{}
-	pc := &privateConn{sandboxID: sbID, target: target, close: slot.close}
+	pc := &privateConn{sandboxID: sbID, connectorID: g.ConnectorID, target: target, close: slot.close}
 	if !s.privateConns.add(pc) {
 		logRow("rate_limited")
 		writeErr(w, http.StatusTooManyRequests, "this sandbox has too many open private connections")

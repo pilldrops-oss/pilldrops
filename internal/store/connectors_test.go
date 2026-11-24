@@ -82,7 +82,7 @@ func TestConnectorLifecycle(t *testing.T) {
 		if _, _, ok, _ := st.ConnectorForKey(ctx, plain+"0", 31); ok {
 			t.Fatal("wrong key resolved")
 		}
-		if err := st.AddPrivateGrant(ctx, PrivateGrant{SandboxID: "sb1" + sfx, ConnectorID: c.ID, Target: "db", CreatedAt: 40}); err != nil {
+		if _, err := st.AddGrant(ctx, Grant{OrgID: org, ConnectorID: c.ID, SubjectKind: GrantSubjectSandbox, Subject: "sb1" + sfx, Kind: GrantKindTarget, Value: "db", CreatedAt: 40}); err != nil {
 			t.Fatal(err)
 		}
 		if ok, err := st.RevokeConnector(ctx, org, c.ID, 50); !ok || err != nil {
@@ -91,7 +91,7 @@ func TestConnectorLifecycle(t *testing.T) {
 		if _, _, ok, _ := st.ConnectorForKey(ctx, plain, 51); ok {
 			t.Fatal("key survives connector revoke")
 		}
-		if gs, _ := st.PrivateGrants(ctx, "sb1"+sfx); len(gs) != 0 {
+		if gs, _ := st.SandboxGrants(ctx, "sb1"+sfx); len(gs) != 0 {
 			t.Fatalf("grants survive revoke: %+v", gs)
 		}
 		if n, _ := st.CountConnectors(ctx, org); n != 0 {
