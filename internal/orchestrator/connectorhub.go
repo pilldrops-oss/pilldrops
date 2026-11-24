@@ -5,8 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"net"
 	"net/http"
+	"net/netip"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -31,6 +34,8 @@ type connectorInstance struct {
 	connectorID, instanceID string
 	keyID                   string // the connector key its session came from; empty for an API key
 	targets                 []store.ConnectorTarget
+	subnets                 []netip.Prefix
+	suffixes                []string
 	ctrl                    *websocket.Conn
 	writeMu                 sync.Mutex
 	conns                   sync.Map // net.Conn -> struct{}
@@ -57,6 +62,25 @@ func (in *connectorInstance) end(reason string) {
 func (in *connectorInstance) serves(target string, port int) bool {
 	for _, t := range in.targets {
 		if t.Name == target && t.Port == port {
+			return true
+		}
+	}
+	return false
+}
+
+func (in *connectorInstance) coversAddr(a netip.Addr) bool {
+	for _, p := range in.subnets {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// servesSuffix reports whether the instance announced s or a suffix above it.
+func (in *connectorInstance) servesSuffix(s string) bool {
+	for _, a := range in.suffixes {
+		if sandbox.UnderSuffix(s, a) {
 			return true
 		}
 	}
@@ -136,6 +160,27 @@ func (h *connectorHub) union(connectorID string, stored []store.ConnectorTarget)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// routes is what the connector's online instances announce now, or the
+// stored lists when none is online.
+func (h *connectorHub) routes(connectorID string, storedSubnets, storedSuffixes []string) (subnets, suffixes []string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	set := h.instances[connectorID]
+	if len(set) == 0 {
+		return storedSubnets, storedSuffixes
+	}
+	nets, names := map[string]bool{}, map[string]bool{}
+	for _, in := range set {
+		for _, p := range in.subnets {
+			nets[p.String()] = true
+		}
+		for _, d := range in.suffixes {
+			names[d] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(nets)), slices.Sorted(maps.Keys(names))
 }
 
 // candidates returns instances serving the target, rotated so load spreads.
@@ -342,6 +387,10 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 		InstanceID   string `json:"instance_id"`
 		Capabilities struct {
 			Targets []store.ConnectorTarget `json:"targets"`
+			Subnets []string                `json:"subnets"`
+			DNS     struct {
+				Suffixes []string `json:"suffixes"`
+			} `json:"dns"`
 		} `json:"capabilities"`
 	}
 	in := &connectorInstance{connectorID: id, keyID: keyID, ctrl: ctrl, done: make(chan struct{})}
@@ -363,7 +412,12 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 		in.end(err.Error())
 		return
 	}
-	in.instanceID, in.targets = hello.InstanceID, hello.Capabilities.Targets
+	subnets, suffixes, err := validAnnouncement(hello.Capabilities.Subnets, hello.Capabilities.DNS.Suffixes, platformDomains())
+	if err != nil {
+		in.end(err.Error())
+		return
+	}
+	in.instanceID, in.targets, in.subnets, in.suffixes = hello.InstanceID, hello.Capabilities.Targets, subnets, suffixes
 	old, ok := s.connectors.add(in)
 	if !ok {
 		in.end("this connector already has the maximum number of instances")
@@ -377,8 +431,9 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 		in.end("disconnected")
 	}()
 	now := s.now().Unix()
-	if err := st.SetConnectorTargets(r.Context(), id, s.connectors.union(id, nil), now); err != nil {
-		s.log().Warn("connector targets not saved", "component", "private", "connector", id, "err", err)
+	nets, names := s.connectors.routes(id, nil, nil)
+	if err := st.SetConnectorAnnounced(r.Context(), id, s.connectors.union(id, nil), nets, names, now); err != nil {
+		s.log().Warn("connector announcement not saved", "component", "private", "connector", id, "err", err)
 	}
 	go s.superviseConnector(st, in)
 	ctrl.SetPongHandler(func(string) error { return ctrl.SetReadDeadline(time.Now().Add(shareReadWait)) })

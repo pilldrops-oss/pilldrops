@@ -102,18 +102,6 @@ func (s *Store) CountConnectors(ctx context.Context, org string) (int, error) {
 	return n, err
 }
 
-func (s *Store) SetConnectorTargets(ctx context.Context, id string, ts []ConnectorTarget, now int64) error {
-	if ts == nil {
-		ts = []ConnectorTarget{}
-	}
-	b, err := json.Marshal(ts)
-	if err != nil {
-		return err
-	}
-	_, err = s.exec(ctx, `UPDATE connectors SET targets = ?, last_seen_at = ? WHERE id = ?`, string(b), now, id)
-	return err
-}
-
 // SetConnectorAnnounced stores what the connector's instances announce now.
 func (s *Store) SetConnectorAnnounced(ctx context.Context, id string, ts []ConnectorTarget, subnets, suffixes []string, now int64) error {
 	if ts == nil {

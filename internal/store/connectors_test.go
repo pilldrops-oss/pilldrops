@@ -58,7 +58,7 @@ func TestConnectorLifecycle(t *testing.T) {
 			t.Fatalf("duplicate name: %v", err)
 		}
 		ts := []ConnectorTarget{{Name: "db", Port: 5432}, {Name: "api", Port: 443, Host: "internal.corp"}}
-		if err := st.SetConnectorTargets(ctx, c.ID, ts, 20); err != nil {
+		if err := st.SetConnectorAnnounced(ctx, c.ID, ts, nil, nil, 20); err != nil {
 			t.Fatal(err)
 		}
 		got, ok, err := st.ConnectorByName(ctx, org, "prod")

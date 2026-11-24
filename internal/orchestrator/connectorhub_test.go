@@ -8,11 +8,15 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
 type fakeInstance struct {
@@ -22,13 +26,21 @@ type fakeInstance struct {
 
 func dialInstance(t *testing.T, ts *connectorTestServer, name, instance string, targets string, echo bool) *fakeInstance {
 	t.Helper()
+	return dialInstanceWith(t, ts, name, instance, `{"targets":`+targets+`}`, echo, nil)
+}
+
+// dialInstanceWith connects an instance whose hello announces caps. echo serves
+// every open as an echo; dns, when set, answers relayed lookups with the body it
+// returns, and a nil body leaves the lookup unanswered.
+func dialInstanceWith(t *testing.T, ts *connectorTestServer, name, instance, caps string, echo bool, dns func(name, qtype string) map[string]any) *fakeInstance {
+	t.Helper()
 	tunnel, conn, tok := ts.session(t, name)
 	ctrl, _, err := websocket.DefaultDialer.Dial(tunnel, map[string][]string{"Authorization": {"Bearer " + tok}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ctrl.Close() })
-	if err := ctrl.WriteMessage(websocket.TextMessage, []byte(`{"type":"hello","instance_id":"`+instance+`","version":"test","capabilities":{"targets":`+targets+`}}`)); err != nil {
+	if err := ctrl.WriteMessage(websocket.TextMessage, []byte(`{"type":"hello","instance_id":"`+instance+`","version":"test","capabilities":`+caps+`}`)); err != nil {
 		t.Fatal(err)
 	}
 	f := &fakeInstance{ctrl: ctrl, opens: make(chan map[string]any, 8)}
@@ -38,6 +50,13 @@ func dialInstance(t *testing.T, ts *connectorTestServer, name, instance string, 
 			if err := ctrl.ReadJSON(&m); err != nil {
 				close(f.opens)
 				return
+			}
+			if m["type"] == "dns" && dns != nil {
+				if reply := dns(m["name"].(string), m["qtype"].(string)); reply != nil {
+					reply["type"], reply["id"] = "dns_answer", m["id"]
+					_ = ctrl.WriteJSON(reply)
+				}
+				continue
 			}
 			if m["type"] != "open" {
 				continue
@@ -433,5 +452,80 @@ func TestConnectorCounterReleasedAfterClose(t *testing.T) {
 	}
 	if n := active.Load(); n != 0 {
 		t.Fatalf("open conns after a failed open %d, want 0", n)
+	}
+}
+
+func TestHubStoresAnnouncedSubnetsAndSuffixes(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	dialInstanceWith(t, ts, "prod", "inst-aaaaaaaaaaaa", `{"targets":[],"subnets":["10.0.0.0/16"],"dns":{"suffixes":["Corp.Internal."]}}`, true, nil)
+	var out struct {
+		Connectors []struct {
+			Subnets []string
+			DNS     struct{ Suffixes []string }
+		}
+	}
+	if err := json.Unmarshal([]byte(ts.body(ts.do(t, "GET", "/v1/connectors", ts.key, ""))), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Connectors) != 1 || !slices.Equal(out.Connectors[0].Subnets, []string{"10.0.0.0/16"}) ||
+		!slices.Equal(out.Connectors[0].DNS.Suffixes, []string{"corp.internal"}) {
+		t.Fatalf("listed %+v", out)
+	}
+	c, _, err := ts.s.st.Load().ConnectorByID(t.Context(), "", ts.connectorID(t, "prod"))
+	if err != nil || !slices.Equal(c.Subnets, []string{"10.0.0.0/16"}) || !slices.Equal(c.Suffixes, []string{"corp.internal"}) {
+		t.Fatalf("stored %+v %v", c, err)
+	}
+}
+
+func TestHubRefusesBadAnnouncements(t *testing.T) {
+	t.Setenv("PORTAL_ORIGIN", "https://pilldrops.com")
+	t.Setenv("SHARE_DOMAIN", "share.example.org")
+	ts := newConnectorTestServer(t)
+	ts.s.portalOrigin = "" // the session URLs must stay on the test server
+	many := make([]string, sandbox.MaxConnectorSubnets+1)
+	for i := range many {
+		many[i] = fmt.Sprintf("10.%d.0.0/16", i)
+	}
+	manyJSON, _ := json.Marshal(many)
+	manySuffixes := make([]string, sandbox.MaxConnectorSuffixes+1)
+	for i := range manySuffixes {
+		manySuffixes[i] = fmt.Sprintf("s%d.corp.internal", i)
+	}
+	manySuffixesJSON, _ := json.Marshal(manySuffixes)
+	for _, c := range []struct{ caps, reason string }{
+		{`{"subnets":["0.0.0.0/0"]}`, "every address"},
+		{`{"subnets":["10.0.5.1/24"]}`, "host bits"},
+		{`{"subnets":` + string(manyJSON) + `}`, "at most 20"},
+		{`{"dns":{"suffixes":["wiki.pilldrops.com"]}}`, "platform"},
+		{`{"dns":{"suffixes":["co.uk"]}}`, "public suffix"},
+		{`{"dns":{"suffixes":["example.org"]}}`, "capture the platform domain"},
+		{`{"dns":{"suffixes":` + string(manySuffixesJSON) + `}}`, "at most 10"},
+		{`{"dns":{"suffixes":["10.0.0.1"]}}`, "IP address"},
+		{`{"dns":{"suffixes":["x.pd"]}}`, "sandbox-internal"},
+		{`{"dns":{"suffixes":["internal"]}}`, "single label"},
+	} {
+		tunnel, _, tok := ts.session(t, "prod")
+		ctrl, _, err := websocket.DefaultDialer.Dial(tunnel, map[string][]string{"Authorization": {"Bearer " + tok}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = ctrl.WriteMessage(websocket.TextMessage, []byte(`{"type":"hello","instance_id":"inst-aaaaaaaaaaaa","capabilities":`+c.caps+`}`))
+		var m map[string]any
+		err = ctrl.ReadJSON(&m)
+		_ = ctrl.Close()
+		if reason, _ := m["reason"].(string); err != nil || m["type"] != "closed" || !strings.Contains(reason, c.reason) {
+			t.Errorf("%s: got %v %v, want closed with %q", c.caps, m, err, c.reason)
+		}
+	}
+}
+
+func TestInstanceCoversAndServes(t *testing.T) {
+	t.Parallel()
+	in := &connectorInstance{subnets: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/16")}, suffixes: []string{"corp.internal"}}
+	if !in.coversAddr(netip.MustParseAddr("10.0.5.7")) || in.coversAddr(netip.MustParseAddr("10.1.0.1")) {
+		t.Error("coversAddr")
+	}
+	if !in.servesSuffix("wiki.corp.internal") || !in.servesSuffix("corp.internal") || in.servesSuffix("internal") {
+		t.Error("servesSuffix")
 	}
 }
