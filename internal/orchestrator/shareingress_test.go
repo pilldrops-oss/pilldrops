@@ -383,6 +383,8 @@ func TestTunnelGetsAKeepaliveMessage(t *testing.T) {
 			t.Fatalf("no keepalive arrived: %v", err)
 		}
 		if msg.Type == "keepalive" {
+			// Taking the shares lock orders this tunnel's read of sharePingEvery before the restore.
+			waitFor(t, func() bool { return l.s.shares.get(l.name) != nil })
 			return
 		}
 	}
