@@ -337,6 +337,31 @@ func TestTagJoinWithGrantsNeedsPrivateAdmin(t *testing.T) {
 	}
 }
 
+// OSS privateAdmin refuses only a sandbox token, so the org's API key may join.
+func TestTagJoinWithGrantsAllowsAnAPIKey(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.routesNode(t)
+	ts.putInTag(t, "sb1", node.id, "backend")
+	ts.s.reg.Place("sb-1-conn", node.id)
+	ts.announceRoutes(t, "prod", routesCaps)
+	if resp := ts.do(t, "POST", "/v1/private/grants", ts.key, `{"tag":"backend","connector":"prod","subnet":"10.0.5.0/24"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("tag grant: %d", resp.StatusCode)
+	}
+	const join = `{"networks":["backend"]}`
+	if resp := ts.do(t, "PATCH", "/v1/sandboxes/sb-1-conn", ts.sandboxToken, join); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("sandbox token join: %d %s", resp.StatusCode, ts.body(resp))
+	}
+	node.onPatch = func(body string) {
+		if strings.Contains(body, join) {
+			_ = saveTags(ts, "sb-1-conn", node.id, "backend")
+		}
+	}
+	if resp := ts.do(t, "PATCH", "/v1/sandboxes/sb-1-conn", ts.key, join); resp.StatusCode != http.StatusOK {
+		t.Fatalf("API key join: %d %s", resp.StatusCode, ts.body(resp))
+	}
+	waitFor(t, func() bool { return strings.Contains(node.patchOf("sb-1-conn"), `"10.0.5.0/24"`) })
+}
+
 // Tag grants follow the tag, so a fork of a member is routed like the member.
 func TestForkOfATagMemberGetsItsRoutes(t *testing.T) {
 	ts := newConnectorTestServer(t)
