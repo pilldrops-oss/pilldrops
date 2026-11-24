@@ -255,6 +255,46 @@ func (s *Server) cutRevoked(ctx context.Context, st *store.Store, org string, me
 	}
 }
 
+// tagJoinAdmin gates putting a sandbox in tags: a tag that carries private
+// grants the sandbox does not hold hands them over, so only privateAdmin may.
+// sandboxID "" is a new sandbox, which holds nothing. Not skipped with private
+// access off: grants joined then would go live once it is turned on.
+func (s *Server) tagJoinAdmin(w http.ResponseWriter, r *http.Request, sandboxID string, tags []string) bool {
+	st := s.st.Load()
+	if st == nil || len(tags) == 0 {
+		return true
+	}
+	ctx, org := r.Context(), fastOrg(r)
+	had := map[string]bool{}
+	if sandboxID != "" {
+		rec, _, err := st.SandboxByID(ctx, sandboxID)
+		if err != nil {
+			writeErr(w, http.StatusServiceUnavailable, "could not read the sandbox: "+err.Error())
+			return false
+		}
+		held, err := st.EffectiveGrants(ctx, org, sandboxID, recordTags(rec))
+		if err != nil {
+			writeErr(w, http.StatusServiceUnavailable, "could not read this org's tag grants: "+err.Error())
+			return false
+		}
+		for _, g := range held {
+			had[g.ID] = true
+		}
+	}
+	gs, err := st.EffectiveGrants(ctx, org, sandboxID, tags)
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "could not read this org's tag grants: "+err.Error())
+		return false
+	}
+	for _, g := range gs {
+		if !had[g.ID] {
+			_, ok := s.privateAdmin(w, r)
+			return ok
+		}
+	}
+	return true
+}
+
 // checkTagChange refuses a network change that would give the sandbox grants
 // it cannot route: a conflict, or a kind its node cannot carry. Only the grants
 // the change adds must fit the node; ones it already holds were let in before.

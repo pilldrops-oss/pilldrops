@@ -161,6 +161,10 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(body, &req) //nolint:errcheck // best-effort peek only; a malformed body fails for real when the node parses it below
 	// Grants that come with the request's tags place the sandbox like its own grants do.
 	var tagGrants []store.Grant
+	// A moved sandbox already holds its tags' grants.
+	if !moving && !s.tagJoinAdmin(w, r, "", req.Networks) {
+		return
+	}
 	if st := s.st.Load(); st != nil && privateAccessOn() && len(req.Networks) > 0 {
 		gs, err := st.EffectiveGrants(r.Context(), fastOrg(r), "", req.Networks)
 		if err != nil {
@@ -786,6 +790,9 @@ func (s *Server) handleSandboxRename(w http.ResponseWriter, r *http.Request) {
 		Networks *[]string `json:"networks"`
 	}
 	if json.Unmarshal(body, &tagPeek) == nil && tagPeek.Networks != nil {
+		if !s.tagJoinAdmin(w, r, id, *tagPeek.Networks) {
+			return
+		}
 		if status, code, err := s.checkTagChange(r.Context(), fastOrg(r), id, node, *tagPeek.Networks); err != nil {
 			writeGrantErr(w, status, code, err)
 			return

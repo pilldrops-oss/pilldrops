@@ -301,3 +301,84 @@ func TestTagRevokeClosesConnWhenThePushFails(t *testing.T) {
 		t.Fatal("conn not closed within 2s of revoke")
 	}
 }
+
+// Joining a tag that carries grants is a grant, so it is held to the grant
+// routes' rule: never a sandbox token, on a team only a signed-in owner or admin.
+func TestTagJoinWithGrantsNeedsPrivateAdmin(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.routesNode(t)
+	ts.putInTag(t, "sb1", node.id, "backend")
+	ts.s.reg.Place("sb-1-conn", node.id)
+	ts.announceRoutes(t, "prod", routesCaps)
+	if resp := ts.do(t, "POST", "/v1/private/grants", ts.key, `{"tag":"backend","connector":"prod","subnet":"10.0.5.0/24"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("tag grant: %d", resp.StatusCode)
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{"PATCH", "/v1/sandboxes/sb-1-conn", `{"networks":["backend"]}`},
+		{"POST", "/v1/sandboxes", `{"template":"base","networks":["backend"]}`},
+		{"POST", "/v1/sandboxes/sb1/fork", `{}`},
+	} {
+		if resp := ts.do(t, c.method, c.path, ts.sandboxToken, c.body); resp.StatusCode != http.StatusForbidden {
+			t.Errorf("sandbox token %s %s: %d %s", c.method, c.path, resp.StatusCode, ts.body(resp))
+		}
+	}
+	if got := node.patchOf("sb-1-conn"); got != "" {
+		t.Fatalf("the refused join reached the node: %s", got)
+	}
+	node.mu.Lock()
+	n := len(node.creates)
+	node.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("a refused create or fork reached the node %d times", n)
+	}
+	// A tag without grants is as before.
+	if resp := ts.do(t, "PATCH", "/v1/sandboxes/sb-1-conn", ts.sandboxToken, `{"networks":["plain"]}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("sandbox token joining a plain tag: %d %s", resp.StatusCode, ts.body(resp))
+	}
+}
+
+// Tag grants follow the tag, so a fork of a member is routed like the member.
+func TestForkOfATagMemberGetsItsRoutes(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.routesNode(t)
+	ts.putInTag(t, "sb1", node.id, "backend")
+	ts.announceRoutes(t, "prod", routesCaps)
+	if resp := ts.do(t, "POST", "/v1/private/grants", ts.key, `{"tag":"backend","connector":"prod","subnet":"10.0.5.0/24"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("tag grant: %d", resp.StatusCode)
+	}
+	// The node writes the child's row, tags and all, before it answers.
+	ts.putInTag(t, "sbnew", "", "backend")
+	if resp := ts.do(t, "POST", "/v1/sandboxes/sb1/fork", ts.key, `{}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("fork: %d %s", resp.StatusCode, ts.body(resp))
+	}
+	waitFor(t, func() bool { return strings.Contains(node.patchOf("sbnew"), `"10.0.5.0/24"`) })
+}
+
+// A grant joined while private access is off would go live once it is on.
+func TestTagJoinGateHoldsWithPrivateAccessOff(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.routesNode(t)
+	ts.s.reg.Place("sb-1-conn", node.id)
+	ts.announceRoutes(t, "prod", routesCaps)
+	if resp := ts.do(t, "POST", "/v1/private/grants", ts.key, `{"tag":"backend","connector":"prod","subnet":"10.0.5.0/24"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("tag grant: %d", resp.StatusCode)
+	}
+	t.Setenv("PRIVATE_INGRESS", "")
+	if resp := ts.do(t, "PATCH", "/v1/sandboxes/sb-1-conn", ts.sandboxToken, `{"networks":["backend"]}`); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("sandbox token join with private access off: %d %s", resp.StatusCode, ts.body(resp))
+	}
+}
+
+func TestForkWithoutAParentRowIsRefused(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.routesNode(t)
+	ts.s.reg.Place("sbghost", node.id)
+	if resp := ts.do(t, "POST", "/v1/sandboxes/sbghost/fork", ts.key, `{}`); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("fork of a sandbox with no row: %d %s", resp.StatusCode, ts.body(resp))
+	}
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if len(node.creates) != 0 {
+		t.Fatal("the refused fork reached the node")
+	}
+}

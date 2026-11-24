@@ -24,6 +24,24 @@ func (s *Server) handleFork(w http.ResponseWriter, r *http.Request) {
 		}
 		body = b
 	}
+	// The child inherits the parent's tags, and with them the tags' grants.
+	var tags []string
+	if st := s.st.Load(); st != nil {
+		parent, found, err := st.SandboxByID(r.Context(), id)
+		if err != nil {
+			writeErr(w, http.StatusServiceUnavailable, "could not read the sandbox: "+err.Error())
+			return
+		}
+		// Without the row its tags are unknown, and the node would copy them anyway.
+		if !found {
+			writeErr(w, http.StatusNotFound, "sandbox not found")
+			return
+		}
+		tags = recordTags(parent)
+	}
+	if !s.tagJoinAdmin(w, r, "", tags) {
+		return
+	}
 	releaseSlot, msg, ok := s.admitBody(r, body)
 	if !ok {
 		if msg == admissionUnavailable {
@@ -53,6 +71,11 @@ func (s *Server) handleFork(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(rb, &created) == nil && created.ID != "" {
 			s.reg.Place(created.ID, node.ID)
 			s.recordPlaced(r.Context(), rb, fastOrg(r), node.ID, 0, 0)
+			if len(tags) > 0 && privateAccessOn() {
+				if _, err := s.pushPrivate(r.Context(), s.st.Load(), created.ID, fastOrg(r)); err != nil {
+					s.log().Warn("tag grants not pushed to a fork", "component", "private", "sandbox", created.ID, "err", err)
+				}
+			}
 			// Called even with no url: the node's other *_url fields carry its
 			// own ?ptok= and must not be relayed either. See sanitizeNodeURLs.
 			to, viewer := s.previewLinks(r, created.URL)
