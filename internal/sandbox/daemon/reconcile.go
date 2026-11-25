@@ -131,6 +131,8 @@ func (d *Daemon) reconcileOnce(ctx context.Context) {
 
 	var deltas []usageDelta
 	var toPause, toStandby, toStop []string
+	// Idle candidates that are running, so the busy check never wakes a frozen one.
+	idleRunning := map[string]bool{}
 
 	// Usage is flushed on a slow cadence; Pause and Destroy flush explicitly.
 	flushDue := now.Sub(d.lastUsageFlush) >= usageFlushInterval
@@ -180,15 +182,20 @@ func (d *Daemon) reconcileOnce(ctx context.Context) {
 		case caps.Snapshot && hibernate > 0 && now.Sub(sb.LastActiveAt) >= hibernate &&
 			(sb.State == StateRunning || sb.State == StateStandby):
 			toPause = append(toPause, id)
+			idleRunning[id] = sb.State == StateRunning
 		case caps.Standby && idle > 0 && sb.State == StateRunning &&
 			now.Sub(sb.LastActiveAt) >= idle:
 			toStandby = append(toStandby, id)
+			idleRunning[id] = true
 		}
 	}
 	if flushDue {
 		d.lastUsageFlush = now
 	}
 	d.mu.Unlock()
+
+	toStandby = d.keepBusy(ctx, toStandby, idleRunning)
+	toPause = d.keepBusy(ctx, toPause, idleRunning)
 
 	d.flushUsageBatch(ctx, deltas)
 	d.runLifecycle(ctx, toStandby, "standby", func(ctx context.Context, id string) error {
@@ -197,6 +204,24 @@ func (d *Daemon) reconcileOnce(ctx context.Context) {
 	})
 	d.runLifecycle(ctx, toPause, "pause", d.Pause)
 	d.runLifecycle(ctx, toStop, "stop", d.Destroy)
+}
+
+// keepBusy drops the idle candidates the busy check says are mid-task and
+// resets their idle clock, so each is asked again one idle period later.
+func (d *Daemon) keepBusy(ctx context.Context, ids []string, running map[string]bool) []string {
+	busy := d.busy.Load()
+	if busy == nil {
+		return ids
+	}
+	idle := ids[:0]
+	for _, id := range ids {
+		if running[id] && (*busy)(ctx, id) {
+			d.Touch(id)
+			continue
+		}
+		idle = append(idle, id)
+	}
+	return idle
 }
 
 // runLifecycle applies op to each id with bounded concurrency; one failure never abandons the rest.

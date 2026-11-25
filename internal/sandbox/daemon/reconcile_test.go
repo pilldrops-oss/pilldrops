@@ -353,3 +353,60 @@ func TestRunSecondsIsWallClockNotVCPUScaled(t *testing.T) {
 		t.Errorf("vcpu seconds = %.0f, want %.0f", u.VCPUSeconds, want)
 	}
 }
+
+// A sandbox whose busy check says it is mid-task outlives its idle timer, and
+// is idled once the task ends.
+func TestReconcileKeepsABusySandboxUp(t *testing.T) {
+	clk := &manualClock{t: time.Unix(1000, 0)}
+	fake := runtimetest.NewFake()
+	d := New(Config{Runtime: fake, Clock: clk, SnapshotDir: t.TempDir(),
+		IdleTimeout: 30 * time.Second, HibernateTimeout: time.Minute, HardTTL: time.Hour})
+	sb, _ := d.Create(context.Background(), CreateSpec{Template: "t"})
+
+	busy, asked := true, 0
+	d.SetBusyCheck(func(_ context.Context, id string) bool {
+		if id != sb.ID {
+			t.Errorf("asked about %s, want %s", id, sb.ID)
+		}
+		asked++
+		return busy
+	})
+
+	clk.Advance(2 * time.Minute) // past both timers
+	d.reconcileOnce(context.Background())
+	if got, _ := d.Get(sb.ID); got.State != StateRunning {
+		t.Fatalf("busy sandbox state = %s, want running", got.State)
+	}
+	d.reconcileOnce(context.Background())
+	if asked != 1 {
+		t.Errorf("busy check asked %d times, want 1: a kept sandbox waits a fresh idle period", asked)
+	}
+
+	busy = false
+	clk.Advance(31 * time.Second)
+	d.reconcileOnce(context.Background())
+	if got, _ := d.Get(sb.ID); got.State != StateStandby {
+		t.Fatalf("finished sandbox state = %s, want standby", got.State)
+	}
+}
+
+// A frozen sandbox runs no task, and asking would wake it.
+func TestReconcileNeverAsksAStandbySandboxIfBusy(t *testing.T) {
+	clk := &manualClock{t: time.Unix(1000, 0)}
+	fake := runtimetest.NewFake()
+	d := New(Config{Runtime: fake, Clock: clk, SnapshotDir: t.TempDir(),
+		IdleTimeout: 30 * time.Second, HibernateTimeout: time.Minute, HardTTL: time.Hour})
+	sb, _ := d.Create(context.Background(), CreateSpec{Template: "t"})
+
+	clk.Advance(31 * time.Second)
+	d.reconcileOnce(context.Background()) // standby, before the check is set
+	d.SetBusyCheck(func(context.Context, string) bool {
+		t.Error("busy check asked about a standby sandbox")
+		return true
+	})
+	clk.Advance(30 * time.Second)
+	d.reconcileOnce(context.Background())
+	if got, _ := d.Get(sb.ID); got.State != StatePaused {
+		t.Fatalf("state = %s, want paused", got.State)
+	}
+}
