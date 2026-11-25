@@ -128,6 +128,8 @@ type Daemon struct {
 	// Checked in Create and Resume rather than the HTTP handlers because the
 	// preview proxy and agent paths boot sandboxes without going through them.
 	isolationOK atomic.Bool
+	// busy, when set, says a running sandbox is mid-task and must not be idled.
+	busy atomic.Pointer[func(ctx context.Context, id string) bool]
 }
 
 // ErrIsolationPreflight is returned by Create and Resume when the node's
@@ -150,6 +152,10 @@ var ErrEgressDomainsUnsupported = errors.New("this node cannot enforce domain eg
 
 // SetIsolationOK records whether the isolation preflight passed; false makes Create and Resume refuse.
 func (d *Daemon) SetIsolationOK(ok bool) { d.isolationOK.Store(ok) }
+
+// SetBusyCheck makes the idle timers ask busy before standby or hibernate; a
+// busy sandbox has its idle clock reset instead. Unset, idle time alone decides.
+func (d *Daemon) SetBusyCheck(busy func(ctx context.Context, id string) bool) { d.busy.Store(&busy) }
 
 // New builds a Daemon. Call Start to run the reconciler loop.
 func New(cfg Config) *Daemon {
