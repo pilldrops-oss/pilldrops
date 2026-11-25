@@ -85,7 +85,7 @@ export default function PrivateAccessPanel({ sandboxId }: { sandboxId: string })
                 {(conn?.targets ?? []).map(t => <option key={t.name} value={t.name}>{t.name}:{t.port}</option>)}
               </select>
             ) : (
-              <input aria-label={pick.kind === 'subnet' ? 'Subnet' : 'DNS suffix'} value={pick.value} disabled={!kindOK || !pick.connector}
+              <input className="inp mono vault-input" aria-label={pick.kind === 'subnet' ? 'Subnet' : 'DNS suffix'} value={pick.value} disabled={!kindOK || !pick.connector}
                 placeholder={pick.kind === 'subnet' ? conn?.subnets?.[0] ?? '10.0.0.0/24' : conn?.dns?.suffixes[0] ?? 'corp.internal'}
                 onChange={e => setPick({ ...pick, value: e.target.value })} />
             )}

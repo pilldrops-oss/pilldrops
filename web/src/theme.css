@@ -3812,6 +3812,7 @@ body.dark .tag-err { background: rgba(220, 38, 38, 0.16); }
   margin-top: 10px;
 }
 .vault-add-name { width: 200px; flex: none; }
+.vault-add .sel, .vault-add .inp { width: auto; }
 .vault-auto { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 
 /* ── Gateway disclosure ──────────────────────────────────────────────────── */

@@ -61,7 +61,7 @@ export default function Connectors() {
       {canChange && (
         <div className="panel vault-panel">
           <form className="vault-add" onSubmit={create}>
-            <label>Connector name<input aria-label="Connector name" value={name} onChange={e => setName(e.target.value.toLowerCase())} placeholder="prod" /></label>
+            <label className="vault-auto">Connector name<input className="inp mono vault-add-name" aria-label="Connector name" value={name} onChange={e => setName(e.target.value.toLowerCase())} placeholder="prod" /></label>
             <button className="btn" type="submit" disabled={busy || !name}>Create</button>
           </form>
           {created && <pre className="code">pilldrops connector run {created} db=HOST:PORT --subnet 10.0.0.0/16 --dns corp.internal</pre>}
@@ -115,9 +115,9 @@ function TagGrantsPanel({ connectors, canChange }: { connectors: Connector[]; ca
   useEffect(load, [load])
   const conn = connectors.find(c => c.name === pick.connector)
   return (
-    <div className="panel">
-      <h2>Tag grants</h2>
-      <p className="muted">Every sandbox in a network tag reaches these, including sandboxes that join the tag later.</p>
+    <section className="panel" aria-label="Tag grants">
+      <div className="ph"><h2>Tag grants</h2><span className="meta">every sandbox in the tag, including ones that join later</span></div>
+      <div className="panel-pad">
       {grants.length === 0 ? <p className="vault-empty">No tag grants.</p> : (
         <table className="tbl"><thead><tr><th>Tag</th><th>Connector</th><th>Reaches</th><th /></tr></thead>
           <tbody>{grants.map(g => (
@@ -144,7 +144,7 @@ function TagGrantsPanel({ connectors, canChange }: { connectors: Connector[]; ca
             load()
           } catch (err) { toast.error(errText(err)) } finally { setBusy(false) }
         }}>
-          <input aria-label="Tag" value={pick.tag} placeholder="backend" onChange={e => setPick({ ...pick, tag: e.target.value.toLowerCase() })} />
+          <input className="inp mono vault-add-name" aria-label="Tag" value={pick.tag} placeholder="backend" onChange={e => setPick({ ...pick, tag: e.target.value.toLowerCase() })} />
           <select className="sel" aria-label="Tag connector" value={pick.connector} onChange={e => setPick({ ...pick, connector: e.target.value, value: '' })}>
             <option value="">Connector…</option>
             {connectors.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
@@ -158,14 +158,15 @@ function TagGrantsPanel({ connectors, canChange }: { connectors: Connector[]; ca
               {(conn?.targets ?? []).map(t => <option key={t.name} value={t.name}>{t.name}:{t.port}</option>)}
             </select>
           ) : (
-            <input aria-label="Tag value" value={pick.value} disabled={!pick.connector}
+            <input className="inp mono vault-input" aria-label="Tag value" value={pick.value} disabled={!pick.connector}
               placeholder={pick.kind === 'subnet' ? conn?.subnets?.[0] ?? '10.0.0.0/24' : conn?.dns?.suffixes[0] ?? 'corp.internal'}
               onChange={e => setPick({ ...pick, value: e.target.value })} />
           )}
           <button className="btn" type="submit" disabled={busy || !pick.tag || !pick.connector || !pick.value}>Grant</button>
         </form>
       )}
-    </div>
+      </div>
+    </section>
   )
 }
 
