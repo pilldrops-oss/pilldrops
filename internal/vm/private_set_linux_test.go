@@ -41,7 +41,7 @@ func sh(t *testing.T, args ...string) string {
 }
 
 // testNamespaces builds a sandbox namespace named as the node names one (tap0
-// at 192.168.30.1 facing a guest namespace at .2, vn0 facing a host namespace
+// at 192.168.30.1/16 facing a guest namespace at .2/16, as on a node, vn0 facing a host namespace
 // that owns the public test address 203.0.113.7) and loads the sandbox ruleset
 // with private access on, policy as its egress tail.
 func testNamespaces(t *testing.T, id, policy string) (sbNS, guestNS, hostNS string) {
@@ -56,13 +56,13 @@ func testNamespaces(t *testing.T, id, policy string) (sbNS, guestNS, hostNS stri
 	sh(t, "ip", "link", "add", "vn0", "netns", sbNS, "type", "veth", "peer", "name", "eth0", "netns", hostNS)
 	in := func(ns string, args ...string) { sh(t, append([]string{"ip", "netns", "exec", ns}, args...)...) }
 	for _, c := range [][]string{
-		{"ip", "addr", "add", "192.168.30.1/24", "dev", "tap0"}, {"ip", "addr", "add", "10.128.0.30/30", "dev", "vn0"},
+		{"ip", "addr", "add", "192.168.30.1/16", "dev", "tap0"}, {"ip", "addr", "add", "10.128.0.30/30", "dev", "vn0"},
 		{"ip", "link", "set", "tap0", "up"}, {"ip", "link", "set", "vn0", "up"}, {"ip", "link", "set", "lo", "up"},
 		{"ip", "route", "add", "default", "via", "10.128.0.29"}, {"sysctl", "-qw", "net.ipv4.ip_forward=1"},
 	} {
 		in(sbNS, c...)
 	}
-	in(guestNS, "ip", "addr", "add", "192.168.30.2/24", "dev", "eth0")
+	in(guestNS, "ip", "addr", "add", "192.168.30.2/16", "dev", "eth0")
 	in(guestNS, "ip", "link", "set", "eth0", "up")
 	in(guestNS, "ip", "route", "add", "default", "via", "192.168.30.1")
 	in(hostNS, "ip", "addr", "add", "10.128.0.29/30", "dev", "eth0")
@@ -153,6 +153,50 @@ func TestPrivateSetRedirectsTCPAndDropsUDP(t *testing.T) {
 	time.Sleep(3 * time.Second)
 	if out := listSet(t, sbNS); strings.Contains(out, "198.51.100.9") {
 		t.Fatalf("learned address outlived its timeout:\n%s", out)
+	}
+}
+
+// The guest's /16 makes a granted 192.168.x address on-link: the guest ARPs
+// for it, and only the namespace's local routes make anything answer.
+func TestGrantedGuestLinkAddressReachesTheProxy(t *testing.T) {
+	needNFT(t)
+	t.Setenv("PILLDROPS_LOCAL_API_PORT", "")
+	sbNS, guestNS, _ := testNamespaces(t, "vm-pdlink", "\t\taccept")
+	granted := []netip.Prefix{netip.MustParsePrefix("192.168.0.0/24")}
+	rs := buildNetNSRuleset("vn0", "tap0", net.ParseIP("10.128.0.29"), net.ParseIP("10.128.0.30"), net.ParseIP("192.168.30.2"),
+		"\t\taccept", "", false, true, privateSetElements(granted, nil, time.Now()))
+	if err := applyRulesetInNS(netnsRunDir+"/"+sbNS, rs); err != nil {
+		t.Fatal(err)
+	}
+	if err := setPrivateLocalRoute(netnsRunDir+"/"+sbNS, true); err != nil {
+		t.Fatal(err)
+	}
+	l, err := listenTCPInNS(netnsRunDir+"/"+sbNS, "192.168.30.1:18445")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	go func() { // not dialInNS: t.Fatal must not run off the test goroutine
+		_ = inNS(netnsRunDir+"/"+guestNS, func() (io.Closer, error) { return net.DialTimeout("tcp", "192.168.0.80:18999", 2*time.Second) })
+	}()
+	_ = l.(*net.TCPListener).SetDeadline(time.Now().Add(3 * time.Second))
+	c, err := l.Accept()
+	if err != nil {
+		t.Fatalf("TCP to a granted 192.168.x address never reached the proxy: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	if dst, err := egressproxy.OriginalDst(c); err != nil || dst.String() != "192.168.0.80:18999" {
+		t.Fatalf("original destination %v %v", dst, err)
+	}
+	// The guest keeps its own link: the gateway still answers.
+	if out := sh(t, "ip", "netns", "exec", guestNS, "ping", "-c1", "-W1", "192.168.30.1"); !strings.Contains(out, "1 received") {
+		t.Fatalf("gateway unreachable with the local routes in place:\n%s", out)
+	}
+	if err := setPrivateLocalRoute(netnsRunDir+"/"+sbNS, false); err != nil {
+		t.Fatal(err)
+	}
+	if out := sh(t, "ip", "netns", "exec", sbNS, "ip", "route", "show", "table", "local", "type", "local", "dev", "lo"); strings.Contains(out, "192.168.") {
+		t.Fatalf("turning private access off left local routes:\n%s", out)
 	}
 }
 

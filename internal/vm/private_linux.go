@@ -450,22 +450,33 @@ func stopPrivateByNS(nsName string) {
 	closeConns(dropped)
 }
 
-// privateLocalRoute makes the namespace own the whole target range, as
-// `ip route add local 192.168.31.0/24 dev lo` does. The guest sees the range
-// as on-link through the tap's /16 and ARPs for each target; without this
-// nobody answers and the redirect never gets the packet.
-func privateLocalRoute(loIndex int) *netlink.Route {
-	_, dst, _ := net.ParseCIDR(privateSubnet)
-	return &netlink.Route{
-		LinkIndex: loIndex,
-		Dst:       dst,
-		Type:      unix.RTN_LOCAL,
-		Table:     unix.RT_TABLE_LOCAL,
-		Scope:     netlink.SCOPE_HOST,
+// guestLink is the tap's /16: the guest ARPs for any address in it instead of
+// using its gateway.
+var guestLink = netip.MustParsePrefix("192.168.0.0/16")
+
+// privateLocalRoutes make the namespace own the private-target range, as
+// `ip route add local 192.168.31.0/24 dev lo` does, and the rest of the guest
+// link outside the platform ranges. The guest sees those addresses as on-link
+// and ARPs for each one; without these routes nobody answers and the redirect
+// never gets the packet, so a granted 192.168.x subnet or DNS answer is
+// unreachable. Ungranted addresses there were unreachable already; they now
+// get a reset from the namespace instead of an ARP timeout.
+func privateLocalRoutes(loIndex int) []*netlink.Route {
+	dsts := append([]netip.Prefix{netip.MustParsePrefix(privateSubnet)}, sandbox.CarvePlatform([]netip.Prefix{guestLink})...)
+	rs := make([]*netlink.Route, len(dsts))
+	for i, d := range dsts {
+		rs[i] = &netlink.Route{
+			LinkIndex: loIndex,
+			Dst:       &net.IPNet{IP: d.Addr().AsSlice(), Mask: net.CIDRMask(d.Bits(), 32)},
+			Type:      unix.RTN_LOCAL,
+			Table:     unix.RT_TABLE_LOCAL,
+			Scope:     netlink.SCOPE_HOST,
+		}
 	}
+	return rs
 }
 
-// setPrivateLocalRoute adds or removes privateLocalRoute in a namespace. Both
+// setPrivateLocalRoute adds or removes privateLocalRoutes in a namespace. Both
 // are idempotent: an adopted namespace may already be in either state.
 func setPrivateLocalRoute(nsPath string, on bool) error {
 	ns, err := netns.GetFromPath(nsPath)
@@ -482,12 +493,15 @@ func setPrivateLocalRoute(nsPath string, on bool) error {
 	if err != nil {
 		return err
 	}
-	r := privateLocalRoute(lo.Attrs().Index)
-	if on {
-		return h.RouteReplace(r)
-	}
-	if err := h.RouteDel(r); err != nil && !errors.Is(err, unix.ESRCH) {
-		return err
+	for _, r := range privateLocalRoutes(lo.Attrs().Index) {
+		if on {
+			err = h.RouteReplace(r)
+		} else if err = h.RouteDel(r); errors.Is(err, unix.ESRCH) {
+			err = nil
+		}
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -14,15 +14,35 @@ import (
 	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
-// The route must be the `ip route add local 192.168.31.0/24 dev lo` that made
-// a target answer ARP on a live node, and nothing wider.
-func TestPrivateLocalRouteOwnsOnlyTheTargetRange(t *testing.T) {
-	r := privateLocalRoute(7)
-	if r.Dst == nil || r.Dst.String() != privateSubnet {
-		t.Fatalf("dst %v, want %s", r.Dst, privateSubnet)
+// The routes own the private-target range and the guest link outside the
+// platform ranges, never the guest's own /23 (its address and gateway).
+func TestPrivateLocalRoutesOwnTheGuestLinkButNotTheGuest(t *testing.T) {
+	rs := privateLocalRoutes(7)
+	covers := func(ip string) bool {
+		for _, r := range rs {
+			if r.Dst.Contains(net.ParseIP(ip)) {
+				return true
+			}
+		}
+		return false
 	}
-	if r.LinkIndex != 7 || r.Type != unix.RTN_LOCAL || r.Table != unix.RT_TABLE_LOCAL || r.Scope != netlink.SCOPE_HOST {
-		t.Fatalf("route %+v is not a local route on lo", r)
+	if rs[0].Dst.String() != privateSubnet {
+		t.Fatalf("first route %v, want %s", rs[0].Dst, privateSubnet)
+	}
+	for _, ip := range []string{"192.168.31.2", "192.168.0.80", "192.168.1.1", "192.168.255.254"} {
+		if !covers(ip) {
+			t.Errorf("%s not owned by the namespace", ip)
+		}
+	}
+	for _, ip := range []string{"192.168.30.1", "192.168.30.2", "10.0.0.1", "172.16.0.1"} {
+		if covers(ip) {
+			t.Errorf("%s owned by the namespace", ip)
+		}
+	}
+	for _, r := range rs {
+		if r.LinkIndex != 7 || r.Type != unix.RTN_LOCAL || r.Table != unix.RT_TABLE_LOCAL || r.Scope != netlink.SCOPE_HOST {
+			t.Fatalf("route %+v is not a local route on lo", r)
+		}
 	}
 }
 
