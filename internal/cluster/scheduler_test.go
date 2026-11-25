@@ -355,3 +355,21 @@ func TestPickMostRoomChoosesTheEmptiestNode(t *testing.T) {
 		t.Fatalf("best fit picked %v, want full", got)
 	}
 }
+
+func TestPickSkipsNodesWithoutPrivateRoutes(t *testing.T) {
+	now := time.Now()
+	ttl := 30 * time.Second
+	plain := runtimeNode("plain", "firecracker", 8000, 3000, 5000, now)
+	plain.PrivateAccess = true // phase 1 only: targets, no subnets or DNS
+	routes := runtimeNode("routes", "firecracker", 64000, 40000, 20000, now)
+	routes.PrivateAccess, routes.PrivateRoutes = true, true
+	if got := Pick([]*Node{plain, routes}, Request{MemMB: 1024, PrivateAccess: true}, now, ttl); got == nil || got.ID != "plain" {
+		t.Fatalf("targets only = %v, want plain (best fit, control)", got)
+	}
+	if got := Pick([]*Node{plain, routes}, Request{MemMB: 1024, PrivateAccess: true, PrivateRoutes: true}, now, ttl); got == nil || got.ID != "routes" {
+		t.Fatalf("with routes = %v, want routes", got)
+	}
+	if got := Pick([]*Node{plain}, Request{MemMB: 1024, PrivateRoutes: true}, now, ttl); got != nil {
+		t.Fatalf("no capable node = %v, want nil", got)
+	}
+}

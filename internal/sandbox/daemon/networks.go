@@ -116,7 +116,12 @@ func (d *Daemon) SetNetworks(ctx context.Context, id string, tags []string) erro
 	rec := d.recordOf(sb)
 	d.mu.Unlock()
 
-	if err := d.pushNetworks(ctx, id); err != nil {
+	err := d.pushNetworks(ctx, id)
+	if err == nil && d.cfg.Store != nil {
+		// The hub reads tags from the row, so an unsaved change is undone too.
+		err = d.cfg.Store.SaveSandbox(ctx, rec)
+	}
+	if err != nil {
 		// Roll back rather than leave the row claiming a membership the kernel
 		// does not have, then re-push so the kernel matches the row again.
 		d.mu.Lock()
@@ -125,6 +130,5 @@ func (d *Daemon) SetNetworks(ctx context.Context, id string, tags []string) erro
 		_ = d.pushNetworks(ctx, id)
 		return fmt.Errorf("set networks: %w", err)
 	}
-	d.persistRec(ctx, rec)
 	return nil
 }

@@ -47,6 +47,8 @@ type vmBackend interface {
 	// SetPrivate replaces the private targets a sandbox may reach. sandboxID
 	// is the daemon's id, which the control plane checks grants against.
 	SetPrivate(id, sandboxID string, ts []sandbox.PrivateTarget) error
+	// SetPrivateRoutes replaces the subnets and DNS suffixes a sandbox routes.
+	SetPrivateRoutes(id, sandboxID string, r sandbox.PrivateRoutes) error
 	// VolumePath, CreateVolume and DeleteVolume manage standalone volume images.
 	VolumePath(id string) (string, error)
 	CreateVolume(id string, sizeMB int) error
@@ -93,6 +95,8 @@ type fcRuntime struct {
 	// privateDial is whether vm.Config.PrivateDial is set: without it the node
 	// has no way to reach a connector, so it must not be offered private sandboxes.
 	privateDial bool
+	// privateRoutes is whether both vm.Config uplink funcs are set.
+	privateRoutes bool
 	// warmRestoreStorageMB is the one writable-disk size golden restore serves
 	// on this node, 0 when snapshots are off.
 	warmRestoreStorageMB int
@@ -144,6 +148,7 @@ func (r *fcRuntime) Capabilities() rt.Caps {
 	// the shared bridge has no slot addresses to pair.
 	caps.TagNetworks = r.netns
 	caps.PrivateAccess = r.netns && r.privateDial
+	caps.PrivateRoutes = caps.PrivateAccess && r.privateRoutes
 	caps.Volumes = true
 	// Stamping a new machine out of a capture reuses the baked tap name and
 	// guest address, which only a private namespace has room for: on the shared
@@ -480,6 +485,11 @@ func (i *fcInstance) SetNetworks(_ context.Context, n rt.Networks) (string, erro
 // SetPrivate implements rt.PrivateRouter, on the instance for the same reason.
 func (i *fcInstance) SetPrivate(_ context.Context, ts []sandbox.PrivateTarget) error {
 	return i.be.SetPrivate(i.vmID, i.sandboxID, ts)
+}
+
+// SetPrivateRoutes implements rt.PrivateRouteSetter, on the instance like SetPrivate.
+func (i *fcInstance) SetPrivateRoutes(_ context.Context, r sandbox.PrivateRoutes) error {
+	return i.be.SetPrivateRoutes(i.vmID, i.sandboxID, r)
 }
 
 // Freeze implements rt.Freezer: stop the vCPUs, keep the RAM. Unlike Snapshot

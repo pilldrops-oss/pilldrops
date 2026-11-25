@@ -3,8 +3,10 @@ package firecracker
 import (
 	"context"
 	"net"
+	"net/netip"
 
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/vm"
 
 	"go.uber.org/zap"
@@ -29,7 +31,12 @@ type Config struct {
 	NetNS bool
 	// PrivateDial reaches granted private targets through the control plane.
 	PrivateDial func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error)
-	Logger      *zap.Logger
+	// PrivateDialDest opens a sandbox's connection to an address under a subnet
+	// or split-DNS grant, and PrivateDNS relays a lookup under a granted
+	// suffix. Both nil on a node that cannot carry those grants.
+	PrivateDialDest func(ctx context.Context, sandboxID string, dest netip.AddrPort) (net.Conn, error)
+	PrivateDNS      func(ctx context.Context, sandboxID, name, qtype string) (sandbox.PrivateDNSReply, error)
+	Logger          *zap.Logger
 }
 
 // New builds the Firecracker runtime. ctx is the node's lifetime: the manager's
@@ -56,6 +63,8 @@ func New(ctx context.Context, cfg Config) (rt.Runtime, error) {
 		NonRootVMM:      cfg.NonRootVMM,
 		NetNS:           cfg.NetNS,
 		PrivateDial:     cfg.PrivateDial,
+		PrivateDialDest: cfg.PrivateDialDest,
+		PrivateDNS:      cfg.PrivateDNS,
 	}, logger)
 	if err != nil {
 		return nil, err
@@ -67,6 +76,7 @@ func New(ctx context.Context, cfg Config) (rt.Runtime, error) {
 	r := newWithBackend(mgr)
 	r.netns = cfg.NetNS
 	r.privateDial = cfg.PrivateDial != nil
+	r.privateRoutes = cfg.PrivateDialDest != nil && cfg.PrivateDNS != nil
 	// Golden restore serves exactly one storage size, and only when snapshots are on.
 	if cfg.EnableSnapshots {
 		r.warmRestoreStorageMB = vm.DefaultOverlayMB

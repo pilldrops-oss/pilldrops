@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	rt "github.com/pilldrops-oss/pilldrops/internal/runtime"
 	"github.com/pilldrops-oss/pilldrops/internal/runtime/docker"
 	"github.com/pilldrops-oss/pilldrops/internal/runtime/firecracker"
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 	"github.com/pilldrops-oss/pilldrops/internal/templates"
 	"go.uber.org/zap"
 )
@@ -56,6 +58,7 @@ func SelectRuntime(ctx context.Context, dataDir string, logger *zap.Logger) (rt.
 		// VM_VCPUS as the final fallback.
 		tmplRes := templateResources(templates.Catalog())
 		envdAuth := Env("ENVD_AUTH", "1") == "1"
+		dialDest, resolveDNS := privateUplink()
 		fc, ferr := firecracker.New(ctx, firecracker.Config{
 			SnapshotDir:    snapDir,
 			OverlayDir:     Env("OVERLAY_DIR", filepath.Join(fcDir, "overlays")),
@@ -72,11 +75,13 @@ func SelectRuntime(ctx context.Context, dataDir string, logger *zap.Logger) (rt.
 			EnableSnapshots: EnvBool("FC_SNAPSHOTS", true),
 			// ENVD_AUTH=0 is a dev escape hatch, not a working "disable auth":
 			// envd still refuses every method until a credential is pushed.
-			EnvdAuth:    envdAuth,
-			NonRootVMM:  NonRootVMMRequested(),
-			NetNS:       NetNSRequested(),
-			PrivateDial: privateDialer(),
-			Logger:      logger,
+			EnvdAuth:        envdAuth,
+			NonRootVMM:      NonRootVMMRequested(),
+			NetNS:           NetNSRequested(),
+			PrivateDial:     privateDialer(),
+			PrivateDialDest: dialDest,
+			PrivateDNS:      resolveDNS,
+			Logger:          logger,
 		})
 		if ferr == nil {
 			slog.Info("/dev/kvm, the firecracker binary and a kernel are all present; "+
@@ -114,6 +119,19 @@ func privateDialer() func(ctx context.Context, sandboxID, target string, port in
 		return nil
 	}
 	return NewPrivateDialer(orchURL, key)
+}
+
+// privateUplink is the node's way to the hub for subnet and DNS grants: nil
+// exactly when privateDialer is, so a node advertises both or neither.
+func privateUplink() (func(context.Context, string, netip.AddrPort) (net.Conn, error), func(context.Context, string, string, string) (sandbox.PrivateDNSReply, error)) {
+	orchURL, key := Env("ORCHESTRATOR_URL", ""), Env("NODE_API_KEY", "")
+	if orchURL == "" || key == "" {
+		return nil, nil
+	}
+	if _, err := privateDialBase(orchURL); err != nil {
+		return nil, nil
+	}
+	return NewPrivateDestDialer(orchURL, key), NewPrivateResolver(orchURL, key)
 }
 
 // unisolated returns the process runtime in a dev build and nil in a release

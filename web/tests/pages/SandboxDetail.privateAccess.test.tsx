@@ -32,9 +32,9 @@ const sb: SB = {
 }
 const connector: Connector = {
   id: 'cn_1', name: 'prod', created_at: 1, last_seen_at: 2, instances: 1, online: true,
-  targets: [{ name: 'db', port: 5432 }],
+  targets: [{ name: 'db', port: 5432 }], subnets: ['10.0.0.0/16'], dns: { suffixes: ['corp.internal'] },
 }
-const grant = { connector: 'prod', target: 'db', created_at: 1, online: true, names: ['db.private'] }
+const grant = { id: 'pg_1', connector: 'prod', kind: 'target' as const, value: 'db', target: 'db', source: 'sandbox', created_at: 1, online: true, names: ['db.private'] }
 
 beforeEach(() => {
   window.__SANDBOXD__ = { key: '' } as typeof window.__SANDBOXD__
@@ -42,7 +42,7 @@ beforeEach(() => {
   vi.mocked(api.listTemplates).mockResolvedValue([])
   vi.mocked(api.getSandboxMetrics).mockResolvedValue(null as never)
   vi.mocked(api.getPreviewToken).mockResolvedValue('tok')
-  vi.mocked(api.listPrivateGrants).mockResolvedValue({ grants: [grant], supported: true })
+  vi.mocked(api.listPrivateGrants).mockResolvedValue({ grants: [grant], supported: true, routes_supported: true })
   vi.mocked(api.grantPrivate).mockResolvedValue(grant)
   vi.mocked(api.revokePrivate).mockResolvedValue(undefined as never)
   vi.mocked(api.listConnectors).mockResolvedValue([connector])
@@ -78,7 +78,7 @@ describe('sandbox detail private access', () => {
     await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Connector' }), 'prod')
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Target' }), 'db')
     await userEvent.click(screen.getByRole('button', { name: 'Add' }))
-    await waitFor(() => expect(api.grantPrivate).toHaveBeenCalledWith('sb1', 'prod', 'db'))
+    await waitFor(() => expect(api.grantPrivate).toHaveBeenCalledWith('sb1', 'prod', 'target', 'db'))
   })
 
   it('disables Add while a grant is being submitted', async () => {
@@ -100,11 +100,11 @@ describe('sandbox detail private access', () => {
     await renderPage()
     await userEvent.click(await screen.findByRole('button', { name: 'Remove db' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Confirm' }))
-    await waitFor(() => expect(api.revokePrivate).toHaveBeenCalledWith('sb1', 'prod', 'db'))
+    await waitFor(() => expect(api.revokePrivate).toHaveBeenCalledWith('sb1', 'pg_1'))
   })
 
   it('explains an unsupported node and disables Add', async () => {
-    vi.mocked(api.listPrivateGrants).mockResolvedValue({ grants: [], supported: false })
+    vi.mocked(api.listPrivateGrants).mockResolvedValue({ grants: [], supported: false, routes_supported: true })
     await renderPage()
     expect(await screen.findByText("Private access is not available on this sandbox's node.")).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled()
@@ -173,5 +173,35 @@ describe('sandbox detail private access', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Remove db' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
     expect(api.revokePrivate).not.toHaveBeenCalled()
+  })
+
+  it('adds a subnet grant', async () => {
+    await renderPage()
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Connector' }), 'prod')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Kind' }), 'subnet')
+    await userEvent.type(screen.getByRole('textbox', { name: 'Subnet' }), '10.0.5.0/24')
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(api.grantPrivate).toHaveBeenCalledWith('sb1', 'prod', 'subnet', '10.0.5.0/24'))
+  })
+
+  it('shows a tag grant with its source and no Remove', async () => {
+    vi.mocked(api.listPrivateGrants).mockResolvedValue({ grants: [
+      { id: 'pg_2', connector: 'prod', kind: 'subnet', value: '10.0.0.0/8', source: 'tag:backend', created_at: 1, online: true, shadowed: ['10.128.0.0/16'] },
+    ], supported: true, routes_supported: true })
+    await renderPage()
+    expect(await screen.findByText('10.0.0.0/8')).toBeInTheDocument()
+    expect(screen.getByText(/from tag backend/)).toBeInTheDocument()
+    expect(screen.getByText(/Not routed \(reserved\): 10\.128\.0\.0\/16/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Remove 10.0.0.0/8' })).not.toBeInTheDocument()
+  })
+
+  it('explains a node without subnet and DNS grants', async () => {
+    vi.mocked(api.listPrivateGrants).mockResolvedValue({ grants: [], supported: true, routes_supported: false })
+    await renderPage()
+    expect(await screen.findByText("Subnet and DNS grants are not available on this sandbox's node.")).toBeInTheDocument()
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Connector' }), 'prod')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Kind' }), 'dns')
+    expect(screen.getByRole('textbox', { name: 'DNS suffix' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled()
   })
 })

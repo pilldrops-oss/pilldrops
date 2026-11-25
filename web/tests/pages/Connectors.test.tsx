@@ -11,13 +11,15 @@ vi.mock('../../src/api', () => ({
   listConnectors: vi.fn(), createConnector: vi.fn(), revokeConnector: vi.fn(),
   listConnectorKeys: vi.fn(), createConnectorKey: vi.fn(), revokeConnectorKey: vi.fn(),
   listConnectorConnections: vi.fn(), getCapabilities: vi.fn(),
+  listTagGrants: vi.fn(), grantTag: vi.fn(), revokeTagGrant: vi.fn(),
 }))
 vi.mock('../../src/hooks/useOrgRole', () => ({ useOrgRole: vi.fn(() => 'owner') }))
 import { useOrgRole } from '../../src/hooks/useOrgRole'
 
 const conn = (over: Partial<Connector> = {}): Connector => ({
   id: 'cn_1', name: 'prod', created_at: 1, last_seen_at: 2, instances: 1, online: true,
-  targets: [{ name: 'db', port: 5432 }, { name: 'api', port: 443, host: 'internal.corp' }], ...over,
+  targets: [{ name: 'db', port: 5432 }, { name: 'api', port: 443, host: 'internal.corp' }],
+  subnets: ['10.0.0.0/16'], dns: { suffixes: ['corp.internal'] }, ...over,
 })
 const renderPage = () => render(<ToastProvider><ConfirmProvider><Connectors /></ConfirmProvider></ToastProvider>)
 
@@ -29,6 +31,9 @@ beforeEach(() => {
   vi.mocked(api.createConnectorKey).mockReset().mockResolvedValue({ id: 'ck_1', key: `pd_conn_${  'a'.repeat(48)}`, created_at: 1, last_used_at: 0 })
   vi.mocked(api.listConnectorConnections).mockReset().mockResolvedValue([])
   vi.mocked(api.getCapabilities).mockReset().mockResolvedValue({ private_access: true } as never)
+  vi.mocked(api.listTagGrants).mockReset().mockResolvedValue([])
+  vi.mocked(api.grantTag).mockReset().mockResolvedValue({ id: 'pg_9', tag: 'backend', connector: 'prod', kind: 'subnet', value: '10.0.5.0/24', created_at: 1, online: true, sandboxes: 2, unsupported: [] })
+  vi.mocked(api.revokeTagGrant).mockReset().mockResolvedValue(undefined as never)
   vi.mocked(useOrgRole).mockReturnValue('owner')
 })
 
@@ -41,7 +46,7 @@ describe('Connectors', () => {
   it('lists targets and online state', async () => {
     vi.mocked(api.listConnectors).mockResolvedValue([conn()])
     renderPage()
-    const row = (await screen.findByText('prod')).closest('tr')!
+    const row = (await screen.findByRole('cell', { name: 'prod' })).closest('tr')!
     expect(within(row).getByText('online · 1 instance')).toBeInTheDocument()
     expect(within(row).getByText('db:5432')).toBeInTheDocument()
     expect(within(row).getByText('api:443 (internal.corp)')).toBeInTheDocument()
@@ -165,5 +170,42 @@ describe('Connectors', () => {
     expect(await screen.findByText('sb9')).toBeInTheDocument()
     expect(screen.getByText('dial failed')).toBeInTheDocument()
     expect(screen.getByText('5s')).toBeInTheDocument()
+  })
+
+  it('lists subnets and dns suffixes beside targets', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([conn()])
+    renderPage()
+    const row = (await screen.findByRole('cell', { name: 'prod' })).closest('tr')!
+    expect(within(row).getByText('10.0.0.0/16')).toBeInTheDocument()
+    expect(within(row).getByText('*.corp.internal')).toBeInTheDocument()
+  })
+
+  it('grants a subnet to a tag', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([conn()])
+    renderPage()
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Tag' }), 'backend')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Tag connector' }), 'prod')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Tag kind' }), 'subnet')
+    await userEvent.type(screen.getByRole('textbox', { name: 'Tag value' }), '10.0.5.0/24')
+    await userEvent.click(screen.getByRole('button', { name: 'Grant' }))
+    await waitFor(() => expect(api.grantTag).toHaveBeenCalledWith('backend', 'prod', 'subnet', '10.0.5.0/24'))
+  })
+
+  it('removes a tag grant after confirming', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([conn()])
+    vi.mocked(api.listTagGrants).mockResolvedValue([{ id: 'pg_9', tag: 'backend', connector: 'prod', kind: 'dns', value: 'corp.internal', created_at: 1, online: true }])
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove corp.internal from backend' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Confirm' }))
+    await waitFor(() => expect(api.revokeTagGrant).toHaveBeenCalledWith('pg_9'))
+  })
+
+  it('shows tag grants to a member without the form', async () => {
+    vi.mocked(useOrgRole).mockReturnValue('member')
+    vi.mocked(api.listConnectors).mockResolvedValue([conn()])
+    vi.mocked(api.listTagGrants).mockResolvedValue([{ id: 'pg_9', tag: 'backend', connector: 'prod', kind: 'dns', value: 'corp.internal', created_at: 1, online: true }])
+    renderPage()
+    expect(await screen.findByText('backend')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Grant' })).not.toBeInTheDocument()
   })
 })

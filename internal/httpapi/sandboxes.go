@@ -73,6 +73,9 @@ const codeTagNetworksUnsupported = "tag_networks_unsupported"
 // codePrivateAccessUnsupported: this sandbox's node cannot route private targets.
 const codePrivateAccessUnsupported = "private_access_unsupported"
 
+// codePrivateRoutesUnsupported: this sandbox's node cannot route subnet or DNS grants.
+const codePrivateRoutesUnsupported = "private_routes_unsupported"
+
 // tenantMayBoot reports whether a tenant may create from tmpl and snapshot: a
 // catalogue template, or its own org's named snapshot. Another org's snapshot,
 // a rehome capture and a move capture (a reserved snapshot name) are not.
@@ -1091,13 +1094,14 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 		HibernateTimeout *int                     `json:"hibernate_timeout"`
 		Networks         *[]string                `json:"networks"`
 		Private          *[]sandbox.PrivateTarget `json:"private"`
+		PrivateRoutes    *sandbox.PrivateRoutes   `json:"private_routes"`
 	}
 	if !decodeBody(r, &body) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if body.Name == nil && body.Slug == nil && body.Port == nil &&
-		body.IdleTimeout == nil && body.HibernateTimeout == nil && body.Networks == nil && body.Private == nil {
+		body.IdleTimeout == nil && body.HibernateTimeout == nil && body.Networks == nil && body.Private == nil && body.PrivateRoutes == nil {
 		writeErr(w, http.StatusBadRequest,
 			"body must set at least one of name, slug, port, idle_timeout, hibernate_timeout, networks")
 		return
@@ -1122,6 +1126,12 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Private != nil {
 		if err := sandbox.ValidPrivateTargets(*body.Private); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if body.PrivateRoutes != nil {
+		if err := sandbox.ValidPrivateRoutes(*body.PrivateRoutes); err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -1190,6 +1200,17 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		audit["private"] = len(*body.Private)
+	}
+	if body.PrivateRoutes != nil {
+		if err := s.d.SetPrivateRoutes(r.Context(), id, *body.PrivateRoutes); err != nil {
+			if errors.Is(err, daemon.ErrPrivateRoutesUnsupported) {
+				writeErrCode(w, http.StatusConflict, codePrivateRoutesUnsupported, err.Error())
+				return
+			}
+			writeErr(w, statusForErr(err), err.Error())
+			return
+		}
+		audit["private_routes"] = len(body.PrivateRoutes.Subnets) + len(body.PrivateRoutes.DNS)
 	}
 	if body.IdleTimeout != nil {
 		idle := sandbox.IdleTimeout(*body.IdleTimeout)

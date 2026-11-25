@@ -903,3 +903,40 @@ func TestPauseRecordsTheSnapshotAfterTheDeadline(t *testing.T) {
 		t.Errorf("record state %q snapshot %q, want paused with its snapshot: a restart would drop it", rec.State, rec.Snapshot)
 	}
 }
+
+// failingSaveStore fails every write once fail is set.
+type failingSaveStore struct {
+	*fakePersister
+	fail bool
+}
+
+func (s *failingSaveStore) SaveSandbox(ctx context.Context, rec PersistedSandbox) error {
+	if s.fail {
+		return errors.New("db down")
+	}
+	return s.fakePersister.SaveSandbox(ctx, rec)
+}
+
+// A tag change the row does not record would keep the hub authorising the
+// old tag's grants, so the change fails and the kernel goes back to the row.
+func TestSetNetworksFailsWhenTheRowIsNotSaved(t *testing.T) {
+	fake := runtimetest.NewFake()
+	fake.TagNetworks = true
+	st := &failingSaveStore{fakePersister: newFakePersister(nil)}
+	d := New(Config{Runtime: fake, Store: st, IdleTimeout: time.Minute, HardTTL: time.Hour})
+	ctx := context.Background()
+	sb, err := d.Create(ctx, CreateSpec{Template: "python-3.11", OrgID: "o", Networks: []string{"backend"}})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	st.fail = true
+	if err := d.SetNetworks(ctx, sb.ID, nil); err == nil {
+		t.Fatal("SetNetworks succeeded with the row unsaved")
+	}
+	if got, _ := d.Get(sb.ID); len(got.Networks) != 1 || got.Networks[0] != "backend" {
+		t.Fatalf("networks = %v, want [backend] kept", got.Networks)
+	}
+	if got := fake.NetworksOf(sb.ID); len(got) != 1 || got[0] != "o/backend" {
+		t.Fatalf("kernel networks = %v, want [o/backend] restored", got)
+	}
+}

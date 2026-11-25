@@ -207,6 +207,16 @@ func (a StoreAdapter) SetSandboxPrivate(ctx context.Context, id, targetsJSON str
 	return a.S.SetSandboxPrivate(ctx, id, targetsJSON)
 }
 
+// SandboxPrivateRoutes reads the sandbox's private routes column; "" when there is no row.
+func (a StoreAdapter) SandboxPrivateRoutes(ctx context.Context, id string) (string, error) {
+	r, _, err := a.S.SandboxByID(ctx, id)
+	return r.PrivateRoutes, err
+}
+
+func (a StoreAdapter) SetSandboxPrivateRoutes(ctx context.Context, id, routesJSON string) error {
+	return a.S.SetSandboxPrivateRoutes(ctx, id, routesJSON)
+}
+
 // SandboxIDsOnTemplate finds every stored record on a template.
 func (a StoreAdapter) SandboxIDsOnTemplate(ctx context.Context, template string) ([]string, error) {
 	return a.S.SandboxIDsOnTemplate(ctx, template)

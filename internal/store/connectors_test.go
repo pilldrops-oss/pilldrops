@@ -36,7 +36,7 @@ func eachStore(t *testing.T, fn func(t *testing.T, st *Store, sfx string)) {
 		sfx := fmt.Sprintf("-%d", time.Now().UnixNano())
 		t.Cleanup(func() {
 			for table, col := range map[string]string{
-				"connectors": "id", "connector_keys": "connector_id", "sandbox_private_grants": "sandbox_id",
+				"connectors": "id", "connector_keys": "connector_id", "sandbox_private_grants": "sandbox_id", "private_grants": "subject",
 				"private_connections": "connector_id", "sandboxes": "id",
 			} {
 				_, _ = st.db.Exec(st.rebind(`DELETE FROM `+table+` WHERE `+col+` LIKE ?`), "%"+sfx)
@@ -58,7 +58,7 @@ func TestConnectorLifecycle(t *testing.T) {
 			t.Fatalf("duplicate name: %v", err)
 		}
 		ts := []ConnectorTarget{{Name: "db", Port: 5432}, {Name: "api", Port: 443, Host: "internal.corp"}}
-		if err := st.SetConnectorTargets(ctx, c.ID, ts, 20); err != nil {
+		if err := st.SetConnectorAnnounced(ctx, c.ID, ts, nil, nil, 20); err != nil {
 			t.Fatal(err)
 		}
 		got, ok, err := st.ConnectorByName(ctx, org, "prod")
@@ -82,7 +82,7 @@ func TestConnectorLifecycle(t *testing.T) {
 		if _, _, ok, _ := st.ConnectorForKey(ctx, plain+"0", 31); ok {
 			t.Fatal("wrong key resolved")
 		}
-		if err := st.AddPrivateGrant(ctx, PrivateGrant{SandboxID: "sb1" + sfx, ConnectorID: c.ID, Target: "db", CreatedAt: 40}); err != nil {
+		if _, err := st.AddGrant(ctx, Grant{OrgID: org, ConnectorID: c.ID, SubjectKind: GrantSubjectSandbox, Subject: "sb1" + sfx, Kind: GrantKindTarget, Value: "db", CreatedAt: 40}); err != nil {
 			t.Fatal(err)
 		}
 		if ok, err := st.RevokeConnector(ctx, org, c.ID, 50); !ok || err != nil {
@@ -91,7 +91,7 @@ func TestConnectorLifecycle(t *testing.T) {
 		if _, _, ok, _ := st.ConnectorForKey(ctx, plain, 51); ok {
 			t.Fatal("key survives connector revoke")
 		}
-		if gs, _ := st.PrivateGrants(ctx, "sb1"+sfx); len(gs) != 0 {
+		if gs, _ := st.SandboxGrants(ctx, "sb1"+sfx); len(gs) != 0 {
 			t.Fatalf("grants survive revoke: %+v", gs)
 		}
 		if n, _ := st.CountConnectors(ctx, org); n != 0 {

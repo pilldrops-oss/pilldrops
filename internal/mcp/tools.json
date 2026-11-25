@@ -338,14 +338,51 @@
     "properties": {},
     "type": "object"
   },
+  "grant_private_tag": {
+    "properties": {
+      "connector": {
+        "description": "Connector name.",
+        "type": "string"
+      },
+      "dns": {
+        "description": "DNS suffix at or under one the connector announced.",
+        "type": "string"
+      },
+      "subnet": {
+        "description": "IPv4 CIDR inside a subnet the connector announced.",
+        "type": "string"
+      },
+      "tag": {
+        "description": "Network tag, as in a sandbox's networks.",
+        "type": "string"
+      },
+      "target": {
+        "description": "Target name the connector announced.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "tag",
+      "connector"
+    ],
+    "type": "object"
+  },
   "grant_private_target": {
     "properties": {
       "connector": {
         "description": "Connector name.",
         "type": "string"
       },
+      "dns": {
+        "description": "DNS suffix at or under one the connector announced, like corp.internal.",
+        "type": "string"
+      },
       "sandbox_id": {
         "description": "The sandbox id.",
+        "type": "string"
+      },
+      "subnet": {
+        "description": "IPv4 CIDR inside a subnet the connector announced, like 10.0.5.0/24.",
         "type": "string"
       },
       "target": {
@@ -355,8 +392,7 @@
     },
     "required": [
       "sandbox_id",
-      "connector",
-      "target"
+      "connector"
     ],
     "type": "object"
   },
@@ -562,6 +598,22 @@
     },
     "required": [
       "sandbox_id"
+    ],
+    "type": "object"
+  },
+  "revoke_private_grant": {
+    "properties": {
+      "grant_id": {
+        "description": "Grant id (pg_...).",
+        "type": "string"
+      },
+      "sandbox_id": {
+        "description": "The sandbox id, for one of its own grants; omit for a tag grant.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "grant_id"
     ],
     "type": "object"
   },

@@ -153,6 +153,10 @@ type Caps struct {
 	// a sandbox to a connector. Like TagNetworks it needs per-sandbox namespaces
 	// on firecracker.
 	PrivateAccess bool
+	// PrivateRoutes is true when this runtime can also carry subnet and
+	// split-DNS grants: a private_dst set in the namespace and a way to the hub
+	// for dest dials and DNS. Needs PrivateAccess.
+	PrivateRoutes bool
 	// Volumes is true when a boot can attach standalone volumes (Volumer).
 	// False refuses a create naming one rather than booting without it.
 	Volumes bool
@@ -530,6 +534,14 @@ type Networker interface {
 // empty list removes access entirely.
 type PrivateRouter interface {
 	SetPrivate(ctx context.Context, ts []sandbox.PrivateTarget) error
+}
+
+// PrivateRouteSetter is an optional Instance capability: the sandbox reaches
+// granted subnets and names under granted DNS suffixes through its
+// connectors. SetPrivateRoutes replaces both lists, takes effect on the running
+// sandbox, and closes connections they no longer cover.
+type PrivateRouteSetter interface {
+	SetPrivateRoutes(ctx context.Context, r sandbox.PrivateRoutes) error
 }
 
 // Forker is a Runtime that can copy a sandbox, memory, disk and running

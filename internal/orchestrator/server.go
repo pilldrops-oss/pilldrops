@@ -92,6 +92,7 @@ type Server struct {
 	connectors connectorHub
 	// privateConns tracks open private connections so a revoke or destroy can cut them.
 	privateConns privateConnSet
+	privateDNS   privateDNS
 	// privatePushes serializes grant changes and pushes per sandbox.
 	privatePushes sandboxLocks
 
@@ -427,6 +428,7 @@ func (s *Server) Routes() http.Handler {
 	s.registerShareRoutes(mux)
 	s.registerConnectorRoutes(mux)
 	s.registerPrivateGrantRoutes(mux)
+	s.registerPrivateTagRoutes(mux)
 	s.registerPublicTemplateRoutes(mux)
 	s.registerLaunchStatsRoutes(mux)
 	// Artifact publish lives here because a node's database role has only SELECT on template_builds and artifacts.

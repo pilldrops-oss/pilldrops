@@ -1,10 +1,13 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -46,6 +49,9 @@ type SandboxRecord struct {
 	// Private is a JSON array of sandbox.PrivateTarget the node routes; "" and
 	// "[]" both mean none.
 	Private string
+	// PrivateRoutes is a JSON sandbox.PrivateRoutes the node routes; "" means none.
+	// Like Private it is written on insert only and owned by the control plane after.
+	PrivateRoutes string
 	// CreatedBy is the id of the API key that created or forked the sandbox;
 	// "" for a row that predates visibility, which is then org-visible.
 	CreatedBy string
@@ -97,11 +103,11 @@ func (s *Store) SaveSandbox(ctx context.Context, r SandboxRecord) error {
 	r.Env = env
 	// An empty incoming node_id leaves the stored owner alone, so a call site
 	// that forgets to carry the id cannot un-own a live sandbox.
-	// private_targets is written on insert only: SetSandboxPrivate owns it after
+	// private_targets and private_routes are written on insert only: SetSandboxPrivate owns it after
 	// that, since the control plane changes it while the node holds a stale record.
 	_, err = s.exec(ctx,
-		`INSERT INTO sandboxes (id, template, name, slug, org_id, node_id, state, snapshot, start_cmd, public_port, vcpu, mem_mib, storage_mb, idle_timeout, hibernate_timeout, backup_retention, env, identity_hash, networks, created_by, visibility, created_at, expires_at, updated_at, pause_archive, image, ports, private_targets)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO sandboxes (id, template, name, slug, org_id, node_id, state, snapshot, start_cmd, public_port, vcpu, mem_mib, storage_mb, idle_timeout, hibernate_timeout, backup_retention, env, identity_hash, networks, created_by, visibility, created_at, expires_at, updated_at, pause_archive, image, ports, private_targets, private_routes)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   template=excluded.template, name=excluded.name, slug=excluded.slug, org_id=excluded.org_id, state=excluded.state,
 		   node_id=CASE WHEN excluded.node_id = '' THEN sandboxes.node_id ELSE excluded.node_id END,
@@ -114,7 +120,7 @@ func (s *Store) SaveSandbox(ctx context.Context, r SandboxRecord) error {
 		   visibility=CASE WHEN excluded.visibility = '' THEN sandboxes.visibility ELSE excluded.visibility END,
 		   expires_at=excluded.expires_at, updated_at=excluded.updated_at, pause_archive=excluded.pause_archive,
 		   image=excluded.image, ports=excluded.ports`,
-		r.ID, r.Template, r.Name, r.Slug, r.OrgID, r.NodeID, r.State, r.Snapshot, r.StartCmd, r.PublicPort, r.VCPU, r.MemMiB, r.StorageMB, r.IdleTimeoutSecs, r.HibernateTimeoutSecs, r.BackupRetentionSecs, r.Env, r.IdentityHash, r.Networks, r.CreatedBy, r.Visibility, r.CreatedAt, r.ExpiresAt, r.UpdatedAt, r.PauseArchive, r.Image, r.Ports, r.Private,
+		r.ID, r.Template, r.Name, r.Slug, r.OrgID, r.NodeID, r.State, r.Snapshot, r.StartCmd, r.PublicPort, r.VCPU, r.MemMiB, r.StorageMB, r.IdleTimeoutSecs, r.HibernateTimeoutSecs, r.BackupRetentionSecs, r.Env, r.IdentityHash, r.Networks, r.CreatedBy, r.Visibility, r.CreatedAt, r.ExpiresAt, r.UpdatedAt, r.PauseArchive, r.Image, r.Ports, r.Private, r.PrivateRoutes,
 	)
 	if slugConflict(err) {
 		return fmt.Errorf("%w: %q", ErrSlugTaken, r.Slug)
@@ -128,10 +134,10 @@ func (s *Store) SaveSandbox(ctx context.Context, r SandboxRecord) error {
 // or route-fall-back to a sandbox that is running and billing.
 func (s *Store) RecordPlacedSandbox(ctx context.Context, r SandboxRecord) error {
 	_, err := s.exec(ctx,
-		`INSERT INTO sandboxes (id, template, name, org_id, node_id, state, vcpu, mem_mib, created_by, visibility, created_at, expires_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO sandboxes (id, template, name, org_id, node_id, state, vcpu, mem_mib, created_by, visibility, networks, created_at, expires_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO NOTHING`,
-		r.ID, r.Template, r.Name, r.OrgID, r.NodeID, r.State, r.VCPU, r.MemMiB, r.CreatedBy, r.Visibility,
+		r.ID, r.Template, r.Name, r.OrgID, r.NodeID, r.State, r.VCPU, r.MemMiB, r.CreatedBy, r.Visibility, cmp.Or(r.Networks, "[]"),
 		r.CreatedAt, r.ExpiresAt, r.UpdatedAt,
 	)
 	return err
@@ -160,6 +166,12 @@ const maxClientTagLen = 24
 // SetSandboxPrivate stores the sandbox's private targets as a JSON array.
 func (s *Store) SetSandboxPrivate(ctx context.Context, id, targetsJSON string) error {
 	_, err := s.exec(ctx, `UPDATE sandboxes SET private_targets = ? WHERE id = ?`, targetsJSON, id)
+	return err
+}
+
+// SetSandboxPrivateRoutes stores the sandbox's subnet and DNS routes as JSON.
+func (s *Store) SetSandboxPrivateRoutes(ctx context.Context, id, routesJSON string) error {
+	_, err := s.exec(ctx, `UPDATE sandboxes SET private_routes = ? WHERE id = ?`, routesJSON, id)
 	return err
 }
 
@@ -205,7 +217,7 @@ func (s *Store) IsPublicPreview(ctx context.Context, id string) (bool, error) {
 }
 
 // sandboxCols is the column list every sandbox-record read shares.
-const sandboxCols = `id, template, name, slug, org_id, node_id, state, snapshot, start_cmd, public_port, vcpu, mem_mib, storage_mb, idle_timeout, hibernate_timeout, backup_retention, env, identity_hash, networks, created_by, visibility, created_at, expires_at, updated_at, pause_archive, image, ports, private_targets`
+const sandboxCols = `id, template, name, slug, org_id, node_id, state, snapshot, start_cmd, public_port, vcpu, mem_mib, storage_mb, idle_timeout, hibernate_timeout, backup_retention, env, identity_hash, networks, created_by, visibility, created_at, expires_at, updated_at, pause_archive, image, ports, private_targets, private_routes`
 
 // querySandboxes runs a sandbox SELECT and decrypts each row's env. where is
 // appended verbatim, so it must be a constant, never caller data.
@@ -213,7 +225,7 @@ func (s *Store) querySandboxes(ctx context.Context, where string, args ...any) (
 	return collectRows(ctx, s, `SELECT `+sandboxCols+` FROM sandboxes `+where, args,
 		func(rows *sql.Rows, r *SandboxRecord) error {
 			if err := rows.Scan(&r.ID, &r.Template, &r.Name, &r.Slug, &r.OrgID, &r.NodeID, &r.State, &r.Snapshot,
-				&r.StartCmd, &r.PublicPort, &r.VCPU, &r.MemMiB, &r.StorageMB, &r.IdleTimeoutSecs, &r.HibernateTimeoutSecs, &r.BackupRetentionSecs, &r.Env, &r.IdentityHash, &r.Networks, &r.CreatedBy, &r.Visibility, &r.CreatedAt, &r.ExpiresAt, &r.UpdatedAt, &r.PauseArchive, &r.Image, &r.Ports, &r.Private); err != nil {
+				&r.StartCmd, &r.PublicPort, &r.VCPU, &r.MemMiB, &r.StorageMB, &r.IdleTimeoutSecs, &r.HibernateTimeoutSecs, &r.BackupRetentionSecs, &r.Env, &r.IdentityHash, &r.Networks, &r.CreatedBy, &r.Visibility, &r.CreatedAt, &r.ExpiresAt, &r.UpdatedAt, &r.PauseArchive, &r.Image, &r.Ports, &r.Private, &r.PrivateRoutes); err != nil {
 				return err
 			}
 			var err error
@@ -253,6 +265,16 @@ func (s *Store) SandboxByIdentityHash(ctx context.Context, hash string) (Sandbox
 // as the control plane can tell. The node overwrites it if it comes back and
 // adopts the sandbox; a node that restarts drops its own unrestorable rows.
 const StateLost = "lost"
+
+// Ended reports whether a sandbox row in state is no longer live, as the org's
+// live counts read it (CountLiveForOrg).
+func Ended(state string) bool {
+	switch state {
+	case "destroyed", "stopped", "error", StateLost:
+		return true
+	}
+	return false
+}
 
 // MarkNodeSandboxesLost flips every live row a reaped node owned to StateLost,
 // so they stop counting against the org's concurrency and read as gone rather
@@ -426,4 +448,25 @@ func (s *Store) ActiveSandboxRowsByOrg(ctx context.Context, orgID string) ([]Act
 	return collectRows(ctx, s,
 		`SELECT `+activeSandboxCols+` FROM sandboxes WHERE org_id = ? ORDER BY created_at DESC`,
 		[]any{orgID}, scanInto(scanActiveSandbox))
+}
+
+// SandboxesInTag lists org's sandboxes that name tag, placed or not.
+func (s *Store) SandboxesInTag(ctx context.Context, orgID, tag string) ([]string, error) {
+	rows, err := s.query(ctx, `SELECT id, networks FROM sandboxes WHERE org_id = ? AND networks <> '[]' AND networks <> ''`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			return nil, err
+		}
+		var nets []string
+		if json.Unmarshal([]byte(raw), &nets) == nil && slices.Contains(nets, tag) {
+			out = append(out, id)
+		}
+	}
+	return out, rows.Err()
 }

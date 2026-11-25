@@ -104,12 +104,14 @@ type connectorTestServer struct {
 	s                              *Server
 	srv                            *httptest.Server
 	key, otherOrgKey, sandboxToken string
+	dbPath                         string
 }
 
 func newConnectorTestServer(t *testing.T) *connectorTestServer {
 	t.Helper()
 	t.Setenv("PRIVATE_INGRESS", "1")
-	st, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "connectors.db"))
+	dbPath := filepath.Join(t.TempDir(), "connectors.db")
+	st, err := store.Open(t.Context(), dbPath)
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}
@@ -123,7 +125,7 @@ func newConnectorTestServer(t *testing.T) *connectorTestServer {
 	s.SetStore(st)
 	srv := httptest.NewServer(s.Routes())
 	t.Cleanup(srv.Close)
-	return &connectorTestServer{s: s, srv: srv, key: orgKey(t, s, "org-a"), otherOrgKey: orgKey(t, s, "org-b"), sandboxToken: sbTok}
+	return &connectorTestServer{s: s, srv: srv, key: orgKey(t, s, "org-a"), otherOrgKey: orgKey(t, s, "org-b"), sandboxToken: sbTok, dbPath: dbPath}
 }
 
 func (ts *connectorTestServer) do(t *testing.T, method, path, token, body string) *http.Response {

@@ -159,6 +159,38 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// Peek at the requested size to schedule; the node does the real sizing.
 	var req sandbox.Spec
 	_ = json.Unmarshal(body, &req) //nolint:errcheck // best-effort peek only; a malformed body fails for real when the node parses it below
+	// Grants that come with the request's tags place the sandbox like its own grants do.
+	var tagGrants []store.Grant
+	// A moved sandbox already holds its tags' grants.
+	if !moving && !s.tagJoinAdmin(w, r, "", req.Networks) {
+		return
+	}
+	if st := s.st.Load(); st != nil && privateAccessOn() && len(req.Networks) > 0 {
+		gs, err := st.EffectiveGrants(r.Context(), fastOrg(r), "", req.Networks)
+		if err != nil {
+			writeErr(w, http.StatusServiceUnavailable, "could not read this org's tag grants: "+err.Error())
+			return
+		}
+		if status, code, err := s.checkGrantSet(r.Context(), st, gs); err != nil {
+			writeGrantErr(w, status, code, err)
+			return
+		}
+		tagGrants = gs
+	}
+	wantTargets, wantRoutes := move.private, move.routes
+	for _, g := range tagGrants {
+		wantTargets = wantTargets || g.Kind == store.GrantKindTarget
+		wantRoutes = wantRoutes || g.Kind != store.GrantKindTarget
+	}
+	for _, g := range privPeek.Private {
+		if kind, _, err := g.kindValue(); err == nil && kind != store.GrantKindTarget {
+			wantRoutes = true
+		}
+	}
+	if wantRoutes && !s.reg.AnyWithCapability(cluster.CapPrivateRoutes, s.now(), cluster.NodeTTL) {
+		writeJSONErr(w, http.StatusConflict, "private_routes_unsupported", "no online node can carry subnet or DNS grants")
+		return
+	}
 	memMB := req.MemoryMB
 	if memMB <= 0 {
 		memMB = 1024 // conservative estimate when the caller omits size
@@ -211,7 +243,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// placement stays unfiltered and the node answers 501 as it does today.
 	// Carry a tri-state through the heartbeat if that case starts mattering.
 	place := cluster.Request{VCPU: req.VCPU, MemMB: memMB, Zone: req.Zone, Runtime: runtime, Template: canonTemplate,
-		Avoid: []string{move.from}, PrivateAccess: move.private}
+		Avoid: []string{move.from}, PrivateAccess: wantTargets, PrivateRoutes: wantRoutes}
 	if fromSnapshot == nil {
 		place.NoBuild = s.noReadyBuild(r.Context(), canonTemplate)
 	}
@@ -399,6 +431,11 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 				writeGrantErr(w, status, code, err)
 				return
 			}
+			if len(grants) == 0 && len(tagGrants) > 0 {
+				if _, err := s.pushPrivate(r.Context(), s.st.Load(), created.ID, fastOrg(r)); err != nil {
+					s.log().Warn("tag grants not pushed to a new sandbox", "component", "private", "sandbox", created.ID, "err", err)
+				}
+			}
 			if st := s.st.Load(); st != nil {
 				_ = st.SetSandboxAttribution(r.Context(), created.ID, store.ClassifySource(req.Client), req.Client) //nolint:errcheck // best-effort: a failure here just means attribution shows up later, not never
 			}
@@ -453,6 +490,7 @@ func (s *Server) recordPlaced(ctx context.Context, nodeAnswer []byte, org, nodeI
 		Visibility string     `json:"visibility"`
 		CreatedAt  time.Time  `json:"created_at"`
 		ExpiresAt  *time.Time `json:"expires_at"`
+		Networks   []string   `json:"networks"`
 	}
 	if json.Unmarshal(nodeAnswer, &doc) != nil || doc.ID == "" {
 		return
@@ -468,12 +506,18 @@ func (s *Server) recordPlaced(ctx context.Context, nodeAnswer []byte, org, nodeI
 	if err := st.RecordPlacedSandbox(ctx, store.SandboxRecord{
 		ID: doc.ID, Template: doc.Template, Name: doc.Name, OrgID: org, NodeID: nodeID,
 		State: cmp.Or(doc.Status, "running"), VCPU: vcpu, MemMiB: memMiB,
-		CreatedBy: doc.CreatedBy, Visibility: doc.Visibility,
+		CreatedBy: doc.CreatedBy, Visibility: doc.Visibility, Networks: networksJSON(doc.Networks),
 		CreatedAt: doc.CreatedAt.Unix(), ExpiresAt: expires, UpdatedAt: now.Unix(),
 	}); err != nil {
 		s.log().ErrorContext(ctx, "could not record a created sandbox; move and the list will not find it",
 			"component", "orchestrator", "sandbox", doc.ID, "node", nodeID, "err", err)
 	}
+}
+
+// networksJSON is a tag list as the networks column stores it.
+func networksJSON(tags []string) string {
+	b, _ := json.Marshal(append([]string{}, tags...))
+	return string(b)
 }
 
 // anyEgressDomainsOn reports whether a schedulable node of runtime runs the
@@ -742,6 +786,18 @@ func (s *Server) handleSandboxRename(w http.ResponseWriter, r *http.Request) {
 		}
 		body = b
 	}
+	var tagPeek struct {
+		Networks *[]string `json:"networks"`
+	}
+	if json.Unmarshal(body, &tagPeek) == nil && tagPeek.Networks != nil {
+		if !s.tagJoinAdmin(w, r, id, *tagPeek.Networks) {
+			return
+		}
+		if status, code, err := s.checkTagChange(r.Context(), fastOrg(r), id, node, *tagPeek.Networks); err != nil {
+			writeGrantErr(w, status, code, err)
+			return
+		}
+	}
 	// Only pushPrivate sets a node's private targets; grants are the API for them.
 	if len(body) > 0 {
 		if body, ok = stripPrivate(w, body); !ok {
@@ -770,6 +826,14 @@ func (s *Server) handleSandboxRename(w http.ResponseWriter, r *http.Request) {
 		prev := doc.AppURL
 		if prev == "" {
 			prev = doc.URL
+		}
+		// A tag change moves the sandbox in or out of its tags' grants.
+		if tagPeek.Networks != nil && privateAccessOn() {
+			if st := s.st.Load(); st != nil {
+				if _, err := s.pushPrivate(r.Context(), st, id, fastOrg(r)); err != nil {
+					s.log().Warn("tag change not pushed", "component", "private", "sandbox", id, "err", err)
+				}
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(s.pointLinksHere(r, rb, prev, node.ID)) //nolint:errcheck // best-effort: headers are committed
@@ -827,10 +891,12 @@ func (s *Server) lostSandbox(r *http.Request, id string) (store.SandboxRecord, b
 
 // moveCtx marks a create as the second half of a move: it may carry an id and
 // must not land on the node it is leaving. private holds the sandbox to nodes
-// that can carry its stored private targets.
+// that can carry its stored private targets, routes to nodes that can carry its
+// stored subnet and DNS routes.
 type moveCtx struct {
 	from    string
 	private bool
+	routes  bool
 }
 
 type moveCtxKey struct{}

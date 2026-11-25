@@ -197,6 +197,8 @@ func StartHeartbeat(ctx context.Context, d *daemon.Daemon, dataDir, selfURL, run
 			"tag_networks": caps.TagNetworks,
 			// A sandbox granted a private connection is placed only where the node can carry one.
 			"private_access": caps.PrivateAccess,
+			// Same, for subnet and DNS grants; an old control plane ignores it.
+			"private_routes": caps.PrivateRoutes,
 			// Same, for a create whose egress rules name a domain: only a node
 			// running the name layer can enforce one.
 			"egress_domains": caps.EgressDomains,

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -52,6 +53,8 @@ func (s *Server) registerConnectorRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/connector-conns/{conn}", s.handleConnectorConn)
 	// Authenticated by node key inside the handler.
 	mux.HandleFunc("GET /internal/private/dial", s.handlePrivateDial)
+	// Authenticated by node key inside the handler.
+	mux.HandleFunc("POST /internal/private/dns", s.handlePrivateDNS)
 }
 
 // privateAdmin is the one gate for changing connectors and grants.
@@ -70,6 +73,42 @@ func privateOff(w http.ResponseWriter) bool {
 	writeJSONErr(w, http.StatusNotImplemented, "no_private_ingress",
 		"private access needs one orchestrator replica started with PRIVATE_INGRESS=1 (and PRIVATE_INGRESS=remote on the API-only replicas)")
 	return true
+}
+
+// validAnnouncement checks a hello's subnets and DNS suffixes and returns them
+// canonical. A suffix follows the target hostname rules.
+func validAnnouncement(subnets, suffixes, platform []string) ([]netip.Prefix, []string, error) {
+	if len(subnets) > sandbox.MaxConnectorSubnets {
+		return nil, nil, fmt.Errorf("at most %d subnets per connector", sandbox.MaxConnectorSubnets)
+	}
+	if len(suffixes) > sandbox.MaxConnectorSuffixes {
+		return nil, nil, fmt.Errorf("at most %d dns suffixes per connector", sandbox.MaxConnectorSuffixes)
+	}
+	nets := make([]netip.Prefix, 0, len(subnets))
+	for _, s := range subnets {
+		p, err := sandbox.ParsePrivateSubnet(s)
+		if err != nil {
+			return nil, nil, err
+		}
+		nets = append(nets, p)
+	}
+	names := make([]string, 0, len(suffixes))
+	for _, d := range suffixes {
+		d = strings.TrimSuffix(strings.ToLower(d), ".")
+		if err := sandbox.ValidPrivateSuffix(d); err != nil {
+			return nil, nil, err
+		}
+		if err := validConnectorHost(d, platform); err != nil {
+			return nil, nil, fmt.Errorf("dns suffix: %w", err)
+		}
+		for _, p := range platform {
+			if sandbox.UnderSuffix(strings.ToLower(p), d) {
+				return nil, nil, fmt.Errorf("dns suffix %q would capture the platform domain %q", d, p)
+			}
+		}
+		names = append(names, d)
+	}
+	return nets, names, nil
 }
 
 func validConnectorHost(host string, platform []string) error {
@@ -152,12 +191,18 @@ func (s *Server) validConnectorToken(tok, id string) (keyID string, ok bool) {
 }
 
 func connectorJSON(c store.Connector, online int) map[string]any {
-	ts := c.Targets
+	ts, nets, names := c.Targets, c.Subnets, c.Suffixes
 	if ts == nil {
 		ts = []store.ConnectorTarget{}
 	}
+	if nets == nil {
+		nets = []string{}
+	}
+	if names == nil {
+		names = []string{}
+	}
 	return map[string]any{"id": c.ID, "name": c.Name, "created_at": c.CreatedAt, "last_seen_at": c.LastSeenAt,
-		"instances": online, "online": online > 0, "targets": ts}
+		"instances": online, "online": online > 0, "targets": ts, "subnets": nets, "dns": map[string]any{"suffixes": names}}
 }
 
 func (s *Server) auditPrivate(r *http.Request, st *store.Store, action, target, detail string) {
@@ -234,6 +279,7 @@ func (s *Server) handleConnectorList(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(cs))
 	for _, c := range cs {
 		c.Targets = s.connectors.union(c.ID, c.Targets)
+		c.Subnets, c.Suffixes = s.connectors.routes(c.ID, c.Subnets, c.Suffixes)
 		out = append(out, connectorJSON(c, s.connectors.count(c.ID)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"connectors": out})
@@ -265,7 +311,12 @@ func (s *Server) handleConnectorRevoke(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	granted, err := st.SandboxesGrantedConnector(r.Context(), c.ID)
+	gs, err := st.GrantsOnConnector(r.Context(), c.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	granted, err := grantSubjects(r.Context(), st, org, gs)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -304,7 +355,7 @@ func (s *Server) handleConnectorLog(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, p := range rows {
-		out = append(out, map[string]any{"id": p.ID, "sandbox_id": p.SandboxID, "target": p.Target, "started_at": p.StartedAt,
+		out = append(out, map[string]any{"id": p.ID, "sandbox_id": p.SandboxID, "target": p.Target, "dest": p.Dest, "started_at": p.StartedAt,
 			"ended_at": p.EndedAt, "bytes_in": p.BytesIn, "bytes_out": p.BytesOut, "result": p.Result})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"connections": out})

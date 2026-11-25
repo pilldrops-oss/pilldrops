@@ -741,8 +741,11 @@ export interface Volume {
 }
 
 export interface ConnectorTarget { name: string; port: number; host?: string }
-export interface Connector { id: string; name: string; created_at: number; last_seen_at: number; instances: number; online: boolean; targets: ConnectorTarget[] }
+export interface Connector { id: string; name: string; created_at: number; last_seen_at: number; instances: number; online: boolean; targets: ConnectorTarget[]; subnets: string[]; dns: { suffixes: string[] } }
 export interface ConnectorKey { id: string; created_at: number; last_used_at: number }
-export interface PrivateGrant { connector: string; target: string; created_at: number; online: boolean; names: string[] }
-export interface PrivateConnection { id: string; sandbox_id: string; target: string; started_at: number; ended_at: number; bytes_in: number; bytes_out: number; result: 'ok' | 'denied' | 'offline' | 'dial_failed' | 'rate_limited' }
+export type GrantKind = 'target' | 'subnet' | 'dns'
+/** source is "sandbox" for the sandbox's own grant, "tag:<name>" for one it has through a tag. */
+export interface PrivateGrant { id: string; connector: string; kind: GrantKind; value: string; source: string; created_at: number; online: boolean; target?: string; names?: string[]; shadowed?: string[] }
+export interface TagGrant { id: string; tag: string; connector: string; kind: GrantKind; value: string; created_at: number; online: boolean; shadowed?: string[] }
+export interface PrivateConnection { id: string; sandbox_id: string; target: string; dest?: string; started_at: number; ended_at: number; bytes_in: number; bytes_out: number; result: 'ok' | 'denied' | 'offline' | 'dial_failed' | 'rate_limited' }
 export type OrgRole = 'owner' | 'admin' | 'member'

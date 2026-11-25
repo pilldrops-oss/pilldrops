@@ -453,6 +453,12 @@ it as `<target>.private`, or by its real hostname when the connector gave one.
    a joined node already has, to reach that dial route. Only nodes with
    per-sandbox network namespaces advertise private access; a grant on a sandbox
    placed elsewhere is refused with 409 `private_access_unsupported`.
+   Subnet and DNS grants also need the node to advertise `private_routes`,
+   which a node of this release does when it advertises `private_access`. A
+   sandbox holding one is placed, moved and rehomed only onto such a node, and a
+   grant to a sandbox on an older node is refused with 409
+   `private_routes_unsupported`. Nodes resolve names under a granted suffix
+   through `POST /internal/private/dns` on the same replica as the dial route.
 4. Connectors are outbound-only: the customer's network opens no port. A connector
    authenticates with a `pd_conn_` key created through
    `POST /v1/connectors/{id}/keys`.
@@ -463,6 +469,44 @@ and kept for 365 days by default; set
 platform's own domains or `localhost`; such a hello is refused. Limits: 10
 connectors per org, 50 targets and 5 instances per connector, 100 concurrent
 connections per sandbox, 1,000 per connector.
+
+A connector may also announce subnets (`--subnet 10.0.0.0/16`, IPv4, /8 to /32)
+and DNS suffixes (`--dns corp.internal`). Grants go to one sandbox or to a
+network tag, and may narrow what the connector announces. Putting a sandbox
+in a tag that carries grants (create, PATCH `networks` or fork) is itself a
+grant: a sandbox's own token gets 403. Inside the sandbox
+the platform's own ranges (10.128.0.0/16, 192.168.30.0/23, 169.254.0.0/16,
+100.64.0.0/10, 127.0.0.0/8) are never routed through a connector. Only TCP is
+carried; UDP to a granted address is dropped. Limits: 20 subnets and 10
+suffixes per connector, 50 grants per sandbox counting its tags', 100 tag
+grants per org, 50 lookups a second and 1,024 remembered answers per sandbox.
+
+Upgrading: the control plane applies the new migration (79) before any node
+runs the new binary, because nodes run `migrate()` themselves and cannot
+`CREATE`. Then, on Postgres, check the role your nodes use (`<node_role>`):
+`SELECT has_table_privilege('<node_role>', 'private_grants', 'SELECT,DELETE');`.
+Only if it returns false, run
+`GRANT SELECT, DELETE ON private_grants TO <node_role>;`, then upgrade nodes.
+A node without that privilege fails every destroy.
+
+Rolling back to the phase 1 control plane is safe, but it writes only
+`sandbox_private_grants`. Before starting the new control plane again, bring
+`private_grants` back in step, on Postgres in one transaction:
+
+```sql
+BEGIN;
+DELETE FROM private_grants p
+ WHERE p.subject_kind = 'sandbox' AND p.kind = 'target'
+   AND NOT EXISTS (SELECT 1 FROM sandbox_private_grants g
+     WHERE g.sandbox_id = p.subject AND g.connector_id = p.connector_id AND g.target = p.value);
+INSERT INTO private_grants (id, org_id, connector_id, subject_kind, subject, kind, value, created_at)
+  SELECT 'pg_' || substr(md5(random()::text || g.sandbox_id || g.target), 1, 24), c.org_id, g.connector_id, 'sandbox', g.sandbox_id, 'target', g.target, g.created_at
+  FROM sandbox_private_grants g JOIN connectors c ON c.id = g.connector_id
+  ON CONFLICT DO NOTHING;
+COMMIT;
+```
+
+Skipping it re-grants targets revoked during the rollback and drops ones added.
 
 ## Environment
 

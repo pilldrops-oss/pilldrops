@@ -34,6 +34,11 @@ type Fake struct {
 	// Private is the last target list pushed per sandbox; a sandbox whose list
 	// was emptied has no entry. Tests read it directly, once pushes are done.
 	Private map[string][]sandbox.PrivateTarget
+	// PrivateRoutes makes Capabilities advertise subnet and DNS routes and
+	// SetPrivateRoutes record into Routes. False refuses SetPrivateRoutes.
+	PrivateRoutes bool
+	// Routes is the last route list pushed per sandbox; an emptied one has no entry.
+	Routes map[string]sandbox.PrivateRoutes
 	// EgressPolicy makes Capabilities advertise egress enforcement. False (the
 	// default) is a runtime that refuses a create carrying network rules.
 	EgressPolicy bool
@@ -95,6 +100,7 @@ func (f *Fake) Capabilities() rt.Caps {
 		Volumes:       f.Volumes,
 		NamedSnapshot: !f.NoSnapshotBoot,
 		PrivateAccess: f.PrivateAccess,
+		PrivateRoutes: f.PrivateRoutes,
 	}
 }
 
@@ -128,6 +134,23 @@ func (f *Fake) setPrivate(id string, ts []sandbox.PrivateTarget) error {
 		return nil
 	}
 	f.Private[id] = append([]sandbox.PrivateTarget(nil), ts...)
+	return nil
+}
+
+func (f *Fake) setPrivateRoutes(id string, r sandbox.PrivateRoutes) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.PrivateRoutes {
+		return rt.ErrUnsupported
+	}
+	if f.Routes == nil {
+		f.Routes = map[string]sandbox.PrivateRoutes{}
+	}
+	if r.Empty() {
+		delete(f.Routes, id)
+		return nil
+	}
+	f.Routes[id] = r
 	return nil
 }
 
@@ -350,6 +373,14 @@ func (i *fakeInstance) SetPrivate(_ context.Context, ts []sandbox.PrivateTarget)
 		return rt.ErrUnsupported
 	}
 	return i.rtF.setPrivate(i.id, ts)
+}
+
+// SetPrivateRoutes implements rt.PrivateRouteSetter at the instance level.
+func (i *fakeInstance) SetPrivateRoutes(_ context.Context, r sandbox.PrivateRoutes) error {
+	if i.rtF == nil {
+		return rt.ErrUnsupported
+	}
+	return i.rtF.setPrivateRoutes(i.id, r)
 }
 
 // Stopped reports whether the given sandbox's instance received Stop.

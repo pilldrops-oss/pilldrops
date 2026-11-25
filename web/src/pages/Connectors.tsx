@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   listConnectors, createConnector, revokeConnector, listConnectorKeys, createConnectorKey,
-  revokeConnectorKey, listConnectorConnections,
+  revokeConnectorKey, listConnectorConnections, listTagGrants, grantTag, revokeTagGrant,
 } from '../api'
-import type { Connector, ConnectorKey, PrivateConnection } from '../types'
+import type { Connector, ConnectorKey, GrantKind, PrivateConnection, TagGrant } from '../types'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmModal'
 import { errText } from '../lib/errText'
@@ -64,7 +64,7 @@ export default function Connectors() {
             <label>Connector name<input aria-label="Connector name" value={name} onChange={e => setName(e.target.value.toLowerCase())} placeholder="prod" /></label>
             <button className="btn" type="submit" disabled={busy || !name}>Create</button>
           </form>
-          {created && <pre className="code">pilldrops connector run {created} db=HOST:PORT</pre>}
+          {created && <pre className="code">pilldrops connector run {created} db=HOST:PORT --subnet 10.0.0.0/16 --dns corp.internal</pre>}
         </div>
       )}
       {loadErr && <p className="lm-error">{loadErr}</p>}
@@ -72,13 +72,17 @@ export default function Connectors() {
       {!loading && rows.length === 0 && <p className="vault-empty">No connectors yet.</p>}
       {rows.length > 0 && (
         <table className="tbl panel">
-          <thead><tr><th>Name</th><th>State</th><th>Targets</th><th>Last seen</th><th /></tr></thead>
+          <thead><tr><th>Name</th><th>State</th><th>Reaches</th><th>Last seen</th><th /></tr></thead>
           <tbody>
             {rows.map(c => (
               <tr key={c.id}>
                 <td>{c.name}</td>
                 <td>{c.online ? `online · ${c.instances} instance${c.instances === 1 ? '' : 's'}` : 'offline'}</td>
-                <td>{c.targets.length === 0 ? '—' : c.targets.map(t => <div key={t.name}>{targetText(t)}</div>)}</td>
+                <td>{c.targets.length + (c.subnets?.length ?? 0) + (c.dns?.suffixes.length ?? 0) === 0 ? '—' : <>
+                  {c.targets.map(t => <div key={t.name}>{targetText(t)}</div>)}
+                  {(c.subnets ?? []).map(s => <div key={s}>{s}</div>)}
+                  {(c.dns?.suffixes ?? []).map(d => <div key={d}>*.{d}</div>)}
+                </>}</td>
                 <td>{c.last_seen_at ? new Date(c.last_seen_at * 1000).toLocaleString() : 'never'}</td>
                 <td>
                   <button className="btn ghost" aria-label={`Log for ${c.name}`} onClick={() => setOpen({ id: c.id, tab: 'log' })}>Log</button>
@@ -90,8 +94,77 @@ export default function Connectors() {
           </tbody>
         </table>
       )}
+      {rows.length > 0 && <TagGrantsPanel connectors={rows} canChange={canChange} />}
       {open?.tab === 'keys' && <KeysPanel key={open.id} id={open.id} onDone={() => setOpen(null)} />}
       {open?.tab === 'log' && <LogPanel key={open.id} id={open.id} onDone={() => setOpen(null)} />}
+    </div>
+  )
+}
+
+const EMPTY_TAG_PICK = { tag: '', connector: '', kind: 'target' as GrantKind, value: '' }
+
+function TagGrantsPanel({ connectors, canChange }: { connectors: Connector[]; canChange: boolean }) {
+  const toast = useToast()
+  const toastRef = useRef(toast)
+  toastRef.current = toast
+  const confirm = useConfirm()
+  const [grants, setGrants] = useState<TagGrant[]>([])
+  const [pick, setPick] = useState(EMPTY_TAG_PICK)
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(() => { listTagGrants().then(setGrants).catch(e => toastRef.current.error(errText(e))) }, [])
+  useEffect(load, [load])
+  const conn = connectors.find(c => c.name === pick.connector)
+  return (
+    <div className="panel">
+      <h2>Tag grants</h2>
+      <p className="muted">Every sandbox in a network tag reaches these, including sandboxes that join the tag later.</p>
+      {grants.length === 0 ? <p className="vault-empty">No tag grants.</p> : (
+        <table className="tbl"><thead><tr><th>Tag</th><th>Connector</th><th>Reaches</th><th /></tr></thead>
+          <tbody>{grants.map(g => (
+            <tr key={g.id}>
+              <td>{g.tag}</td>
+              <td>{g.connector}</td>
+              <td><code>{g.kind === 'target' ? `${g.value}.private` : g.value}</code>
+                {g.shadowed && g.shadowed.length > 0 && <div className="muted">Not routed (reserved): {g.shadowed.join(', ')}</div>}</td>
+              <td>{canChange && <button className="btn ghost" aria-label={`Remove ${g.value} from ${g.tag}`} onClick={async () => {
+                if (!await confirm({ title: `Remove ${g.value} from tag ${g.tag}?`, body: 'Sandboxes in the tag lose it, and open connections through it close.', danger: true })) return
+                try { await revokeTagGrant(g.id); load() } catch (e) { toast.error(errText(e)) }
+              }}>Remove</button>}</td>
+            </tr>))}</tbody></table>
+      )}
+      {canChange && (
+        <form className="vault-add" onSubmit={async e => {
+          e.preventDefault()
+          setBusy(true)
+          try {
+            const r = await grantTag(pick.tag.trim(), pick.connector, pick.kind, pick.value.trim())
+            toast.success(r.unsupported.length === 0 ? `Granted to ${r.sandboxes} sandbox${r.sandboxes === 1 ? '' : 'es'}`
+              : `Granted; ${r.unsupported.length} of ${r.sandboxes} run on a node that cannot use it yet`)
+            setPick(EMPTY_TAG_PICK)
+            load()
+          } catch (err) { toast.error(errText(err)) } finally { setBusy(false) }
+        }}>
+          <input aria-label="Tag" value={pick.tag} placeholder="backend" onChange={e => setPick({ ...pick, tag: e.target.value.toLowerCase() })} />
+          <select className="sel" aria-label="Tag connector" value={pick.connector} onChange={e => setPick({ ...pick, connector: e.target.value, value: '' })}>
+            <option value="">Connector…</option>
+            {connectors.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+          <select className="sel" aria-label="Tag kind" value={pick.kind} onChange={e => setPick({ ...pick, kind: e.target.value as GrantKind, value: '' })}>
+            <option value="target">Target</option><option value="subnet">Subnet</option><option value="dns">DNS</option>
+          </select>
+          {pick.kind === 'target' ? (
+            <select className="sel" aria-label="Tag target" value={pick.value} disabled={!pick.connector} onChange={e => setPick({ ...pick, value: e.target.value })}>
+              <option value="">Target…</option>
+              {(conn?.targets ?? []).map(t => <option key={t.name} value={t.name}>{t.name}:{t.port}</option>)}
+            </select>
+          ) : (
+            <input aria-label="Tag value" value={pick.value} disabled={!pick.connector}
+              placeholder={pick.kind === 'subnet' ? conn?.subnets?.[0] ?? '10.0.0.0/24' : conn?.dns?.suffixes[0] ?? 'corp.internal'}
+              onChange={e => setPick({ ...pick, value: e.target.value })} />
+          )}
+          <button className="btn" type="submit" disabled={busy || !pick.tag || !pick.connector || !pick.value}>Grant</button>
+        </form>
+      )}
     </div>
   )
 }
@@ -138,7 +211,7 @@ function LogPanel({ id, onDone }: { id: string; onDone: () => void }) {
       {rows.length === 0 ? <p className="vault-empty">No connections yet.</p> : (
         <table className="tbl"><thead><tr><th>Sandbox</th><th>Target</th><th>Started</th><th>Duration</th><th>Bytes</th><th>Result</th></tr></thead>
           <tbody>{rows.map(r => (
-            <tr key={r.id}><td>{r.sandbox_id}</td><td>{r.target}</td><td>{new Date(r.started_at * 1000).toLocaleString()}</td>
+            <tr key={r.id}><td>{r.sandbox_id}</td><td>{r.target}{r.dest ? ` → ${r.dest}` : ''}</td><td>{new Date(r.started_at * 1000).toLocaleString()}</td>
               <td>{r.ended_at ? `${r.ended_at - r.started_at}s` : 'open'}</td><td>{r.bytes_in} in / {r.bytes_out} out</td><td>{r.result.replace('_', ' ')}</td></tr>
           ))}</tbody></table>
       )}

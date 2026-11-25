@@ -14,13 +14,14 @@ import (
 )
 
 type privateFakeNode struct {
-	id, key    string
-	mu         sync.Mutex
-	patches    map[string]string
-	deleted    []string
-	failDelete bool
-	creates    []string
-	onPatch    func(body string) // runs before the PATCH is recorded
+	id, key      string
+	mu           sync.Mutex
+	patches      map[string]string
+	deleted      []string
+	failDelete   bool
+	creates      []string
+	onPatch      func(body string) // runs before the PATCH is recorded
+	createAnswer string            // POST reply; "" is the default sbnew
 }
 
 func (n *privateFakeNode) lastPatch(t *testing.T, id string) string {
@@ -91,9 +92,13 @@ func (ts *connectorTestServer) fakeNodeNamed(t *testing.T, id string, supports b
 		case r.Method == "POST":
 			n.mu.Lock()
 			n.creates = append(n.creates, string(b))
+			ans := n.createAnswer
 			n.mu.Unlock()
+			if ans == "" {
+				ans = `{"id":"sbnew","template":"base","status":"running"}`
+			}
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":"sbnew","template":"base","status":"running"}`))
+			_, _ = w.Write([]byte(ans))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -177,7 +182,7 @@ func TestGrantOnNodeWithoutSupportRollsBack(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict || strings.Contains(body, "docker") || strings.Contains(body, "firecracker") {
 		t.Fatalf("got %d %s", resp.StatusCode, body)
 	}
-	if gs, _ := ts.s.st.Load().PrivateGrants(t.Context(), "sb1"); len(gs) != 0 {
+	if gs, _ := ts.s.st.Load().SandboxGrants(t.Context(), "sb1"); len(gs) != 0 {
 		t.Fatal("grant kept after the node refused")
 	}
 }
@@ -262,7 +267,7 @@ func TestCreateCleanupSurvivesNodeDeleteFailure(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("create: %d %s", resp.StatusCode, ts.body(resp))
 	}
-	if gs, _ := ts.s.st.Load().PrivateGrants(t.Context(), "sbnew"); len(gs) != 0 {
+	if gs, _ := ts.s.st.Load().SandboxGrants(t.Context(), "sbnew"); len(gs) != 0 {
 		t.Fatalf("grants left after cleanup: %v", gs)
 	}
 	if _, ok := ts.s.reg.NodeFor("sbnew"); ok {
@@ -332,7 +337,7 @@ func TestDestroyDropsGrants(t *testing.T) {
 	if resp := ts.do(t, "DELETE", "/v1/sandboxes/sb1", ts.key, ""); resp.StatusCode != http.StatusOK {
 		t.Fatalf("destroy: %d %s", resp.StatusCode, ts.body(resp))
 	}
-	if gs, _ := ts.s.st.Load().PrivateGrants(t.Context(), "sb1"); len(gs) != 0 {
+	if gs, _ := ts.s.st.Load().SandboxGrants(t.Context(), "sb1"); len(gs) != 0 {
 		t.Fatalf("grants left: %v", gs)
 	}
 }

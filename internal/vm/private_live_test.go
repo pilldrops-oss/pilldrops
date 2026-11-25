@@ -80,7 +80,7 @@ func TestPrivateProxyLive(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer h.Close()
-		filter := &netlink.Route{Table: unix.RT_TABLE_LOCAL, Dst: privateLocalRoute(0).Dst}
+		filter := &netlink.Route{Table: unix.RT_TABLE_LOCAL, Dst: privateLocalRoutes(0)[0].Dst}
 		rs, err := h.RouteListFiltered(netlink.FAMILY_V4, filter, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_DST)
 		if err != nil {
 			t.Fatal(err)

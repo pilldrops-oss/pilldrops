@@ -44,6 +44,8 @@ type Node struct {
 	// PrivateAccess reports that this node's runtime can carry private connections
 	// from a sandbox to a connector.
 	PrivateAccess bool `json:"private_access,omitempty"`
+	// PrivateRoutes reports that this node can carry subnet and split-DNS grants.
+	PrivateRoutes bool `json:"private_routes,omitempty"`
 	// EgressDomains reports that this node runs the name layer that makes a
 	// domain egress rule enforceable.
 	EgressDomains bool `json:"egress_domains,omitempty"`
@@ -104,6 +106,8 @@ type Request struct {
 	TagNetworks bool
 	// PrivateAccess restricts placement to nodes that can carry private connections.
 	PrivateAccess bool
+	// PrivateRoutes restricts placement to nodes that can carry subnet and DNS grants.
+	PrivateRoutes bool
 	// EgressDomains restricts placement to nodes that run the name layer. Set
 	// it only when the create's rules name a domain: same argument as
 	// TagNetworks, and the node would otherwise take the sandbox and refuse the
@@ -275,6 +279,9 @@ func pick(nodes []*Node, req Request, now time.Time, ttl time.Duration) *Node {
 			continue
 		}
 		if req.PrivateAccess && !n.PrivateAccess {
+			continue
+		}
+		if req.PrivateRoutes && !n.PrivateRoutes {
 			continue
 		}
 		if req.EgressDomains && !n.EgressDomains {

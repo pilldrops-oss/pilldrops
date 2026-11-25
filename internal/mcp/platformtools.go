@@ -17,6 +17,18 @@ func sbPath(a map[string]any, tail string) string {
 	return "/v1/sandboxes/" + url.PathEscape(str(a, "sandbox_id")) + tail
 }
 
+// grantBody is a grant request from tool arguments: the connector and whichever
+// of target, subnet and dns were given; the API refuses anything but exactly one.
+func grantBody(a map[string]any) map[string]any {
+	body := map[string]any{"connector": str(a, "connector")}
+	for _, k := range []string{"target", "subnet", "dns"} {
+		if v := str(a, k); v != "" {
+			body[k] = v
+		}
+	}
+	return body
+}
+
 // truthy reads a confirmation flag. Strings are accepted for the same reason
 // num accepts them: LLM clients routinely send "true" for a boolean field.
 func truthy(a map[string]any, k string) bool {
@@ -481,16 +493,38 @@ func platformTools() []tool {
 		},
 		{
 			name: "grant_private_target",
-			desc: "Let one sandbox reach a target behind a connector. Inside the sandbox it is <target>.private on " +
-				"the target's own port, and also its real hostname when the connector announced one. Owners and " +
-				"admins only; refused on nodes without private access.",
+			desc: "Let one sandbox reach something behind a connector: a target (then <target>.private on its own " +
+				"port, and its real hostname when the connector announced one), a subnet inside one the connector " +
+				"announced (the platform's own ranges are never routed and come back as shadowed), or the names under " +
+				"a DNS suffix at or under one it announced. Give exactly one of target, subnet or dns. Owners and " +
+				"admins only; refused on nodes that cannot carry it.",
 			schema: obj(map[string]any{
 				"sandbox_id": prop("string", "The sandbox id."),
 				"connector":  prop("string", "Connector name."),
 				"target":     prop("string", "Target name the connector announced."),
-			}, "sandbox_id", "connector", "target"),
+				"subnet":     prop("string", "IPv4 CIDR inside a subnet the connector announced, like 10.0.5.0/24."),
+				"dns":        prop("string", "DNS suffix at or under one the connector announced, like corp.internal."),
+			}, "sandbox_id", "connector"),
 			run: func(a map[string]any, be Backend) map[string]any {
-				return call(be, "POST", sbPath(a, "/private"), map[string]any{"connector": str(a, "connector"), "target": str(a, "target")})
+				return call(be, "POST", sbPath(a, "/private"), grantBody(a))
+			},
+		},
+		{
+			name: "grant_private_tag",
+			desc: "Let every sandbox in a network tag reach a target, a subnet or the names under a DNS suffix behind " +
+				"a connector, including sandboxes that join the tag later; leaving the tag removes access. Give " +
+				"exactly one of target, subnet or dns. Owners and admins only.",
+			schema: obj(map[string]any{
+				"tag":       prop("string", "Network tag, as in a sandbox's networks."),
+				"connector": prop("string", "Connector name."),
+				"target":    prop("string", "Target name the connector announced."),
+				"subnet":    prop("string", "IPv4 CIDR inside a subnet the connector announced."),
+				"dns":       prop("string", "DNS suffix at or under one the connector announced."),
+			}, "tag", "connector"),
+			run: func(a map[string]any, be Backend) map[string]any {
+				body := grantBody(a)
+				body["tag"] = str(a, "tag")
+				return call(be, "POST", "/v1/private/grants", body)
 			},
 		},
 		{
@@ -503,6 +537,22 @@ func platformTools() []tool {
 			}, "sandbox_id", "connector", "target"),
 			run: func(a map[string]any, be Backend) map[string]any {
 				return call(be, "DELETE", sbPath(a, "/private/"+url.PathEscape(str(a, "connector"))+"/"+url.PathEscape(str(a, "target"))), nil)
+			},
+		},
+		{
+			name: "revoke_private_grant",
+			desc: "Revoke one private grant by id: a tag's grant, or with sandbox_id one of that sandbox's own " +
+				"grants. Open connections it carried close.",
+			schema: obj(map[string]any{
+				"grant_id":   prop("string", "Grant id (pg_...)."),
+				"sandbox_id": prop("string", "The sandbox id, for one of its own grants; omit for a tag grant."),
+			}, "grant_id"),
+			run: func(a map[string]any, be Backend) map[string]any {
+				id := url.PathEscape(str(a, "grant_id"))
+				if str(a, "sandbox_id") != "" {
+					return call(be, "DELETE", sbPath(a, "/private/"+id), nil)
+				}
+				return call(be, "DELETE", "/v1/private/grants/"+id, nil)
 			},
 		},
 		{

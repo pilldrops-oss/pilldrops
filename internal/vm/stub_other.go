@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/netip"
 	"time"
 
 	"go.uber.org/zap"
@@ -39,6 +40,8 @@ type Config struct {
 	NonRootVMM      bool
 	NetNS           bool
 	PrivateDial     func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error)
+	PrivateDialDest func(ctx context.Context, sandboxID string, dest netip.AddrPort) (net.Conn, error)
+	PrivateDNS      func(ctx context.Context, sandboxID, name, qtype string) (sandbox.PrivateDNSReply, error)
 }
 
 // CreateRequest mirrors the Linux type.
@@ -158,6 +161,11 @@ func (m *Manager) SetNetworks(string, runtime.Networks) (string, error) {
 
 // SetPrivate mirrors the linux signature; this build proxies nothing.
 func (m *Manager) SetPrivate(string, string, []sandbox.PrivateTarget) error { return ErrUnsupported }
+
+// SetPrivateRoutes mirrors the linux signature; this build routes nothing.
+func (m *Manager) SetPrivateRoutes(string, string, sandbox.PrivateRoutes) error {
+	return ErrUnsupported
+}
 
 // TagPeers mirrors the linux helper; no sandbox here has peers.
 func TagPeers(string) map[string]string { return nil }

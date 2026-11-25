@@ -78,6 +78,8 @@ gosec|G115|internal/runtime/docker/engine.go
 gosec|G115|internal/store/agentmirror.go
 gosec|G115|internal/store/agentwebhooks.go
 gosec|G115|internal/vm/network.go
+# learnPlan: the remaining DNS timeout is clamped to 30-300 s before it becomes uint32 seconds.
+gosec|G115|internal/vm/private.go
 gosec|G204|cmd/devserver/main.go
 gosec|G204|cmd/envd/main.go
 gosec|G204|internal/httpapi/imagebuild.go

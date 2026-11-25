@@ -47,3 +47,32 @@ func TestEmptyPatchDoesNotOfferPrivate(t *testing.T) {
 		t.Fatalf("empty patch: %d %v", code, out)
 	}
 }
+
+func TestPatchPrivateRoutes(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		fake := runtimetest.NewFake()
+		fake.PrivateAccess, fake.PrivateRoutes = true, supported
+		srv, key := newFakeRuntimeServer(t, fake)
+		code, out := do(t, "POST", srv.URL+"/v1/sandboxes", key, `{"template":"base"}`)
+		if code != 201 {
+			t.Fatalf("create: %d %v", code, out)
+		}
+		id, _ := out["id"].(string)
+		code, out = do(t, "PATCH", srv.URL+"/v1/sandboxes/"+id, key, `{"private_routes":{"subnets":["10.0.5.0/24"],"dns":["corp.internal"]}}`)
+		if !supported {
+			if code != http.StatusConflict || out["code"] != codePrivateRoutesUnsupported {
+				t.Fatalf("unsupported node: %d %v", code, out)
+			}
+			if msg, _ := out["error"].(string); contains(msg, "fake") {
+				t.Errorf("error %q names the runtime", msg)
+			}
+			continue
+		}
+		if code != 200 || len(fake.Routes[id].Subnets) != 1 {
+			t.Fatalf("supported node: %d %v, runtime got %+v", code, out, fake.Routes[id])
+		}
+		if code, out := do(t, "PATCH", srv.URL+"/v1/sandboxes/"+id, key, `{"private_routes":{"subnets":["169.254.0.0/16"],"dns":[]}}`); code != 400 {
+			t.Fatalf("platform range: %d %v, want 400", code, out)
+		}
+	}
+}

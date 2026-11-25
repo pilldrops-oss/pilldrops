@@ -1,13 +1,16 @@
 package nodeboot
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -15,6 +18,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/pilldrops-oss/pilldrops/internal/sandbox"
 )
 
 // NewPrivateDialer opens a sandbox's connection to a granted target through
@@ -22,13 +27,29 @@ import (
 // An unusable URL yields a dialer that always fails, logged once here, so a
 // misconfigured node refuses private connections instead of failing to boot.
 func NewPrivateDialer(orchURL, nodeKey string) func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error) {
+	dial := privateWSDialer(orchURL, nodeKey)
+	return func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error) {
+		return dial(ctx, url.Values{"sandbox": {sandboxID}, "target": {target}, "port": {strconv.Itoa(port)}})
+	}
+}
+
+// NewPrivateDestDialer opens a sandbox's connection to an address under a
+// subnet or split-DNS grant, the same way.
+func NewPrivateDestDialer(orchURL, nodeKey string) func(ctx context.Context, sandboxID string, dest netip.AddrPort) (net.Conn, error) {
+	dial := privateWSDialer(orchURL, nodeKey)
+	return func(ctx context.Context, sandboxID string, dest netip.AddrPort) (net.Conn, error) {
+		return dial(ctx, url.Values{"sandbox": {sandboxID}, "dest": {dest.String()}})
+	}
+}
+
+// privateWSDialer is the WebSocket dial to /internal/private/dial both share.
+func privateWSDialer(orchURL, nodeKey string) func(ctx context.Context, q url.Values) (net.Conn, error) {
 	base, err := privateDialBase(orchURL)
 	if err != nil {
 		slog.Error("private access disabled", "component", "node", "err", err)
-		return func(context.Context, string, string, int) (net.Conn, error) { return nil, err }
+		return func(context.Context, url.Values) (net.Conn, error) { return nil, err }
 	}
-	return func(ctx context.Context, sandboxID, target string, port int) (net.Conn, error) {
-		q := url.Values{"sandbox": {sandboxID}, "target": {target}, "port": {strconv.Itoa(port)}}
+	return func(ctx context.Context, q url.Values) (net.Conn, error) {
 		d := websocket.Dialer{HandshakeTimeout: 15 * time.Second}
 		ws, resp, err := d.DialContext(ctx, base+"/internal/private/dial?"+q.Encode(), http.Header{"Authorization": {"Bearer " + nodeKey}})
 		if resp != nil && resp.Body != nil {
@@ -41,6 +62,32 @@ func NewPrivateDialer(orchURL, nodeKey string) func(ctx context.Context, sandbox
 			return nil, err
 		}
 		return &wsStream{ws: ws}, nil
+	}
+}
+
+// NewPrivateResolver relays a split-DNS lookup to the control plane's hub.
+func NewPrivateResolver(orchURL, nodeKey string) func(ctx context.Context, sandboxID, name, qtype string) (sandbox.PrivateDNSReply, error) {
+	endpoint := strings.TrimRight(orchURL, "/") + "/internal/private/dns"
+	client := &http.Client{Timeout: 4 * time.Second}
+	return func(ctx context.Context, sandboxID, name, qtype string) (sandbox.PrivateDNSReply, error) {
+		body, _ := json.Marshal(map[string]string{"sandbox": sandboxID, "name": name, "qtype": qtype})
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return sandbox.PrivateDNSReply{}, err
+		}
+		req.Header.Set("Authorization", "Bearer "+nodeKey)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			return sandbox.PrivateDNSReply{}, err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return sandbox.PrivateDNSReply{}, fmt.Errorf("private dns refused: %s", resp.Status)
+		}
+		var out sandbox.PrivateDNSReply
+		err = json.NewDecoder(io.LimitReader(resp.Body, 8<<10)).Decode(&out)
+		return out, err
 	}
 }
 

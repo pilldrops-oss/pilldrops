@@ -4,9 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"maps"
 	"net"
 	"net/http"
+	"net/netip"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -31,6 +35,8 @@ type connectorInstance struct {
 	connectorID, instanceID string
 	keyID                   string // the connector key its session came from; empty for an API key
 	targets                 []store.ConnectorTarget
+	subnets                 []netip.Prefix
+	suffixes                []string
 	ctrl                    *websocket.Conn
 	writeMu                 sync.Mutex
 	conns                   sync.Map // net.Conn -> struct{}
@@ -57,6 +63,25 @@ func (in *connectorInstance) end(reason string) {
 func (in *connectorInstance) serves(target string, port int) bool {
 	for _, t := range in.targets {
 		if t.Name == target && t.Port == port {
+			return true
+		}
+	}
+	return false
+}
+
+func (in *connectorInstance) coversAddr(a netip.Addr) bool {
+	for _, p := range in.subnets {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// servesSuffix reports whether the instance announced s or a suffix above it.
+func (in *connectorInstance) servesSuffix(s string) bool {
+	for _, a := range in.suffixes {
+		if sandbox.UnderSuffix(s, a) {
 			return true
 		}
 	}
@@ -138,6 +163,27 @@ func (h *connectorHub) union(connectorID string, stored []store.ConnectorTarget)
 	return out
 }
 
+// routes is what the connector's online instances announce now, or the
+// stored lists when none is online.
+func (h *connectorHub) routes(connectorID string, storedSubnets, storedSuffixes []string) (subnets, suffixes []string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	set := h.instances[connectorID]
+	if len(set) == 0 {
+		return storedSubnets, storedSuffixes
+	}
+	nets, names := map[string]bool{}, map[string]bool{}
+	for _, in := range set {
+		for _, p := range in.subnets {
+			nets[p.String()] = true
+		}
+		for _, d := range in.suffixes {
+			names[d] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(nets)), slices.Sorted(maps.Keys(names))
+}
+
 // candidates returns instances serving the target, rotated so load spreads.
 func (h *connectorHub) candidates(connectorID, target string, port int) []*connectorInstance {
 	h.mu.Lock()
@@ -148,6 +194,24 @@ func (h *connectorHub) candidates(connectorID, target string, port int) []*conne
 		}
 	}
 	h.mu.Unlock()
+	return h.rotate(out)
+}
+
+// suffixCandidates returns instances that announced suffix or one above it, rotated.
+func (h *connectorHub) suffixCandidates(connectorID, suffix string) []*connectorInstance {
+	h.mu.Lock()
+	var out []*connectorInstance
+	for _, in := range h.instances[connectorID] {
+		if in.servesSuffix(suffix) {
+			out = append(out, in)
+		}
+	}
+	h.mu.Unlock()
+	return h.rotate(out)
+}
+
+// rotate sorts instances by id and starts at the next one, so load spreads.
+func (h *connectorHub) rotate(out []*connectorInstance) []*connectorInstance {
 	sort.Slice(out, func(i, j int) bool { return out[i].instanceID < out[j].instanceID })
 	if n := len(out); n > 1 {
 		k := int(h.next.Add(1) % uint64(n))
@@ -235,10 +299,24 @@ func (h *connectorHub) counter(connectorID string) *atomic.Int64 {
 
 var errPrivateUnavailable = errors.New("connector unavailable")
 
-// openPrivate asks up to two instances to open target and returns the data
-// connection. The result string is the log code on failure.
+// openPrivate asks up to two instances serving target to open it.
 func (s *Server) openPrivate(ctx context.Context, connectorID, target string, port int) (net.Conn, string, error) {
-	cands := s.connectors.candidates(connectorID, target, port)
+	return s.openOn(ctx, connectorID, s.connectors.candidates(connectorID, target, port),
+		map[string]any{"type": "open", "proto": "tcp", "target": target, "port": port})
+}
+
+// openDest asks up to two instances that can reach dest to open it.
+func (s *Server) openDest(ctx context.Context, g destGrant, dest netip.AddrPort) (net.Conn, string, error) {
+	msg := map[string]any{"type": "open", "proto": "tcp", "dest": dest.String()}
+	if g.name != "" {
+		msg["name"] = g.name
+	}
+	return s.openOn(ctx, g.connectorID, s.connectors.destCandidates(g.connectorID, dest.Addr(), g), msg)
+}
+
+// openOn sends msg under a fresh id to up to two of cands in turn and returns
+// the data connection. The result string is the log code on failure.
+func (s *Server) openOn(ctx context.Context, connectorID string, cands []*connectorInstance, msg map[string]any) (net.Conn, string, error) {
 	if len(cands) == 0 {
 		return nil, "offline", errPrivateUnavailable
 	}
@@ -251,7 +329,9 @@ func (s *Server) openPrivate(ctx context.Context, connectorID, target string, po
 	for _, in := range cands[:min(2, len(cands))] {
 		ch := make(chan net.Conn, 1)
 		id := s.connectors.addPending(ch)
-		if err := in.send(map[string]any{"type": "open", "id": id, "proto": "tcp", "target": target, "port": port}); err != nil {
+		m := maps.Clone(msg)
+		m["id"] = id
+		if err := in.send(m); err != nil {
 			s.connectors.abandonPending(id, ch)
 			continue
 		}
@@ -275,6 +355,40 @@ func (s *Server) openPrivate(ctx context.Context, connectorID, target string, po
 	}
 	active.Add(-1)
 	return nil, result, errPrivateUnavailable
+}
+
+// covers reports whether an online instance of the connector announces a subnet containing a.
+func (h *connectorHub) covers(connectorID string, a netip.Addr) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, in := range h.instances[connectorID] {
+		if in.coversAddr(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// destCandidates returns the instances that can open a, rotated: those
+// announcing a covering subnet for a subnet grant, or the grant's suffix for a
+// DNS-learned address, with the instance that answered the lookup first.
+func (h *connectorHub) destCandidates(connectorID string, a netip.Addr, g destGrant) []*connectorInstance {
+	h.mu.Lock()
+	var out []*connectorInstance
+	for _, in := range h.instances[connectorID] {
+		if (g.subnet && in.coversAddr(a)) || (!g.subnet && in.servesSuffix(g.suffix)) {
+			out = append(out, in)
+		}
+	}
+	h.mu.Unlock()
+	out = h.rotate(out)
+	for i, in := range out {
+		if in.instanceID == g.instance && i > 0 {
+			out[0], out[i] = out[i], out[0]
+			break
+		}
+	}
+	return out
 }
 
 type connectorConn struct {
@@ -342,6 +456,10 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 		InstanceID   string `json:"instance_id"`
 		Capabilities struct {
 			Targets []store.ConnectorTarget `json:"targets"`
+			Subnets []string                `json:"subnets"`
+			DNS     struct {
+				Suffixes []string `json:"suffixes"`
+			} `json:"dns"`
 		} `json:"capabilities"`
 	}
 	in := &connectorInstance{connectorID: id, keyID: keyID, ctrl: ctrl, done: make(chan struct{})}
@@ -363,7 +481,12 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 		in.end(err.Error())
 		return
 	}
-	in.instanceID, in.targets = hello.InstanceID, hello.Capabilities.Targets
+	subnets, suffixes, err := validAnnouncement(hello.Capabilities.Subnets, hello.Capabilities.DNS.Suffixes, platformDomains())
+	if err != nil {
+		in.end(err.Error())
+		return
+	}
+	in.instanceID, in.targets, in.subnets, in.suffixes = hello.InstanceID, hello.Capabilities.Targets, subnets, suffixes
 	old, ok := s.connectors.add(in)
 	if !ok {
 		in.end("this connector already has the maximum number of instances")
@@ -377,24 +500,32 @@ func (s *Server) handleConnectorControl(w http.ResponseWriter, r *http.Request) 
 		in.end("disconnected")
 	}()
 	now := s.now().Unix()
-	if err := st.SetConnectorTargets(r.Context(), id, s.connectors.union(id, nil), now); err != nil {
-		s.log().Warn("connector targets not saved", "component", "private", "connector", id, "err", err)
+	nets, names := s.connectors.routes(id, nil, nil)
+	if err := st.SetConnectorAnnounced(r.Context(), id, s.connectors.union(id, nil), nets, names, now); err != nil {
+		s.log().Warn("connector announcement not saved", "component", "private", "connector", id, "err", err)
 	}
 	go s.superviseConnector(st, in)
 	ctrl.SetPongHandler(func(string) error { return ctrl.SetReadDeadline(time.Now().Add(shareReadWait)) })
 	for {
+		_ = ctrl.SetReadDeadline(time.Now().Add(shareReadWait))
+		_, raw, err := ctrl.ReadMessage()
+		if err != nil {
+			return
+		}
 		var m struct {
 			Type string `json:"type"`
 			ID   string `json:"id"`
 		}
-		_ = ctrl.SetReadDeadline(time.Now().Add(shareReadWait))
-		if err := ctrl.ReadJSON(&m); err != nil {
-			return
+		if json.Unmarshal(raw, &m) != nil {
+			continue
 		}
-		if m.Type == "fail" {
+		switch m.Type {
+		case "fail":
 			if ch := s.connectors.takePending(m.ID); ch != nil {
 				ch <- nil
 			}
+		case "dns_answer":
+			s.privateDNS.deliver(m.ID, raw)
 		}
 	}
 }

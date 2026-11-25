@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"database/sql"
 	"io"
 	"net"
 	"net/http"
@@ -154,6 +155,31 @@ func TestRevokeClosesOpenPrivateConn(t *testing.T) {
 	ts.grantDB(t)
 	c := ts.nodeDial(t, node.key, "sb1", "db", 5432)
 	ts.do(t, "DELETE", "/v1/sandboxes/sb1/private/prod/db", ts.key, "")
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := c.Read(make([]byte, 1)); err == nil {
+		t.Fatal("conn survived revoke")
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatal("conn not closed within 2s of revoke")
+	}
+}
+
+// A revoke whose push fails after the grant is gone still cuts the connection.
+func TestRevokeClosesConnWhenThePushFails(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.fakeNode(t, true)
+	ts.grantDB(t)
+	c := ts.nodeDial(t, node.key, "sb1", "db", 5432)
+	db, err := sql.Open("sqlite", ts.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`CREATE TRIGGER fail_private BEFORE UPDATE ON sandboxes BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if resp := ts.do(t, "DELETE", "/v1/sandboxes/sb1/private/prod/db", ts.key, ""); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke: %d %s", resp.StatusCode, ts.body(resp))
+	}
 	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, err := c.Read(make([]byte, 1)); err == nil {
 		t.Fatal("conn survived revoke")
