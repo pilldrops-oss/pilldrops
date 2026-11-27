@@ -279,6 +279,10 @@ func learnAddr(id, suffix string, a netip.Addr, answerTTL uint32) (uint32, bool)
 		privMu.Unlock()
 		return 0, false
 	}
+	if !slices.Contains(p.suffixes, suffix) {
+		privMu.Unlock()
+		return 0, false
+	}
 	if coveredBy(p.subnets, a) {
 		privMu.Unlock()
 		_, ttl := dnsTimeouts(answerTTL)
@@ -290,8 +294,11 @@ func learnAddr(id, suffix string, a netip.Addr, answerTTL uint32) (uint32, bool)
 	prev, known := p.learned[a]
 	expires, ttl, add, refill := learnPlan(prev, known, now, answerTTL)
 	if add && len(p.learned) >= maxLearnedPerSandbox {
-		dropOldestLearned(p.learned)
-		add, refill = false, true
+		dropExpiredLearned(p.learned, now)
+		if len(p.learned) >= maxLearnedPerSandbox {
+			dropOldestLearned(p.learned)
+			add, refill = false, true
+		}
 	}
 	p.learned[a] = learnedAddr{suffix: suffix, expires: expires}
 	var script string

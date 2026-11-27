@@ -131,3 +131,13 @@ func TestPrivateResolverPostsAndDecodes(t *testing.T) {
 		t.Fatal("a refused lookup returned an answer")
 	}
 }
+
+func TestPrivateResolverRejectsAMalformedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"rcode":0,"answers":[`)
+	}))
+	defer srv.Close()
+	if _, err := NewPrivateResolver(srv.URL, "sf_node_x")(context.Background(), "sb1", "wiki.corp.internal", "A"); err == nil {
+		t.Fatal("a truncated body decoded without error")
+	}
+}

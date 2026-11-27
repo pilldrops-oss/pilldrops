@@ -238,3 +238,14 @@ func TestCoversDest(t *testing.T) {
 		}
 	}
 }
+
+func TestDropExpiredLearned(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(1000, 0)
+	live, stale, edge := netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"), netip.MustParseAddr("10.0.0.3")
+	m := map[netip.Addr]learnedAddr{live: {expires: now.Add(time.Second)}, stale: {expires: now.Add(-time.Second)}, edge: {expires: now}}
+	dropExpiredLearned(m, now)
+	if _, ok := m[live]; !ok || len(m) != 1 {
+		t.Fatalf("kept %v, want only the live address", m)
+	}
+}

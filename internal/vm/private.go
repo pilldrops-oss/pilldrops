@@ -173,6 +173,15 @@ func coversDest(subnets []netip.Prefix, learned map[netip.Addr]learnedAddr, a ne
 	return ok && l.expires.After(now)
 }
 
+// dropExpiredLearned removes the addresses whose answers have expired.
+func dropExpiredLearned(m map[netip.Addr]learnedAddr, now time.Time) {
+	for a, l := range m {
+		if !l.expires.After(now) {
+			delete(m, a)
+		}
+	}
+}
+
 // privateSetElements renders the set's contents: the static subnets, then each
 // live learned address with the whole seconds it has left. An address inside a
 // subnet is left out: it is covered already, and nft refuses an interval
