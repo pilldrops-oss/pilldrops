@@ -197,6 +197,12 @@ func TestSandboxPrivateColumnsAndTagMembers(t *testing.T) {
 		if ids, _ := st.SandboxesInTag(ctx, org, "backend"); len(ids) != 2 {
 			t.Fatalf("a placed sandbox's networks were not recorded: %v", ids)
 		}
+		if err := st.SaveSandbox(ctx, SandboxRecord{ID: "sbt5" + sfx, Template: "t", OrgID: org, State: "destroyed", Networks: `["backend"]`}); err != nil {
+			t.Fatal(err)
+		}
+		if ids, _ := st.SandboxesInTag(ctx, org, "backend"); len(ids) != 2 {
+			t.Fatalf("an ended sandbox was listed: %v", ids)
+		}
 	})
 }
 
@@ -244,7 +250,9 @@ func TestDeleteSandboxDropsItsGrants(t *testing.T) {
 				t.Fatalf("grants outlived the sandbox: %v %v", gs, err)
 			}
 			var old int
-			_ = st.queryRow(ctx, `SELECT COUNT(*) FROM sandbox_private_grants WHERE sandbox_id = ?`, gone).Scan(&old)
+			if err := st.queryRow(ctx, `SELECT COUNT(*) FROM sandbox_private_grants WHERE sandbox_id = ?`, gone).Scan(&old); err != nil {
+				t.Fatal(err)
+			}
 			if old != 0 {
 				t.Fatalf("old table kept %d rows", old)
 			}
@@ -273,9 +281,13 @@ func TestRevokeConnectorDropsGrantsInBothTables(t *testing.T) {
 			t.Fatalf("revoke: %v %v", ok, err)
 		}
 		var n int
-		_ = st.queryRow(ctx, `SELECT COUNT(*) FROM private_grants WHERE connector_id = ?`, cid).Scan(&n)
+		if err := st.queryRow(ctx, `SELECT COUNT(*) FROM private_grants WHERE connector_id = ?`, cid).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
 		var old int
-		_ = st.queryRow(ctx, `SELECT COUNT(*) FROM sandbox_private_grants WHERE connector_id = ?`, cid).Scan(&old)
+		if err := st.queryRow(ctx, `SELECT COUNT(*) FROM sandbox_private_grants WHERE connector_id = ?`, cid).Scan(&old); err != nil {
+			t.Fatal(err)
+		}
 		if n != 0 || old != 0 {
 			t.Fatalf("left %d new and %d old grant rows", n, old)
 		}
