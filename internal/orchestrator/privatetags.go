@@ -248,7 +248,7 @@ func (s *Server) cutRevoked(ctx context.Context, st *store.Store, org string, me
 	for _, rec := range members {
 		gs, err := st.EffectiveGrants(ctx, org, rec.ID, recordTags(rec))
 		if err != nil {
-			s.privateConns.closeFor(rec.ID, g.Value)
+			s.privateConns.closeFor(rec.ID, g.ConnectorID, g.Value)
 			continue
 		}
 		s.privateConns.closeUngranted(rec.ID, gs)

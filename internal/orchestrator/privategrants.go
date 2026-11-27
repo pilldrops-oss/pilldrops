@@ -402,6 +402,11 @@ func (s *Server) grantPrivate(ctx context.Context, st *store.Store, org, sandbox
 	if err != nil {
 		return g, c, http.StatusInternalServerError, "", err
 	}
+	if _, found, err := st.FindGrant(ctx, g.SubjectKind, g.Subject, g.ConnectorID, g.Kind, g.Value); err != nil {
+		return g, c, http.StatusInternalServerError, "", err
+	} else if found {
+		return g, c, http.StatusConflict, "private_grant_exists", errors.New("this sandbox already has that grant")
+	}
 	if status, code, err := s.checkGrants(ctx, st, append(gs, g)); err != nil {
 		return g, c, status, code, err
 	}
@@ -631,7 +636,7 @@ func (s *Server) revokeSandboxGrant(w http.ResponseWriter, r *http.Request, st *
 	}
 	if _, err := s.pushPrivate(r.Context(), st, rec.ID, org); err != nil {
 		// The push may have failed before it cut anything, so cut this grant's connections here.
-		s.privateConns.closeFor(rec.ID, g.Value)
+		s.cutRevoked(r.Context(), st, org, []store.SandboxRecord{rec}, g)
 		s.log().Warn("private revoke not pushed", "component", "private", "sandbox", rec.ID, "err", err)
 	}
 	s.auditPrivate(r, st, "private.revoke", rec.ID, grantDetail(g.ConnectorName, g))
@@ -718,6 +723,6 @@ func (s *Server) dropPrivate(ctx context.Context, sandboxID string) {
 	if st := s.st.Load(); st != nil {
 		_ = st.DeletePrivateGrantsForSandbox(ctx, sandboxID) //nolint:errcheck // best-effort: the sandbox is gone, orphan grants route nowhere
 	}
-	s.privateConns.closeFor(sandboxID, "")
+	s.privateConns.closeFor(sandboxID, "", "")
 	s.privateDNS.forget(sandboxID)
 }

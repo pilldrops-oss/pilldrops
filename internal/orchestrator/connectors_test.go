@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -263,5 +264,14 @@ func TestConnectorKeyListAndRevoke(t *testing.T) {
 	}
 	if got := list(); strings.Contains(got, keyID) {
 		t.Fatalf("revoked key still listed: %s", got)
+	}
+}
+
+func TestPlatformDomainsDropsThePort(t *testing.T) {
+	t.Setenv("PORTAL_ORIGIN", "http://localhost:8080")
+	t.Setenv("PORTAL_SANDBOX_DOMAIN", "")
+	t.Setenv("SHARE_DOMAIN", "share.localhost:8080")
+	if got := platformDomains(); !slices.Equal(got, []string{"localhost", "share.localhost"}) {
+		t.Fatalf("platformDomains = %v", got)
 	}
 }

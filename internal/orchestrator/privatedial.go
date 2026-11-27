@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,12 +128,12 @@ func (p *privateConnSet) refuse(sandboxID string, now time.Time) int {
 	return n
 }
 
-// closeFor closes the sandbox's connections to target; an empty target means all of them.
-func (p *privateConnSet) closeFor(sandboxID, target string) {
+// closeFor closes the sandbox's connections to target through connectorID; an empty target means all of them.
+func (p *privateConnSet) closeFor(sandboxID, connectorID, target string) {
 	p.mu.Lock()
 	var hit []*privateConn
 	for c := range p.conns {
-		if c.sandboxID == sandboxID && (target == "" || c.target == target) {
+		if c.sandboxID == sandboxID && (target == "" || (c.connectorID == connectorID && c.target == target)) {
 			hit = append(hit, c)
 		}
 	}
@@ -257,6 +258,9 @@ func (s *Server) authorizeDest(gs []store.Grant, sandboxID string, a netip.Addr,
 	return destGrant{}, false
 }
 
+// maxLoggedDestBytes caps the dest a connection-log row keeps, since a denied dial's dest is whatever the sandbox sent.
+const maxLoggedDestBytes = 255
+
 // handlePrivateDial carries one sandbox connection to a granted target, or,
 // with dest, to an address under a subnet or split-DNS grant. The node has
 // already routed it; this re-checks everything, because a node key is not
@@ -287,7 +291,7 @@ func (s *Server) handlePrivateDial(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "this node does not run that sandbox")
 		return
 	}
-	row := store.PrivateConn{ID: newPrivateConnID(), OrgID: rec.OrgID, SandboxID: sbID, Target: target, Dest: rawDest, NodeID: nodeID, StartedAt: s.now().Unix()}
+	row := store.PrivateConn{ID: newPrivateConnID(), OrgID: rec.OrgID, SandboxID: sbID, Target: target, Dest: strings.ToValidUTF8(rawDest[:min(len(rawDest), maxLoggedDestBytes)], ""), NodeID: nodeID, StartedAt: s.now().Unix()}
 	logRow := func(result string) {
 		row.Result, row.EndedAt = result, s.now().Unix()
 		if err := st.InsertPrivateConn(context.WithoutCancel(r.Context()), row); err != nil {

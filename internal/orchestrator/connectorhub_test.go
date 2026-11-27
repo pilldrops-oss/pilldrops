@@ -52,7 +52,13 @@ func dialInstanceWith(t *testing.T, ts *connectorTestServer, name, instance, cap
 				return
 			}
 			if m["type"] == "dns" && dns != nil {
-				if reply := dns(m["name"].(string), m["qtype"].(string)); reply != nil {
+				name, nameOK := m["name"].(string)
+				qtype, qtypeOK := m["qtype"].(string)
+				if !nameOK || !qtypeOK {
+					t.Errorf("dns frame has name %v and qtype %v, want strings", m["name"], m["qtype"])
+					return
+				}
+				if reply := dns(name, qtype); reply != nil {
 					reply["type"], reply["id"] = "dns_answer", m["id"]
 					_ = ctrl.WriteJSON(reply)
 				}
@@ -65,7 +71,11 @@ func dialInstanceWith(t *testing.T, ts *connectorTestServer, name, instance, cap
 			case f.opens <- m:
 			default: // nobody reads past the buffer; never stall the instance
 			}
-			id := m["id"].(string)
+			id, idOK := m["id"].(string)
+			if !idOK {
+				t.Errorf("open frame has id %v, want a string", m["id"])
+				return
+			}
 			if !echo {
 				_ = ctrl.WriteJSON(map[string]any{"type": "fail", "id": id, "reason": "dial"})
 				continue

@@ -224,6 +224,20 @@ func (s *Server) keepAnswers(sandboxID, connectorID, instanceID, suffix, name st
 	return out
 }
 
+// validDNSQueryName reports whether name is at most 253 bytes of labels of 1 to
+// 63 letters, digits, hyphens and underscores.
+func validDNSQueryName(name string) bool {
+	if len(name) > 253 {
+		return false
+	}
+	for label := range strings.SplitSeq(name, ".") {
+		if len(label) < 1 || len(label) > 63 || strings.Trim(label, "abcdefghijklmnopqrstuvwxyz0123456789-_") != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // handlePrivateDNS relays one split-DNS lookup from a sandbox's node to the
 // connector its longest granted suffix names.
 func (s *Server) handlePrivateDNS(w http.ResponseWriter, r *http.Request) {
@@ -251,6 +265,11 @@ func (s *Server) handlePrivateDNS(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, `"qtype" must be A or CNAME`)
 		return
 	}
+	name := strings.TrimSuffix(strings.ToLower(q.Name), ".")
+	if !validDNSQueryName(name) {
+		writeErr(w, http.StatusBadRequest, `"name" is not a valid DNS name`)
+		return
+	}
 	rec, found, err := st.SandboxByID(r.Context(), q.Sandbox)
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
@@ -273,7 +292,6 @@ func (s *Server) handlePrivateDNS(w http.ResponseWriter, r *http.Request) {
 			suffixes = append(suffixes, g.Value)
 		}
 	}
-	name := strings.TrimSuffix(strings.ToLower(q.Name), ".")
 	suffix, ok := sandbox.LongestSuffix(name, suffixes)
 	if !ok {
 		writeErr(w, http.StatusForbidden, "not granted")
