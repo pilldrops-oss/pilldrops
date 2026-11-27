@@ -93,7 +93,7 @@ type connectorHub struct {
 	instances map[string]map[string]*connectorInstance
 	pending   map[string]chan net.Conn
 	active    map[string]*atomic.Int64
-	next      atomic.Uint64
+	next      atomic.Uint32
 }
 
 func (h *connectorHub) init() {
@@ -214,7 +214,7 @@ func (h *connectorHub) suffixCandidates(connectorID, suffix string) []*connector
 func (h *connectorHub) rotate(out []*connectorInstance) []*connectorInstance {
 	sort.Slice(out, func(i, j int) bool { return out[i].instanceID < out[j].instanceID })
 	if n := len(out); n > 1 {
-		k := int(h.next.Add(1) % uint64(n))
+		k := int(h.next.Add(1)) % n
 		out = append(out[k:], out[:k]...)
 	}
 	return out
