@@ -195,9 +195,30 @@ describe('Connectors', () => {
     vi.mocked(api.listConnectors).mockResolvedValue([conn()])
     vi.mocked(api.listTagGrants).mockResolvedValue([{ id: 'pg_9', tag: 'backend', connector: 'prod', kind: 'dns', value: 'corp.internal', created_at: 1, online: true }])
     renderPage()
-    await userEvent.click(await screen.findByRole('button', { name: 'Remove corp.internal from backend' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove corp.internal from backend via prod' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Confirm' }))
     await waitFor(() => expect(api.revokeTagGrant).toHaveBeenCalledWith('pg_9'))
+  })
+
+  it('shows a tag grant load error instead of the empty state', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([conn()])
+    vi.mocked(api.listTagGrants).mockRejectedValue(new Error('grants boom'))
+    renderPage()
+    expect(await screen.findByText(/grants boom/)).toBeInTheDocument()
+    expect(screen.queryByText('No tag grants.')).not.toBeInTheDocument()
+  })
+
+  it('labels each tag grant Remove with its connector and shows a DNS grant as a wildcard', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue([conn(), conn({ id: 'cn_2', name: 'stage' })])
+    vi.mocked(api.listTagGrants).mockResolvedValue([
+      { id: 'pg_1', tag: 'backend', connector: 'prod', kind: 'dns', value: 'corp.internal', created_at: 1, online: true },
+      { id: 'pg_2', tag: 'backend', connector: 'stage', kind: 'dns', value: 'corp.internal', created_at: 1, online: true },
+    ])
+    renderPage()
+    expect(await screen.findByRole('button', { name: 'Remove corp.internal from backend via prod' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove corp.internal from backend via stage' })).toBeInTheDocument()
+    expect(screen.getAllByText('*.corp.internal')).toHaveLength(2 + 2)
+    expect(screen.getByLabelText('Tag', { selector: 'input' })).toBeInTheDocument()
   })
 
   it('shows tag grants to a member without the form', async () => {
