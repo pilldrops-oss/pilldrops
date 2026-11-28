@@ -103,8 +103,8 @@ func (s *Store) SaveSandbox(ctx context.Context, r SandboxRecord) error {
 	r.Env = env
 	// An empty incoming node_id leaves the stored owner alone, so a call site
 	// that forgets to carry the id cannot un-own a live sandbox.
-	// private_targets and private_routes are written on insert only: SetSandboxPrivate owns it after
-	// that, since the control plane changes it while the node holds a stale record.
+	// private_targets and private_routes are written on insert only: SetSandboxPrivate and
+	// SetSandboxPrivateRoutes own them after that, since the control plane changes them while the node holds a stale record.
 	_, err = s.exec(ctx,
 		`INSERT INTO sandboxes (id, template, name, slug, org_id, node_id, state, snapshot, start_cmd, public_port, vcpu, mem_mib, storage_mb, idle_timeout, hibernate_timeout, backup_retention, env, identity_hash, networks, created_by, visibility, created_at, expires_at, updated_at, pause_archive, image, ports, private_targets, private_routes)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -450,9 +450,10 @@ func (s *Store) ActiveSandboxRowsByOrg(ctx context.Context, orgID string) ([]Act
 		[]any{orgID}, scanInto(scanActiveSandbox))
 }
 
-// SandboxesInTag lists org's sandboxes that name tag, placed or not.
+// SandboxesInTag lists org's sandboxes that name tag, placed or not, skipping
+// ended ones.
 func (s *Store) SandboxesInTag(ctx context.Context, orgID, tag string) ([]string, error) {
-	rows, err := s.query(ctx, `SELECT id, networks FROM sandboxes WHERE org_id = ? AND networks <> '[]' AND networks <> ''`, orgID)
+	rows, err := s.query(ctx, `SELECT id, networks FROM sandboxes WHERE org_id = ? AND networks <> '[]' AND networks <> '' AND state NOT IN ('destroyed', 'stopped', 'error', ?)`, orgID, StateLost)
 	if err != nil {
 		return nil, err
 	}

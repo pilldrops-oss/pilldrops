@@ -272,6 +272,15 @@ func TestSetPrivateRoutesClosesWhatItNoLongerCovers(t *testing.T) {
 	if out := listSet(t, sbNS); !strings.Contains(out, "10.0.5.0/24") || strings.Contains(out, "10.0.0.0/16") || strings.Contains(out, "172.16.0.9") {
 		t.Fatalf("set not replaced:\n%s", out)
 	}
+	privMu.Lock()
+	privLive[id].learned[netip.MustParseAddr("172.16.0.9")] = learnedAddr{suffix: "corp.internal", expires: time.Now().Add(time.Minute)}
+	privMu.Unlock()
+	if err := m.SetPrivateRoutes(id, "sb-routes", sandbox.PrivateRoutes{Subnets: []string{"10.0.5.0/24"}, DNS: []string{"corp.internal"}}); err != nil {
+		t.Fatal(err)
+	}
+	if out := listSet(t, sbNS); !strings.Contains(out, "172.16.0.9") {
+		t.Fatalf("a learned address under a kept suffix was dropped:\n%s", out)
+	}
 	if err := m.SetPrivateRoutes(id, "sb-routes", sandbox.PrivateRoutes{Subnets: []string{"10.0.0.0/16", "10.0.5.0/24"}}); err != nil {
 		t.Fatalf("overlapping subnets must be folded before nft sees them: %v", err)
 	}

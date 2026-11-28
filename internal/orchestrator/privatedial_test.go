@@ -17,23 +17,23 @@ import (
 func TestPrivateConnSetCloseFor(t *testing.T) {
 	var set privateConnSet
 	closed := map[string]bool{}
-	for _, c := range []*privateConn{{sandboxID: "a", target: "db"}, {sandboxID: "a", target: "api"}, {sandboxID: "b", target: "db"}} {
-		name := c.sandboxID + "/" + c.target
+	for _, c := range []*privateConn{{sandboxID: "a", connectorID: "c1", target: "db"}, {sandboxID: "a", connectorID: "c2", target: "db"}, {sandboxID: "a", connectorID: "c1", target: "api"}, {sandboxID: "b", connectorID: "c1", target: "db"}} {
+		name := c.sandboxID + "/" + c.connectorID + "/" + c.target
 		c.close = func() { closed[name] = true }
 		set.add(c)
 	}
-	set.closeFor("a", "db")
-	if !closed["a/db"] || closed["a/api"] || closed["b/db"] {
-		t.Fatalf("closeFor(a, db) closed %v", closed)
+	set.closeFor("a", "c1", "db")
+	if !closed["a/c1/db"] || closed["a/c2/db"] || closed["a/c1/api"] || closed["b/c1/db"] {
+		t.Fatalf("closeFor(a, c1, db) closed %v", closed)
 	}
-	set.closeFor("a", "")
-	if !closed["a/api"] || closed["b/db"] {
+	set.closeFor("a", "", "")
+	if !closed["a/c1/api"] || !closed["a/c2/db"] || closed["b/c1/db"] {
 		t.Fatalf("closeFor(a, all) closed %v", closed)
 	}
 	gone := &privateConn{sandboxID: "c", close: func() { t.Fatal("removed conn closed") }}
 	set.add(gone)
 	set.remove(gone)
-	set.closeFor("c", "")
+	set.closeFor("c", "", "")
 }
 
 func (ts *connectorTestServer) nodeDialRaw(t *testing.T, key, sb, target string, port int) (*websocket.Conn, *http.Response, error) {

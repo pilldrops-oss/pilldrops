@@ -5,6 +5,7 @@ package vm
 import (
 	"context"
 	"net"
+	"net/netip"
 	"testing"
 
 	"github.com/vishvananda/netlink"
@@ -98,5 +99,22 @@ func TestSetPrivateClosesRevokedConnsOutsideTheLock(t *testing.T) {
 	stopPrivate(id)
 	if !kept.closed || !kept.lockFree {
 		t.Fatalf("stop: closed %v, lock free %v", kept.closed, kept.lockFree)
+	}
+}
+
+func TestLearnAddrRefusesARevokedSuffix(t *testing.T) {
+	const id = "vm-learn-revoked"
+	privMu.Lock()
+	privLive[id] = &liveProxy{sandboxID: "sb-revoked", suffixes: []string{"other.internal"}, learned: map[netip.Addr]learnedAddr{}}
+	p := privLive[id]
+	privMu.Unlock()
+	t.Cleanup(func() { privMu.Lock(); delete(privLive, id); privMu.Unlock() })
+	if _, ok := learnAddr(id, "corp.internal", netip.MustParseAddr("198.51.100.7"), 60); ok {
+		t.Fatal("an address was learned under a suffix no longer granted")
+	}
+	privMu.Lock()
+	defer privMu.Unlock()
+	if len(p.learned) != 0 {
+		t.Fatalf("stored %v", p.learned)
 	}
 }

@@ -302,3 +302,17 @@ func TestAuthorizeDestPrefersAnOnlineConnector(t *testing.T) {
 		t.Fatalf("no instance covers it, so the first grant: %+v %v", g, ok)
 	}
 }
+
+func TestDeniedDestIsCappedInTheLog(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.routesNode(t)
+	ts.announceRoutes(t, "prod", routesCaps)
+	long := strings.Repeat("x", 1000)
+	if got := ts.nodeDialDestStatus(t, node.key, "sb1", long); got != "403" {
+		t.Fatalf("dial: %s", got)
+	}
+	waitFor(t, func() bool {
+		rows, _ := ts.s.st.Load().PrivateConns(t.Context(), "", 10)
+		return len(rows) == 1 && rows[0].Result == "denied" && len(rows[0].Dest) == maxLoggedDestBytes
+	})
+}

@@ -3,6 +3,7 @@ package sandbox
 import (
 	"net/netip"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -78,12 +79,12 @@ func TestShadowed(t *testing.T) {
 
 func TestValidPrivateSuffix(t *testing.T) {
 	t.Parallel()
-	for _, ok := range []string{"corp.internal", "a.b.c", "x-1.corp"} {
+	for _, ok := range []string{"corp.internal", "a.b.c", "x-1.corp", strings.Repeat("a", 63) + ".corp"} {
 		if err := ValidPrivateSuffix(ok); err != nil {
 			t.Errorf("%q refused: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"internal", "Corp.internal", "corp.internal.", "x.pd", "x.private", "x.localhost", "a_b.corp", "10.0.0.1", "1.2.3.4", ""} {
+	for _, bad := range []string{"internal", "Corp.internal", "corp.internal.", "x.pd", "x.private", "x.localhost", "a_b.corp", "10.0.0.1", "1.2.3.4", "", strings.Repeat("a", 64) + ".corp", strings.Repeat("a.", 127) + "co"} {
 		if ValidPrivateSuffix(bad) == nil {
 			t.Errorf("%q accepted", bad)
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,6 +105,11 @@ func TestDNSRelayRefusals(t *testing.T) {
 		{other.key, "sb1", "wiki.corp.internal", "A", http.StatusForbidden},
 		{node.key, "sb1", "wiki.other.internal", "A", http.StatusForbidden},
 		{node.key, "sb1", "wiki.corp.internal", "AAAA", http.StatusBadRequest},
+		{node.key, "sb1", strings.Repeat("a", 64) + ".corp.internal", "A", http.StatusBadRequest},
+		{node.key, "sb1", strings.Repeat("a.", 127) + "corp.internal", "A", http.StatusBadRequest},
+		{node.key, "sb1", "a..corp.internal", "A", http.StatusBadRequest},
+		{node.key, "sb1", "wiki corp.internal", "A", http.StatusBadRequest},
+		{node.key, "sb1", "", "A", http.StatusBadRequest},
 		{node.key, "sb1", "slow.corp.internal", "A", http.StatusBadGateway},
 		{node.key, "sb1", "big.corp.internal", "A", http.StatusBadGateway},
 		{node.key, "sb1", "rcode.corp.internal", "A", http.StatusBadGateway},
@@ -111,6 +117,35 @@ func TestDNSRelayRefusals(t *testing.T) {
 		if code, _ := ts.nodeDNS(t, c.key, c.sb, c.name, c.qtype); code != c.want {
 			t.Errorf("%s %s with %q: %d, want %d", c.name, c.qtype, c.key, code, c.want)
 		}
+	}
+}
+
+func TestDNSRelayMalformedBody(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.dnsGrant(t, wikiAnswers)
+	req, _ := http.NewRequest(http.MethodPost, ts.srv.URL+"/internal/private/dns", strings.NewReader("{not json"))
+	req.Header.Set("Authorization", "Bearer "+node.key)
+	resp, err := ts.srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("malformed body: %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestDNSRelayConnectorOffline(t *testing.T) {
+	ts := newConnectorTestServer(t)
+	node := ts.routesNode(t)
+	inst := dialInstanceWith(t, ts, "prod", "inst-aaaaaaaaaaaa", routesCaps, true, wikiAnswers)
+	if resp := ts.do(t, "POST", "/v1/sandboxes/sb1/private", ts.key, `{"connector":"prod","dns":"corp.internal"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("dns grant: %d %s", resp.StatusCode, ts.body(resp))
+	}
+	_ = inst.ctrl.Close()
+	waitFor(t, func() bool { return ts.s.connectors.count(ts.connectorID(t, "prod")) == 0 })
+	if code, _ := ts.nodeDNS(t, node.key, "sb1", "wiki.corp.internal", "A"); code != http.StatusBadGateway {
+		t.Fatalf("no instance online: %d, want 502", code)
 	}
 }
 

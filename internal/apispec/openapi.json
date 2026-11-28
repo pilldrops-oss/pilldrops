@@ -2210,23 +2210,21 @@
         "description": "Every sandbox naming the tag in its networks reaches what the grant names, including sandboxes that join later; leaving the tag removes access. A sandbox's own key gets 403, as for sandbox grants; joining a tag that carries grants (create, PATCH `networks`, fork) is refused to it too. The reply's `unsupported` lists members whose node cannot carry the grant yet. 409 `private_route_conflict` or `private_name_taken` names the member it would conflict on. 429 past 100 tag grants per org.",
         "requestBody": {
           "required": true,
-          "content": {"application/json": {"schema": {"type": "object", "required": ["tag", "connector"], "properties": {
-            "tag": {"type": "string"}, "connector": {"type": "string"},
-            "target": {"type": "string"}, "subnet": {"type": "string"}, "dns": {"type": "string"}
-          }}}}
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TagGrantRequest"}}}
         },
         "responses": {
-          "201": {"description": "Granted.", "content": {"application/json": {"schema": {"type": "object", "properties": {
-            "id": {"type": "string"}, "tag": {"type": "string"}, "connector": {"type": "string"},
-            "kind": {"type": "string", "enum": ["target", "subnet", "dns"]}, "value": {"type": "string"},
-            "sandboxes": {"type": "integer"}, "unsupported": {"type": "array", "items": {"type": "string"}},
-            "shadowed": {"type": "array", "items": {"type": "string"}}
-          }}}}},
+          "201": {"description": "Granted.", "content": {"application/json": {"schema": {"allOf": [
+            {"$ref": "#/components/schemas/TagGrant"},
+            {"type": "object", "properties": {
+              "sandboxes": {"type": "integer", "description": "Sandboxes in the tag now."},
+              "unsupported": {"type": "array", "items": {"type": "string"}, "description": "Members whose node cannot carry the grant yet."}
+            }}
+          ]}}}},
           "400": {"$ref": "#/components/responses/Error"},
           "403": {"$ref": "#/components/responses/Error"},
           "404": {"$ref": "#/components/responses/Error"},
-          "409": {"$ref": "#/components/responses/Error"},
-          "429": {"$ref": "#/components/responses/Error"},
+          "409": {"description": "Code `private_grant_exists` when the tag already has that grant, `private_route_conflict` or `private_name_taken` when a member could not route it.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "429": {"description": "The org already has 100 tag grants, or a member in the tag already holds 50 private grants, counting its tags'.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "501": {"$ref": "#/components/responses/Error"}
         }
       },
@@ -2236,8 +2234,9 @@
         "parameters": [{"name": "tag", "in": "query", "required": false, "schema": {"type": "string"}, "description": "Only this tag's grants."}],
         "responses": {
           "200": {"description": "Tag grants.", "content": {"application/json": {"schema": {"type": "object", "properties": {
-            "grants": {"type": "array", "items": {"type": "object"}}
+            "grants": {"type": "array", "items": {"$ref": "#/components/schemas/TagGrant"}}
           }}}}},
+          "400": {"$ref": "#/components/responses/Error"},
           "403": {"$ref": "#/components/responses/Error"}
         }
       }
@@ -3045,6 +3044,33 @@
             "type": "integer",
             "description": "Unix seconds, 0 if never used."
           }
+        }
+      },
+      "TagGrantRequest": {
+        "type": "object",
+        "required": ["tag", "connector"],
+        "description": "Give exactly one of `target`, `subnet` or `dns`, as for a sandbox grant.",
+        "properties": {
+          "tag": {"type": "string", "description": "Network tag: lowercase letters, digits and hyphens."},
+          "connector": {"type": "string"},
+          "target": {"type": "string"},
+          "subnet": {"type": "string"},
+          "dns": {"type": "string"}
+        }
+      },
+      "TagGrant": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "tag": {"type": "string"},
+          "connector": {"type": "string"},
+          "kind": {"type": "string", "enum": ["target", "subnet", "dns"]},
+          "value": {"type": "string"},
+          "target": {"type": "string"},
+          "names": {"type": "array", "items": {"type": "string"}},
+          "shadowed": {"type": "array", "items": {"type": "string"}},
+          "created_at": {"type": "integer", "description": "Unix seconds."},
+          "online": {"type": "boolean", "description": "An instance of the connector is connected."}
         }
       },
       "PrivateGrant": {

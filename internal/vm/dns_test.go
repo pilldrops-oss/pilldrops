@@ -227,6 +227,37 @@ func TestSplitAnswer(t *testing.T) {
 	}
 }
 
+func TestSplitAnswerQueryTypesAndAddresses(t *testing.T) {
+	t.Parallel()
+	name, _ := dnsmessage.NewName("wiki.corp.internal.")
+	var asked string
+	relay := func(qtype string) (sandbox.PrivateDNSReply, error) {
+		asked = qtype
+		return sandbox.PrivateDNSReply{Answers: []sandbox.PrivateDNSAnswer{
+			{Type: "CNAME", Value: "web.corp.internal", TTL: 60},
+			{Type: "A", Value: "2001:db8::1", TTL: 60},
+			{Type: "A", Value: "not-an-address", TTL: 60},
+			{Type: "A", Value: "10.9.9.9", TTL: 600},
+		}}, nil
+	}
+	var learnedTTLs []uint32
+	learn := func(_ netip.Addr, ttl uint32) (uint32, bool) {
+		learnedTTLs = append(learnedTTLs, ttl)
+		_, reply := dnsTimeouts(ttl)
+		return reply, true
+	}
+	m := unpack(t, splitAnswer(7, dnsmessage.Question{Name: name, Type: dnsmessage.TypeCNAME, Class: dnsmessage.ClassINET}, relay, learn))
+	if asked != "CNAME" {
+		t.Errorf("relayed qtype %q, want CNAME", asked)
+	}
+	if len(m.Answers) != 2 || len(learnedTTLs) != 1 {
+		t.Fatalf("only the CNAME and the IPv4 A may be answered: %+v learned %v", m.Answers, learnedTTLs)
+	}
+	if learnedTTLs[0] != 600 || m.Answers[1].Header.TTL != 300 {
+		t.Errorf("learn got TTL %d and the guest %d, want 600 and the clamped 300", learnedTTLs[0], m.Answers[1].Header.TTL)
+	}
+}
+
 func TestTargetHostsAnswerBeforeSplitDNS(t *testing.T) {
 	t.Parallel()
 	priv := func() map[string]string { return map[string]string{"wiki.corp.internal.": "192.168.31.2"} }

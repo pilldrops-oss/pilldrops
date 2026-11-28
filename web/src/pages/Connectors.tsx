@@ -12,6 +12,11 @@ import { usePrivateAccess } from '../hooks/usePrivateAccess'
 
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 
+const tagReaches = (g: TagGrant) => {
+  if (g.kind === 'target') return `${g.value}.private`
+  return g.kind === 'dns' ? `*.${g.value}` : g.value
+}
+
 const targetText = (t: { name: string; port: number; host?: string }) =>
   t.host ? `${t.name}:${t.port} (${t.host})` : `${t.name}:${t.port}`
 
@@ -64,7 +69,7 @@ export default function Connectors() {
             <label className="vault-auto">Connector name<input className="inp mono vault-add-name" aria-label="Connector name" value={name} onChange={e => setName(e.target.value.toLowerCase())} placeholder="prod" /></label>
             <button className="btn" type="submit" disabled={busy || !name}>Create</button>
           </form>
-          {created && <pre className="code">pilldrops connector run {created} db=HOST:PORT --subnet 10.0.0.0/16 --dns corp.internal</pre>}
+          {created && <pre className="code">pilldrops connector run {created} db=HOST:PORT --subnet 192.0.2.0/24 --dns corp.internal</pre>}
         </div>
       )}
       {loadErr && <p className="lm-error">{loadErr}</p>}
@@ -109,24 +114,27 @@ function TagGrantsPanel({ connectors, canChange }: { connectors: Connector[]; ca
   toastRef.current = toast
   const confirm = useConfirm()
   const [grants, setGrants] = useState<TagGrant[]>([])
+  const [loadErr, setLoadErr] = useState('')
   const [pick, setPick] = useState(EMPTY_TAG_PICK)
   const [busy, setBusy] = useState(false)
-  const load = useCallback(() => { listTagGrants().then(setGrants).catch(e => toastRef.current.error(errText(e))) }, [])
+  const load = useCallback(() => { listTagGrants().then(g => { setGrants(g); setLoadErr('') }).catch(e => setLoadErr(errText(e))) }, [])
   useEffect(load, [load])
   const conn = connectors.find(c => c.name === pick.connector)
   return (
     <section className="panel" aria-label="Tag grants">
       <div className="ph"><h2>Tag grants</h2><span className="meta">every sandbox in the tag, including ones that join later</span></div>
       <div className="panel-pad">
-      {grants.length === 0 ? <p className="vault-empty">No tag grants.</p> : (
+      {loadErr && <p className="lm-error">{loadErr}</p>}
+      {!loadErr && grants.length === 0 && <p className="vault-empty">No tag grants.</p>}
+      {!loadErr && grants.length > 0 && (
         <table className="tbl"><thead><tr><th>Tag</th><th>Connector</th><th>Reaches</th><th /></tr></thead>
           <tbody>{grants.map(g => (
             <tr key={g.id}>
               <td>{g.tag}</td>
               <td>{g.connector}</td>
-              <td><code>{g.kind === 'target' ? `${g.value}.private` : g.value}</code>
+              <td><code>{tagReaches(g)}</code>
                 {g.shadowed && g.shadowed.length > 0 && <div className="muted">Not routed (reserved): {g.shadowed.join(', ')}</div>}</td>
-              <td>{canChange && <button className="btn ghost" aria-label={`Remove ${g.value} from ${g.tag}`} onClick={async () => {
+              <td>{canChange && <button className="btn ghost" aria-label={`Remove ${g.value} from ${g.tag} via ${g.connector}`} onClick={async () => {
                 if (!await confirm({ title: `Remove ${g.value} from tag ${g.tag}?`, body: 'Sandboxes in the tag lose it, and open connections through it close.', danger: true })) return
                 try { await revokeTagGrant(g.id); load() } catch (e) { toast.error(errText(e)) }
               }}>Remove</button>}</td>
@@ -144,7 +152,7 @@ function TagGrantsPanel({ connectors, canChange }: { connectors: Connector[]; ca
             load()
           } catch (err) { toast.error(errText(err)) } finally { setBusy(false) }
         }}>
-          <input className="inp mono vault-add-name" aria-label="Tag" value={pick.tag} placeholder="backend" onChange={e => setPick({ ...pick, tag: e.target.value.toLowerCase() })} />
+          <label className="vault-auto">Tag<input className="inp mono vault-add-name" aria-label="Tag" value={pick.tag} placeholder="backend" onChange={e => setPick({ ...pick, tag: e.target.value.toLowerCase() })} /></label>
           <select className="sel" aria-label="Tag connector" value={pick.connector} onChange={e => setPick({ ...pick, connector: e.target.value, value: '' })}>
             <option value="">Connector…</option>
             {connectors.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}

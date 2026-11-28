@@ -149,6 +149,8 @@ func platformDomains() []string {
 		v := os.Getenv(k)
 		if u, err := url.Parse(v); err == nil && u.Host != "" {
 			v = u.Hostname()
+		} else if host, _, err := net.SplitHostPort(v); err == nil {
+			v = host
 		}
 		if v != "" {
 			out = append(out, v)

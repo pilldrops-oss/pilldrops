@@ -217,6 +217,10 @@ func TestGrantLimitCountsEveryKind(t *testing.T) {
 	if b := ts.body(resp); resp.StatusCode != http.StatusTooManyRequests || !strings.Contains(b, "at most") {
 		t.Fatalf("over the limit: %d %s", resp.StatusCode, b)
 	}
+	resp = ts.do(t, "POST", "/v1/sandboxes/sb1/private", ts.key, `{"connector":"prod","subnet":"10.1.0.0/16"}`)
+	if b := ts.body(resp); resp.StatusCode != http.StatusConflict || !strings.Contains(b, "private_grant_exists") {
+		t.Fatalf("duplicate at the limit: %d %s", resp.StatusCode, b)
+	}
 }
 
 // A tag's subnet grant on a sandbox whose node cannot route it must not make
