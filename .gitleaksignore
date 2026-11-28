@@ -15,3 +15,7 @@
 81cca8fcdb7e3378b6d2c4cf0f3e464bdd7310bb:docs/testing/merged-main-diskwatchdog.sh:curl-auth-header:53
 81cca8fcdb7e3378b6d2c4cf0f3e464bdd7310bb:docs/testing/merged-main-integration-rig.sh:curl-auth-header:79
 81cca8fcdb7e3378b6d2c4cf0f3e464bdd7310bb:docs/testing/merged-main-integration-rig.sh:curl-auth-header:119
+
+# A 63-character private target name in TestValidPrivateName, the longest a
+# label may be. It is a made-up string of digits, not a credential.
+05a77629a6f524d71e17e64509d8a3dc144e7fb4:internal/sandbox/private_test.go:generic-api-key:7
